@@ -19,11 +19,11 @@ mlruns/
 .cache/
 *.db
 *.sqlite3
-postgres/
-minio/
+/postgres/
+/minio/
 airflow/logs/
-prometheus/
-grafana/
+/prometheus/
+/grafana/
 data/raw/
 data/processed/
 data/model_datasets/

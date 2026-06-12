@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: iqa-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["iqa-api:8000"]
+
+  - job_name: iqa-inference
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["iqa-inference:8100"]
