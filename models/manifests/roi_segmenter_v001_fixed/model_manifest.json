@@ -1,0 +1,11 @@
+{
+  "model_version": "roi_segmenter_v001_fixed",
+  "model_type": "functional_unet_resnet18_det1_context2b",
+  "status": "fixed",
+  "artifact_uri": "s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt",
+  "sha256": "pending-restore",
+  "runtime": {
+    "package": "iqa.models.segmentation",
+    "loader": "build_segmentation_model"
+  }
+}

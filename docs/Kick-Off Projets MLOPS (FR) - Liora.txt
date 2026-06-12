@@ -1,0 +1,200 @@
+Projet MLOps
+Kick-Off 
+
+Présentation
+Sébastien SIME 
+Machine Learning Engineer DataScientest
+
+
+Présentations
+Organisation des sessions de mentorat
+La méthodologie MLOPS
+Next steps
+Q&A
+Objectifs de la session
+
+Présentations
+
+Faisons connaissance
+
+Présentez-vous en quelques mots
+Ce projet était-ce votre premier choix ?
+Un point fort / point faible connu
+
+Les sessions de mentorat
+
+Organisation des sessions
+J’organiserai un point d’1h maximum sur zoom / teams fréquemment (Toutes les semaines).
+L’objectif sera de passer en revue vos derniers travaux et de répondre à vos questions.
+A la fin de chaque point, je pourrais vous fixer des objectifs (en termes de réalisation ou de date) collectifs ou individuels (pour équilibrer la charge de travail).
+
+Les points à présenter
+Les points à présenter par les membres de l’équipe lors de chaque point :
+Les tâches réalisées par les différents membres de l’équipe.
+Les succès, challenges et éventuels blocages.
+Ce qu’il vous reste pour atteindre les objectifs (le backlog).
+☝A tour de rôle, chaque membre de l’équipe présentera un condensé des avancées (pas d’exception).
+
+Méthodologie projets MLOps
+
+Méthodologie
+Notre Approche
+Apprentissage progressif
+Découverte guidée par les problèmes challenges
+Mise en œuvre pratique
+Accompagnement régulier
+Projets ML reproductibles
+Déploiements fiables
+Modèles surveillés
+Solutions évolutives
+Avantages clés
+
+Vue d’ensemble
+Durée
+Format Continu sur 21 semaines
+Format Bootcamp sur 40 jours
+Phases Principales
+Foundations
+Microservices & versioning
+Orchestration & Déploiement
+Monitoring & Mise à l’échelle
+
+Phase 1: Fondations
+Objectifs
+Cadrer votre projet MLOPS
+Mettre en place l'environnement de développement reproductible
+Implémenter des pipelines basiques
+Démarrer les pratiques de versioning et de tests automatisés reproductibles
+Implémenter une API basique
+Composants Clés à Implémenter
+Versioning du code (Git)
+Environnements reproductibles
+Pipelines de traitement des données et d'entraînement ML basique
+Documentation initiale
+Cohérence des environnements
+Organisation du code
+Gestion des données
+Bases de la collaboration
+Défis Attendus
+
+Phase 2: Micro-Services, Versionning
+Objectifs
+Suivi efficace des expériences d'entraînement
+Versioning des données et modèles
+Décomposition en microservices interdépendants
+Début d’orchestration simple
+Composants Clés à Implémenter
+Système de suivi des expériences
+Versioning des données
+Isolation des services
+Versioning to bout en bout
+Organisation des expériences
+Traçabilité des données
+Reproductibilité des résultats
+Automatisation des pipelines
+Point d’attention
+
+Phase 3: Orchestration et déploiement
+Objectifs
+Finalisation de l’orchestration de bout en bout et implémentation du réentraînement 
+Mise en place d’une pipeline d’intégration continu (CI)
+Optimisation et sécurisation de l’API (avec autorisation et authentification) de prédiction
+Mise en place d’une scalabilité légère
+Composants Clés à Implémenter
+APIs sécurisés
+CI basique (CD optionnel)
+Processus de déploiement et de réentrainement automatisé
+Bonne pratique de sécurisation
+Stratégie de test et de réentrainement
+Automatisation du déploiement
+Point d’attention
+
+Phase 4: Monitoring et maintenance
+Objectifs
+Surveiller la performance des modèles et la qualité des données
+Mettre en place un dashboard de monitoring automatisé
+Finaliser la logique de maintenance et de mise à jour des composants / modèles
+Nice to have : front-end simplifié (streamlit, fastHTML etc.)
+Composants Clés à Implémenter
+Monitoring des performances
+Détection de dérive des données
+Système d'alertes
+Processus de réentraînement
+Performance des modèles
+Qualité des données
+Santé du système
+Point d’attention
+
+Principes architecturaux clés
+
+Quelques composants
+
+
+Planning format Continu
+Semaines 1-6 : Fondations & config.
+Mise en place environnement
+Pipelines ML basique
+Début du versioning
+Test auto & API basique
+Semaines 7-12 : Microservices, suivi & versioning
+Suivi des expériences
+Versioning des données & modèle
+Design et début orchestration des pipelines
+Création des microservices de base
+Semaines 13-18 : Orchestration & Déploiement
+Orchestration de bout en bout
+Stratégie d’intégration continu et rollback
+Scalabilité légère
+Optimisation / sécurisation API
+Semaines 19-22 : Monitoring & Maintenance
+Configuration du monitoring
+Procédures de MAJ des composants / modèle
+Finalisation du réentraînement
+Finalisation documentation
+
+Planning format Bootcamp
+Jours 1-10 : Fondations & config.
+Mise en place environnement
+Pipelines ML basique
+Début du versioning
+Test auto & API basique
+Jours 11-20 : Microservices, suivi & versioning
+Suivi des expériences
+Versioning des données & modèle
+Design et début orchestration des pipelines
+Création des microservices de base
+Jours 21-30 : Orchestration & Déploiement
+Orchestration de bout en bout
+Stratégie d’intégration continu et rollback
+Scalabilité légère
+Optimisation / sécurisation API
+Jours 31-40 : Monitoring & Maintenance
+Configuration du monitoring
+Procédures de MAJ des composants / modèle
+Finalisation du réentraînement
+Finalisation documentation
+
+Bonnes pratiques
+
+Bonnes pratiques
+
+Bonnes pratiques
+
+QUESTIONS?
+
+Next Steps
+
+Next Steps
+Prochaines Étapes
+Configurer un environnement de développement reproductible chez tous
+Commencer avec un pipeline ML et une API basiques
+Mettre en place le versioning et les tests automatisés dès le début
+Mettre en place le suivi des expériences dès que possible
+
+Next meeting le …
+
+Ressources
+Quelques ressources pour vous aider à commencer :
+https://github.com/ssime-git/mlops-boiler-plate
+https://github.com/ssime-git/mlops_project_template
+https://github.com/ssime-git/zenml_mlops_template	

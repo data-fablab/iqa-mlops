@@ -1,0 +1,30 @@
+services:
+  iqa_api:
+    image: iqa/api:sim
+    ports: ["8000:8000"]
+    env_file: .env.sim
+    depends_on: [postgres]
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports: ["5000:5000"]
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports: ["9000:9000", "9001:9001"]
+  prometheus:
+    image: prom/prometheus:latest
+    ports: ["9090:9090"]
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3000:3000"]
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: iqa
+      POSTGRES_USER: iqa
+      POSTGRES_PASSWORD: iqa_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

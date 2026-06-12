@@ -1,0 +1,6 @@
+feature_ae:
+  recall_defect_min: 1.0
+  false_negative_total_max: 0
+  image_ap_max_regression: 0.02
+  roi_fail_rate_max: 0.10
+  latency_p95_ms_max: 1000

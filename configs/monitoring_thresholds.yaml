@@ -1,0 +1,13 @@
+drift:
+  teacher_drift_mean_warning: 0.20
+  teacher_drift_mean_critical: 0.25
+  reconstruction_p95_warning: 0.75
+  reconstruction_p95_critical: 0.90
+
+quality:
+  false_negative_total_critical: 1
+  roi_fail_rate_warning: 0.05
+  roi_fail_rate_critical: 0.10
+
+latency:
+  prediction_p95_ms: 1000

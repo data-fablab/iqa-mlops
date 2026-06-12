@@ -1,0 +1,12 @@
+{
+  "model_version": "rd_feature_ae_gated_v001_bootstrap",
+  "model_type": "reverse_distill_resnet18_dual_context_gated",
+  "status": "bootstrap",
+  "artifact_uri": "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt",
+  "sha256": "pending-restore",
+  "runtime": {
+    "package": "iqa.models.feature_ae",
+    "loader": "load_rd_feature_ae_gated",
+    "teacher_version": "teacher_resnet18_imagenet_fixed"
+  }
+}

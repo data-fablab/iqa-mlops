@@ -1,0 +1,1 @@
+"""Industrial Quality Assistant package."""

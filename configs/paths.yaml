@@ -1,0 +1,14 @@
+project:
+  metadata_dir: "data/metadata"
+  validation_dir: "data/validation"
+  model_datasets_dir: "data/model_datasets"
+  model_manifests_dir: "models/manifests"
+  reports_dir: "reports"
+
+storage:
+  source_datasets_bucket: "iqa-source-datasets"
+  ingested_images_bucket: "iqa-ingested-images"
+  dvc_bucket: "iqa-dvc"
+  heatmaps_bucket: "iqa-heatmaps"
+  models_bucket: "iqa-models"
+  mlflow_bucket: "mlflow-artifacts"

@@ -1,0 +1,393 @@
+# Architecture projet IQA
+
+## 1. Principe
+
+Cette architecture reprend l'esprit du template `ssime-git/mlops-project-template` :
+- separation claire API / entrainement / monitoring / configuration / deploiement ;
+- Docker Compose pour la station unique ;
+- DVC avec remote S3 MinIO pour les donnees et datasets candidats ;
+- MLflow pour les experiences et le registre de modeles ;
+- MinIO comme stockage objet local pour DVC, MLflow artifacts, heatmaps, modeles et backups ;
+- Prometheus/Grafana pour l'observabilite ;
+- Airflow pour rendre la boucle MLOps visible et pilotable.
+
+Elle integre les decisions de la proposition Ken retenues par l'equipe :
+- `validation_set_v001` fige avant tout replay, hors calibration ;
+- feedback Sophie fonctionnel avec `human_sophie` prioritaire sur l'oracle GT ;
+- PostgreSQL comme metadata store cible ;
+- PostgreSQL stocke les faits, statuts et URI, jamais les fichiers lourds ;
+- scenarios isoles par `scenario_id` ;
+- stockage S3 local via MinIO, avec un client unique `src/iqa/storage` ;
+- images entrantes stockees dans `s3://iqa-ingested-images` ;
+- deux boucles separees : CI code et lifecycle modele Airflow ;
+- deploiement officiel sur Ubuntu Server, pas Windows + WSL2.
+
+## 2. Architecture logique
+
+```text
+Sophie / Marc
+    |
+    v
+Streamlit
+    |
+    v
+Reverse proxy
+    |
+    v
+FastAPI
+    |
+    +--> inference
+    |       -> ROI segmenter fige
+    |       -> controle qualite ROI
+    |       -> teacher ResNet18 fige
+    |       -> Feature-AE actif
+    |       -> score + heatmap + decision Vert/Orange/Rouge
+    |
+    +--> feedback
+    |       -> oracle_gt apres prediction
+    |       -> human_sophie prioritaire
+    |
+    +--> PostgreSQL metadata
+    |       -> predictions, feedback, lots, versions, incidents
+    |
+    +--> Prometheus metrics
+
+Airflow
+    |
+    +--> iqa_ingestion
+    +--> iqa_replay
+    +--> iqa_lifecycle
+    +--> iqa_monitoring
+    |
+    +--> DVC remote s3://iqa-dvc
+    +--> MinIO artifact store
+    +--> MLflow tracking + registry
+    +--> /admin/reload-model
+```
+
+## 3. Simulation vs production reelle
+
+Le dataset Casting est utilise comme historique industriel rejoue. Il sert a simuler un flux de production sans pretendre que les fichiers du repo sont le stockage usine final.
+
+Flux cible production :
+```text
+camera / poste qualite / MES
+-> production_ingest
+-> MinIO s3://iqa-ingested-images
+-> PostgreSQL piece_event + image_uri + contexte lot
+-> FastAPI inference
+-> prediction + feedback
+```
+
+Flux MVP ecole :
+```text
+dataset Casting historique
+-> historical_replay
+-> meme contrat ingestion
+-> MinIO/DVC URI compatible
+-> PostgreSQL piece_event + image_uri + scenario_id
+-> FastAPI inference
+-> prediction + feedback
+```
+
+Cette separation permet de remplacer la source de donnees plus tard sans changer les contrats runtime.
+
+## 4. Arborescence cible
+
+```text
+iqa-mlops/
+|-- README.md
+|-- docs/
+|   |-- cadrage.md
+|   |-- architecture.md
+|   |-- server-config.md
+|   |-- PRD-IQA-MVP.md
+|   |-- CONTEXT.md
+|   |-- simulation_report.md
+|   |-- validation_report.md
+|   `-- adr/
+|       |-- 0001-validation-set-fige-hors-replay.md
+|       `-- 0002-airflow-comme-orchestrateur.md
+|-- configs/
+|   |-- paths.yaml
+|   |-- replay_scenarios.yaml
+|   |-- monitoring_thresholds.yaml
+|   `-- promotion_gates.yaml
+|-- airflow/
+|   |-- dags/
+|   |   |-- iqa_ingestion.py
+|   |   |-- iqa_replay.py
+|   |   |-- iqa_lifecycle.py
+|   |   `-- iqa_monitoring.py
+|   |-- plugins/
+|   `-- requirements-airflow.txt
+|-- data/
+|   |-- raw/
+|   |-- metadata/
+|   |-- processed/
+|   |-- model_datasets/
+|   `-- validation/
+|-- src/iqa/
+|   |-- ingestion/
+|   |-- replay/
+|   |-- roi/
+|   |-- models/
+|   |-- inference/
+|   |-- feedback/
+|   |-- datasets/
+|   |-- training/
+|   |-- monitoring/
+|   |-- storage/
+|   |-- registry/
+|   `-- api/
+|-- models/
+|-- reports/
+|-- tests/
+|   |-- dags/
+|   |-- contracts/
+|   |-- integration/
+|   `-- ml/
+|-- notebooks/
+|-- deploy/
+|   |-- docker-compose.yml
+|   |-- grafana/
+|   |-- minio/
+|   |   |-- init-buckets.sh
+|   |   `-- lifecycle-heatmaps.json
+|   |-- prometheus/
+|   `-- nginx/
+|-- .env.example
+|-- .github/workflows/
+|-- Makefile
+|-- pyproject.toml
+|-- .gitignore
+`-- .dvc/
+    `-- config
+```
+
+## 5. Documents projet
+
+Documents cibles :
+- `cadrage.md` : vision, perimetre, donnees, scenarios, monitoring, gates ;
+- `PRD-IQA-MVP.md` : exigences produit, user stories, decisions d'implementation ;
+- `CONTEXT.md` : glossaire court et langage commun ;
+- `architecture.md` : structure technique et responsabilites ;
+- `server-config.md` : configuration Z420 Ubuntu Server ;
+- `adr/0001` : validation set fige hors replay ;
+- `adr/0002` : Airflow comme orchestrateur ;
+- `adr/0003` : MinIO comme stockage objet local.
+
+Le PRD et les ADR evitent que les choix importants restent implicites dans le cadrage.
+
+## 6. DAGs Airflow
+
+Les DAGs orchestrent des modules du package `src/iqa`. Ils ne contiennent pas toute la logique metier.
+
+### `iqa_ingestion.py`
+
+```text
+historical_replay ou production_ingest
+-> inventory sha256
+-> stockage image dans MinIO
+-> piece_events = source_class + group_key
+-> verification masques GT si historique
+-> manifests metadata / PostgreSQL facts
+```
+
+Sorties :
+- `casting_images_inventory.csv` ;
+- `casting_piece_events.csv` ;
+- controles de coherence.
+
+### `iqa_replay.py`
+
+```text
+metadata + validation_set_v001
+-> bootstrap hors replay
+-> production_replay_natural
+-> drift_domain_extension
+-> lots horodates
+```
+
+Sorties :
+- `feature_ae_bootstrap_events.csv` ;
+- `casting_flux_replay_plan_natural.csv` ;
+- `casting_flux_replay_plan_drift.csv` ;
+- `replay_scenarios.csv`.
+
+Invariant :
+```text
+bootstrap ∩ replay ∩ validation_set_v001 = vide
+```
+
+### `iqa_lifecycle.py`
+
+DAG vedette de la demonstration MLOps.
+
+```text
+monitoring/feedback
+-> dataset candidat good-only ROI-ok
+-> train Feature-AE candidat
+-> evaluation validation_set_v001
+-> quality gates
+-> log MLflow
+-> promotion = copie vers s3://iqa-models/prod/
+-> /admin/reload-model si promotion
+```
+
+Contraintes :
+- aucun defaut dans le train normal ;
+- aucune ROI warning/fail dans le train normal ;
+- aucun piece event du validation set dans le train ou le replay ;
+- le ROI segmenter et le teacher restent figes.
+
+### `iqa_monitoring.py`
+
+```text
+predictions par lot
+-> drift teacher features
+-> derive reconstruction Feature-AE
+-> suivi ROI
+-> alertes FN / drift / latence
+-> trigger eventuel du DAG lifecycle
+```
+
+Le declenchement du lifecycle est un evenement donnees, pas un commit ni un cron systematique.
+
+## 6. Donnees
+
+```text
+data/raw/            -> hss-iad versionne DVC
+data/metadata/       -> manifests CSV
+data/processed/      -> ROI, features, heatmaps, exports
+data/model_datasets/ -> datasets candidats Feature-AE
+data/validation/     -> validation_set_v001
+```
+
+Stockage objet MinIO :
+```text
+s3://iqa-source-datasets -> dataset historique immutable
+s3://iqa-dvc             -> remote DVC
+s3://iqa-ingested-images -> images brutes recues ou rejouees
+s3://mlflow-artifacts  -> artefacts MLflow
+s3://iqa-heatmaps      -> heatmaps et overlays
+s3://iqa-models        -> prod, previous_prod, candidates archives
+s3://iqa-backups       -> sauvegardes applicatives
+```
+
+Manifests essentiels :
+```text
+casting_images_inventory.csv
+casting_piece_events.csv
+feature_ae_bootstrap_events.csv
+casting_flux_replay_plan_natural.csv
+casting_flux_replay_plan_drift.csv
+replay_scenarios.csv
+validation_set_v001.csv
+```
+
+## 7. Package `src/iqa`
+
+```text
+ingestion/   -> inventaire, sha256, piece_events
+replay/      -> lots, cadence, scenarios
+roi/         -> ROI segmenter fige, controle qualite ROI
+models/      -> code PyTorch teacher + Feature-AE
+inference/   -> pipeline prediction image/piece
+feedback/    -> oracle GT, feedback Sophie, regles de priorite
+datasets/    -> datasets candidats good-only
+training/    -> train/eval/calibration/gates Feature-AE
+monitoring/  -> drift, metriques, alertes
+storage/     -> client S3 MinIO unique, URI logiques, URLs presignees
+registry/    -> MLflow, promotion, rollback, model loading
+api/         -> FastAPI routes et schemas
+```
+
+`src/iqa/models/` contient le code modele. Les artefacts entraines sont stockes dans MinIO, principalement `s3://iqa-models`.
+
+## 8. Services Docker Compose
+
+Services cibles :
+
+```text
+iqa-api
+iqa-inference
+iqa-streamlit
+iqa-trainer
+airflow-webserver
+airflow-scheduler
+mlflow
+minio
+minio-init
+postgres
+prometheus
+grafana
+reverse-proxy
+```
+
+Airflow reste en mode leger :
+```text
+LocalExecutor
+PostgreSQL metadata DB
+pas de CeleryExecutor
+pas de KubernetesExecutor
+concurrence limitee
+```
+
+## 9. Tests
+
+Tests attendus :
+- import des DAGs Airflow : zero broken DAG en CI ;
+- contrats API : `/health`, `/predict`, `/feedback`, `/model/version`, `/admin/reload-model` ;
+- invariants datasets : aucun defaut, aucune ROI warning/fail, aucun validation_set dans le train ;
+- gates : cas limites AP, taux Orange, FN ;
+- storage : mapping URI logiques -> buckets/cles ;
+- MinIO integration : round-trip ecriture/lecture ;
+- model loading : chargement depuis `s3://iqa-models` ;
+- feedback : `human_sophie` prioritaire sur `oracle_gt` ;
+- aggregation piece : Rouge/Orange/Vert ;
+- incidents rejouables : faux negatif, pic ROI fail, rollback.
+
+## 10. Phases d'implementation
+
+1. Squelette repo, configs, CI, PostgreSQL, MinIO, API `/health`.
+2. Tracer bullet : une piece traverse predict -> feedback -> PostgreSQL -> MLflow.
+3. Fondation donnees : inventory, piece_events, `validation_set_v001`, replay regenere.
+4. Pipeline vision complet multi-vues.
+5. Replay naturel via API reelle.
+6. Dataset builder candidat good-only.
+7. Evaluation et gates chiffrees.
+8. Boucle modele Airflow.
+9. Scenario drift + isolation/reset par `scenario_id`.
+10. Monitoring Prometheus/Grafana.
+11. Streamlit dashboard Marc + review Sophie.
+12. Incidents rejouables, dont rollback par bascule `previous_prod` S3.
+13. Deploiement Z420 Ubuntu Server + runbook.
+
+## 11. Decisions retenues
+
+- Ubuntu Server est la cible officielle de deploiement ; Windows + WSL2 n'est pas retenu.
+- Airflow est retenu pour la demonstration MLOps.
+- La CI ne declenche jamais d'entrainement.
+- Le lifecycle modele est declenche par evenement donnees.
+- PostgreSQL est le metadata store cible.
+- MinIO est le stockage objet local cible.
+- DVC utilise le remote `s3://iqa-dvc`.
+- Le module `src/iqa/storage` est le seul a parler a MinIO/boto3.
+- Le validation set est fige avant replay et hors calibration.
+- Les scenarios sont isoles par `scenario_id`.
+- Sophie peut saisir un verdict humain prioritaire.
+- Seul le Feature-AE est reentraine automatiquement.
+- Kubernetes et reentrainement ROI sont hors MVP.
+
+## 12. Verdict
+
+Cette architecture devient la base cible IQA.
+
+Elle combine :
+```text
+template MLOps + Airflow + MinIO + validation set fige
++ feedback humain prioritaire + Feature-AE lifecycle + Ubuntu Server
+```
+
+Elle reste suffisamment simple pour le MVP, tout en donnant une colonne vertebrale credible pour la soutenance et le deploiement sur la Z420.
