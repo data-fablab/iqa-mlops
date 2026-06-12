@@ -18,6 +18,7 @@ from iqa.api.main import (
     replay_scenarios,
 )
 from iqa.inference.service import health as inference_health
+from iqa.inference.service import metrics as inference_metrics
 
 
 def test_api_app_exposes_phase_1_contract_routes() -> None:
@@ -63,6 +64,10 @@ def test_piece_event_predict_uses_path_event_id() -> None:
 
 def test_inference_service_health() -> None:
     assert inference_health() == {"status": "ok", "service": "iqa-inference"}
+
+
+def test_inference_service_metrics() -> None:
+    assert "iqa_inference_up 1" in inference_metrics()
 
 
 def test_feedback_accepts_oracle_gt() -> None:

@@ -1,0 +1,16 @@
+services:
+  iqa-inference:
+    build:
+      context: ..
+      args:
+        IQA_UV_EXTRA: cu128
+    command: uv run --extra cu128 iqa-inference
+    gpus: all
+
+  iqa-trainer:
+    build:
+      context: ..
+      args:
+        IQA_UV_EXTRA: cu128
+    command: uv run --extra cu128 iqa-run-lifecycle
+    gpus: all

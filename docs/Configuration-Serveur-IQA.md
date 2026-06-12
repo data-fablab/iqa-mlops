@@ -285,6 +285,84 @@ Cette configuration est coherente avec le cadrage projet, a condition de conserv
 
 Decision explicite : la procedure officielle de deploiement est `Ubuntu Server -> Docker Compose -> dvc pull -> docker compose up`. Windows + WSL2 peut rester un environnement de developpement individuel, mais pas la cible serveur retenue.
 
+## 14. Procedure serveur MVP
+
+Initialisation du repo :
+
+```bash
+cd /opt/iqa
+git clone https://github.com/data-fablab/iqa-mlops.git
+cd iqa-mlops
+uv sync --extra cpu --extra data
+uv run --extra cpu --extra data ruff check src scripts tests
+uv run --extra cpu --extra data pytest -q
+```
+
+Configuration environnement :
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Le fichier `.env` serveur doit remplacer tous les secrets `change-me-*` :
+
+```text
+IQA_POSTGRES_PASSWORD
+MINIO_ROOT_USER
+MINIO_ROOT_PASSWORD
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+GF_SECURITY_ADMIN_PASSWORD
+IQA_ADMIN_TOKEN
+IQA_SERVICE_TOKEN
+```
+
+Demarrage socle :
+
+```bash
+cd /opt/iqa/iqa-mlops/deploy
+docker compose up -d postgres minio minio-init mlflow prometheus grafana
+docker compose ps
+```
+
+Initialisation DVC cote serveur :
+
+```bash
+cd /opt/iqa/iqa-mlops
+uv run --extra cpu --extra data dvc remote modify --local iqa-minio endpointurl http://localhost:9000
+uv run --extra cpu --extra data dvc remote modify --local iqa-minio access_key_id "$MINIO_ROOT_USER"
+uv run --extra cpu --extra data dvc remote modify --local iqa-minio secret_access_key "$MINIO_ROOT_PASSWORD"
+uv run --extra cpu --extra data dvc pull
+```
+
+Demarrage API et inference CPU/smoke :
+
+```bash
+cd /opt/iqa/iqa-mlops/deploy
+docker compose up -d iqa-api iqa-inference reverse-proxy
+curl http://localhost/api/health
+curl http://localhost:8100/health
+```
+
+Demarrage inference/trainer GPU RTX3060 :
+
+```bash
+cd /opt/iqa/iqa-mlops/deploy
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build iqa-inference iqa-trainer
+```
+
+Validation GPU Docker :
+
+```bash
+nvidia-smi
+docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi
+```
+
+Note : le compose principal reste CPU pour etre portable. Le fichier
+`docker-compose.gpu.yml` active CUDA uniquement pour les services qui en ont
+besoin : `iqa-inference` et `iqa-trainer`.
+
 ## 13. Decisions de convergence infrastructure
 
 Le pyproject.toml racine reste conserve pour le repo initial. L'isolation fine
