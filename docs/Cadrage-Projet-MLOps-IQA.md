@@ -11,7 +11,7 @@ Le MVP doit demontrer une boucle MLOps complete :
 - score d'anomalie ;
 - heatmap explicable ;
 - decision Vert / Orange / Rouge ;
-- feedback oracle GT puis humain cible ;
+- feedback oracle GT pour automatiser le MVP, interface Sophie en vitrine ;
 - versioning donnees/modeles ;
 - monitoring, drift, recalibration et reentrainement controle.
 
@@ -245,10 +245,14 @@ ROI warning/fail hors train Feature-AE
 ```
 
 ## 10. Feedback
-Pour accelerer le MVP, le feedback Sophie est automatise par un oracle GT. L'interface Sophie reste fonctionnelle : elle permet de saisir un verdict `human_sophie`, exploite par les memes regles que l'oracle et prioritaire en cas de divergence.
+Pour accelerer le MVP, le feedback operationnel est automatise par un oracle GT.
+L'interface Sophie reste une vitrine fonctionnelle : elle montre le parcours cible
+de revue qualite, mais les retours humains reels ne pilotent pas le workflow MVP.
+Si `human_sophie` est active plus tard, elle pourra prioriser la decision affichee
+sans rendre eligible au train une piece que le GT sait defectueuse.
 
 ```text
-feedback_source = oracle_gt | human_sophie
+feedback_source = oracle_gt | human_sophie_future
 label good      -> Conforme
 label defective -> Defaut confirme
 masque GT       -> evaluation localisation
@@ -316,7 +320,7 @@ raw hss-iad
 Contrats :
 ```text
 Serving       = ROI fixe + teacher fixe + Feature-AE actif
-Feedback      = oracle_gt au MVP, human_sophie fonctionnel et prioritaire
+Feedback      = oracle_gt au MVP, vitrine human_sophie future
 Training      = separe de l'usage metier
 Orchestration = Airflow LocalExecutor, DAG vedette iqa_lifecycle
 Storage       = MinIO local, acces via src/iqa/storage uniquement
@@ -506,3 +510,33 @@ piece controlee -> ROI -> Feature-AE -> heatmap -> decision Sophie
 ```
 
 La valeur metier reste portee par le controle reel, la tracabilite, la reduction du risque qualite et la capacite a faire vivre un modele en production de maniere gouvernee.
+
+## 19. Decisions de convergence Ken/IQA
+
+Le `piece_event` est l'unite atomique de split, replay, feedback, validation,
+calibration et train. Une image herite toujours du split de sa piece.
+
+On ajoute `calibration_set_v001` :
+
+```text
+calibration_set_v001 = good-only, fige avant replay, hors bootstrap, train,
+validation et replay
+bootstrap ∩ calibration ∩ replay ∩ validation = vide
+```
+
+Chaque scenario dispose de son registered model MLflow :
+
+```text
+feature_ae__production_replay_natural
+feature_ae__drift_domain_extension
+```
+
+MLflow Registry est la source de verite de la promotion et du rollback. MinIO
+stocke les artefacts, mais aucun prefixe S3 ne vaut promotion.
+
+Les evenements replay portent `event_time`, `recorded_at` et `is_simulated`.
+`event_time` raconte le flux historique, `recorded_at` trace l'execution systeme.
+
+Le repo initial conserve le pyproject.toml racine. L'isolation se fait par
+services Docker (`iqa-api`, `iqa-inference`, batchs, Airflow), sans migration
+immediate vers un dossier `services/`.

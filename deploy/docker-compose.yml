@@ -1,0 +1,113 @@
+services:
+  iqa-api:
+    build:
+      context: ..
+    command: uv run --extra cpu iqa-api
+    env_file: ../.env.example
+    ports: ["8000:8000"]
+    depends_on: [iqa-inference, postgres]
+
+  iqa-inference:
+    build:
+      context: ..
+    command: uv run --extra cpu iqa-inference
+    env_file: ../.env.example
+    ports: ["8100:8100"]
+
+  iqa-streamlit:
+    image: python:3.12-slim
+    command: python -m http.server 8501
+    ports: ["8501:8501"]
+
+  iqa-ingestion:
+    build:
+      context: ..
+    command: uv run --extra cpu iqa-run-ingestion
+    env_file: ../.env.example
+    profiles: ["batch"]
+
+  iqa-replay:
+    build:
+      context: ..
+    command: uv run --extra cpu iqa-run-replay
+    env_file: ../.env.example
+    profiles: ["batch"]
+
+  iqa-trainer:
+    build:
+      context: ..
+    command: uv run --extra cpu iqa-run-lifecycle
+    env_file: ../.env.example
+    profiles: ["batch"]
+
+  iqa-monitoring:
+    build:
+      context: ..
+    command: uv run --extra cpu iqa-run-monitoring
+    env_file: ../.env.example
+    profiles: ["batch"]
+
+  airflow-webserver:
+    image: apache/airflow:2.10.5-python3.12
+    command: webserver
+    ports: ["8080:8080"]
+    depends_on: [postgres]
+
+  airflow-scheduler:
+    image: apache/airflow:2.10.5-python3.12
+    command: scheduler
+    depends_on: [postgres]
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql://mlflow:mlflow_password@postgres:5432/mlflow --default-artifact-root s3://mlflow-artifacts
+    ports: ["5000:5000"]
+    depends_on: [postgres, minio]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports: ["9000:9000", "9001:9001"]
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    volumes:
+      - ./minio/init-buckets.sh:/init-buckets.sh:ro
+    entrypoint: ["/bin/sh", "/init-buckets.sh"]
+    depends_on: [minio]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: iqa
+      POSTGRES_PASSWORD: iqa_password
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-databases.sql:/docker-entrypoint-initdb.d/10-init-databases.sql:ro
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3000:3000"]
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+
+  reverse-proxy:
+    image: nginx:1.27-alpine
+    ports: ["80:80"]
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [iqa-api, iqa-streamlit, mlflow, minio, grafana, airflow-webserver]
+
+volumes:
+  minio_data:
+  postgres_data:

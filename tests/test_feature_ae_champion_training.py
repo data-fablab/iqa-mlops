@@ -8,7 +8,7 @@ import pytest
 import torch
 from PIL import Image
 
-from iqa.datasets import TiledFeatureAEDataset, tile_boxes
+from iqa.datasets import CALIBRATION_SET_ID, TiledFeatureAEDataset, is_calibration_sample, iter_manifest_image_samples, tile_boxes
 from iqa.models.feature_ae import FEATURE_AE_MODEL_TYPE
 from iqa.training.feature_ae import FeatureAETrainingConfig, train_feature_ae
 from iqa.training.feature_ae_evaluation import (
@@ -86,6 +86,31 @@ def test_train_normal_without_gt_uses_empty_defect_mask(tmp_path: Path) -> None:
     dataset = TiledFeatureAEDataset(manifest, image_root, tile_size=32, context_size=64, train_only_normal=True)
 
     assert dataset[0]["gt_mask"].sum() == 0
+
+
+def test_calibration_set_is_recognized_and_excluded_from_training(tmp_path: Path) -> None:
+    image_root = tmp_path / "images"
+    image_path = image_root / "Casting_class1" / "calibration" / "good" / "part.jpg"
+    image_path.parent.mkdir(parents=True)
+    Image.new("RGB", (32, 32), "gray").save(image_path)
+    manifest = tmp_path / "manifest.csv"
+    _write_manifest(
+        manifest,
+        [
+            {
+                "image_ids": "img_cal",
+                "relative_paths": "Casting_class1/calibration/good/part.jpg",
+                "split_set": CALIBRATION_SET_ID,
+                "label": "good",
+                "is_defective": "false",
+            }
+        ],
+    )
+    samples = iter_manifest_image_samples(manifest)
+
+    assert is_calibration_sample(samples[0]) is True
+    with pytest.raises(ValueError, match="No Feature-AE tiles"):
+        TiledFeatureAEDataset(manifest, image_root, tile_size=32, context_size=64, train_only_normal=True)
 
 
 def test_training_rejects_replay_candidate_without_versions(tmp_path: Path) -> None:

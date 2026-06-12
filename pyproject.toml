@@ -29,6 +29,12 @@ iqa-train-feature-ae = "scripts.train_feature_ae:main"
 iqa-evaluate-feature-ae = "scripts.evaluate_feature_ae:main"
 iqa-predict-image = "scripts.predict_image:main"
 iqa-validate-ml-source = "scripts.validate_ml_source:main"
+iqa-api = "scripts.run_api:main"
+iqa-inference = "scripts.run_inference_service:main"
+iqa-run-ingestion = "scripts.run_ingestion:main"
+iqa-run-replay = "scripts.run_replay:main"
+iqa-run-monitoring = "scripts.run_monitoring:main"
+iqa-run-lifecycle = "scripts.run_lifecycle:main"
 
 [project.optional-dependencies]
 app = [

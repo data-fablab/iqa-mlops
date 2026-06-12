@@ -19,6 +19,15 @@ def test_phase_1_root_files_exist() -> None:
         assert (ROOT / path).is_file()
 
 
+def test_convergence_adrs_exist() -> None:
+    for path in [
+        ROOT / "docs" / "adr" / "0005-calibration-set-etanche-et-split-piece-event.md",
+        ROOT / "docs" / "adr" / "0006-mlflow-registry-source-verite.md",
+        ROOT / "docs" / "adr" / "0007-architecture-services-avec-pyproject-racine.md",
+    ]:
+        assert path.is_file()
+
+
 def test_phase_1_config_files_exist() -> None:
     for path in [
         "configs/paths.yaml",
@@ -46,10 +55,29 @@ def test_metadata_store_is_documented_as_postgresql() -> None:
     ]
 
     assert "IQA_METADATA_DB_URL=postgresql://" in env_example
+    assert "IQA_MLFLOW_DB_URL=postgresql://" in env_example
+    assert "IQA_AIRFLOW_DB_URL=postgresql://" in env_example
     for path in docs_and_examples:
         content = path.read_text(encoding="utf-8").lower()
         assert "postgresql" in content or "postgres" in content
         assert "sqlite" not in content
+
+
+def test_architecture_documents_microservices_and_registry_truth() -> None:
+    docs = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            ROOT / "docs" / "Architecture-Projet-IQA.md",
+            ROOT / "docs" / "Configuration-Serveur-IQA.md",
+            ROOT / "docs" / "Decisions-Questions-Ouvertes-IQA.md",
+        ]
+    )
+
+    for service in ["iqa-api", "iqa-inference", "iqa-ingestion", "iqa-replay", "iqa-trainer", "iqa-monitoring"]:
+        assert service in docs
+    assert "MLflow Registry est la source de verite" in docs
+    assert "Reverse proxy | Nginx" in docs
+    assert "Nginx/Traefik" not in docs
 
 
 def test_ingestion_abstraction_is_documented() -> None:
@@ -66,6 +94,35 @@ def test_ingestion_abstraction_is_documented() -> None:
 
     for term in expected_terms:
         assert term in combined
+
+
+def test_convergence_decisions_are_documented() -> None:
+    docs = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            ROOT / "README.md",
+            ROOT / "docs" / "Architecture-Projet-IQA.md",
+            ROOT / "docs" / "Cadrage-Projet-MLOps-IQA.md",
+            ROOT / "docs" / "PRD-IQA-MVP.md",
+            ROOT / "docs" / "Configuration-Serveur-IQA.md",
+            ROOT / "docs" / "adr" / "0005-calibration-set-etanche-et-split-piece-event.md",
+            ROOT / "docs" / "adr" / "0006-mlflow-registry-source-verite.md",
+            ROOT / "docs" / "adr" / "0007-architecture-services-avec-pyproject-racine.md",
+        ]
+    )
+
+    for term in [
+        "calibration_set_v001",
+        "event_time",
+        "recorded_at",
+        "MLflow Registry",
+        "iqa-source-datasets",
+        "iqa-ingested-images",
+        "pyproject.toml racine",
+        "feature_ae__production_replay_natural",
+        "feature_ae__drift_domain_extension",
+    ]:
+        assert term in docs
 
 
 def test_no_heavy_model_or_sqlite_artifacts_in_repo_tree() -> None:

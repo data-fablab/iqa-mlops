@@ -53,6 +53,10 @@ checkpoint, and image prediction. The retained Feature-AE preprocessing uses
 `tiled_context` with explicit `image_size=384` and `context_size=768`; the old
 source name `tile_256_overlap` is intentionally not reused.
 
+Model-specific contracts are documented in:
+- [docs/Modele-Feature-AE-IQA.md](docs/Modele-Feature-AE-IQA.md)
+- [docs/Modele-Segmentation-ROI-IQA.md](docs/Modele-Segmentation-ROI-IQA.md)
+
 ## API Skeleton
 
 ```powershell
@@ -74,3 +78,21 @@ Stored outside Git:
 - checkpoints in MinIO under `s3://iqa-models`;
 - production or replayed raw images in MinIO under `s3://iqa-ingested-images`;
 - source datasets and heavy data through DVC/MinIO in later phases.
+
+## Convergence Decisions
+
+The repo keeps a root `pyproject.toml` for the initial deliverable while Docker
+Compose separates the target services. The official serving boundary remains
+`iqa-api` plus a separate `iqa-inference` service.
+
+Data and model lifecycle rules:
+
+- `piece_event` is the atomic split unit.
+- `calibration_set_v001` is a good-only set, sealed away from bootstrap, replay,
+  training, and `validation_set_v001`.
+- Replay events carry `event_time`, `recorded_at`, and derived `is_simulated`.
+- MLflow Registry is the source of truth for promotion and rollback.
+- Registered models are isolated by scenario:
+  `feature_ae__production_replay_natural` and
+  `feature_ae__drift_domain_extension`.
+- Sophie is a MVP showcase interface; `oracle_gt` drives the automated workflow.

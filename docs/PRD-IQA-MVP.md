@@ -25,13 +25,13 @@ image
 -> Feature-AE good-only
 -> score + heatmap
 -> aggregation multi-vues
--> feedback oracle GT puis human_sophie
+-> feedback oracle GT puis vitrine Sophie
 ```
 
 ## 3. Decisions produit
 
 - Sophie reste decisionnaire.
-- L'oracle GT accelere le MVP, mais le feedback humain prime.
+- L'oracle GT automatise le workflow MVP ; l'interface Sophie montre le parcours cible.
 - Le ROI segmenter et le teacher ResNet18 restent figes.
 - Le Feature-AE est le seul modele vivant.
 - Les scenarios de replay sont isoles par `scenario_id`.
@@ -97,3 +97,21 @@ J21 -> drift, dashboards, review Sophie, incidents
 J24 -> feature freeze + deploiement Z420 Ubuntu + runbook
 J28 -> soutenance
 ```
+
+## 8. Decisions de convergence
+
+- `piece_event` est l'unite atomique de split, replay, feedback, validation,
+  calibration et train.
+- `calibration_set_v001` est good-only, etanche, hors bootstrap, replay, train
+  et validation.
+- Invariant officiel : `bootstrap ∩ calibration ∩ replay ∩ validation = vide`.
+- Train Feature-AE = good-only + ROI-ok + hors validation/calibration/incident.
+- GT defaut oracle = apres prediction uniquement ; le GT reste souverain pour
+  l'eligibilite train.
+- MLflow Registry est la source de verite de la promotion et du rollback.
+- Registered models par scenario : `feature_ae__production_replay_natural` et
+  `feature_ae__drift_domain_extension`.
+- `event_time`, `recorded_at` et `is_simulated` separent le temps simule, le
+  temps systeme et la nature replay/production.
+- Le pyproject.toml racine est conserve pour le repo initial ; la migration
+  `services/` est reportee.

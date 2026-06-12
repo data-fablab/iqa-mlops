@@ -20,6 +20,9 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 FEATURE_AE_TILE_SIZE = 384
 FEATURE_AE_CONTEXT_SIZE = 768
 FEATURE_AE_PREPROCESSING_MODES = ("letterbox", "tiled_context")
+CALIBRATION_SET_ID = "calibration_set_v001"
+VALIDATION_SET_ID = "validation_set_v001"
+FEATURE_AE_EXCLUDED_TRAIN_SETS = (CALIBRATION_SET_ID, VALIDATION_SET_ID, "incident")
 
 
 @dataclass(frozen=True)
@@ -327,9 +330,18 @@ class TiledFeatureAEDataset(Dataset):
 def _is_train_normal(sample: CastingImageSample, *, reject_validation: bool) -> bool:
     split = sample.split_set.lower()
     label = sample.label.lower()
-    if reject_validation and "validation" in split:
+    if reject_validation and _is_excluded_feature_ae_train_split(split):
         return False
     return not sample.is_defective and label in {"good", "normal", "conforme"}
+
+
+def _is_excluded_feature_ae_train_split(split: str) -> bool:
+    return any(excluded in split for excluded in FEATURE_AE_EXCLUDED_TRAIN_SETS)
+
+
+def is_calibration_sample(sample: CastingImageSample) -> bool:
+    split = sample.split_set.lower()
+    return CALIBRATION_SET_ID in split and not sample.is_defective and sample.label.lower() in {"good", "normal", "conforme"}
 
 
 def validate_good_only_samples(samples: Iterable[CastingImageSample]) -> None:
@@ -340,10 +352,13 @@ def validate_good_only_samples(samples: Iterable[CastingImageSample]) -> None:
 
 __all__ = [
     "FEATURE_AE_CONTEXT_SIZE",
+    "CALIBRATION_SET_ID",
+    "FEATURE_AE_EXCLUDED_TRAIN_SETS",
     "FEATURE_AE_PREPROCESSING_MODES",
     "FEATURE_AE_TILE_SIZE",
     "IMAGENET_MEAN",
     "IMAGENET_STD",
+    "VALIDATION_SET_ID",
     "CastingImageDataset",
     "CastingImageSample",
     "ResizeLetterbox",
@@ -352,6 +367,7 @@ __all__ = [
     "centered_box",
     "image_crop_to_tensor",
     "image_to_tensor",
+    "is_calibration_sample",
     "iter_manifest_image_samples",
     "load_image_tensor",
     "load_mask_tensor",

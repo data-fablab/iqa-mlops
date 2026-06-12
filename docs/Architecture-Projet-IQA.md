@@ -13,7 +13,7 @@ Cette architecture reprend l'esprit du template `ssime-git/mlops-project-templat
 
 Elle integre les decisions de la proposition Ken retenues par l'equipe :
 - `validation_set_v001` fige avant tout replay, hors calibration ;
-- feedback Sophie fonctionnel avec `human_sophie` prioritaire sur l'oracle GT ;
+- interface Sophie vitrine pour le MVP, avec feedback automatise par oracle GT ;
 - PostgreSQL comme metadata store cible ;
 - PostgreSQL stocke les faits, statuts et URI, jamais les fichiers lourds ;
 - scenarios isoles par `scenario_id` ;
@@ -34,9 +34,9 @@ Streamlit
 Reverse proxy
     |
     v
-FastAPI
+FastAPI `iqa-api`
     |
-    +--> inference
+    +--> service `iqa-inference`
     |       -> ROI segmenter fige
     |       -> controle qualite ROI
     |       -> teacher ResNet18 fige
@@ -45,7 +45,7 @@ FastAPI
     |
     +--> feedback
     |       -> oracle_gt apres prediction
-    |       -> human_sophie prioritaire
+    |       -> human_sophie cible future, non operationnel MVP
     |
     +--> PostgreSQL metadata
     |       -> predictions, feedback, lots, versions, incidents
@@ -54,10 +54,10 @@ FastAPI
 
 Airflow
     |
-    +--> iqa_ingestion
-    +--> iqa_replay
-    +--> iqa_lifecycle
-    +--> iqa_monitoring
+    +--> service batch `iqa-ingestion`
+    +--> service batch `iqa-replay`
+    +--> service batch `iqa-trainer`
+    +--> service batch `iqa-monitoring`
     |
     +--> DVC remote s3://iqa-dvc
     +--> MinIO artifact store
@@ -75,7 +75,8 @@ camera / poste qualite / MES
 -> production_ingest
 -> MinIO s3://iqa-ingested-images
 -> PostgreSQL piece_event + image_uri + contexte lot
--> FastAPI inference
+-> FastAPI `iqa-api`
+-> service `iqa-inference`
 -> prediction + feedback
 ```
 
@@ -86,7 +87,8 @@ dataset Casting historique
 -> meme contrat ingestion
 -> MinIO/DVC URI compatible
 -> PostgreSQL piece_event + image_uri + scenario_id
--> FastAPI inference
+-> FastAPI `iqa-api`
+-> service `iqa-inference`
 -> prediction + feedback
 ```
 
@@ -172,6 +174,8 @@ Documents cibles :
 - `PRD-IQA-MVP.md` : exigences produit, user stories, decisions d'implementation ;
 - `CONTEXT.md` : glossaire court et langage commun ;
 - `architecture.md` : structure technique et responsabilites ;
+- `Modele-Feature-AE-IQA.md` : contrat du modele vivant, training, evaluation, checkpoints ;
+- `Modele-Segmentation-ROI-IQA.md` : contrat du segmenteur ROI fige et usage downstream ;
 - `server-config.md` : configuration Z420 Ubuntu Server ;
 - `adr/0001` : validation set fige hors replay ;
 - `adr/0002` : Airflow comme orchestrateur ;
@@ -231,7 +235,8 @@ monitoring/feedback
 -> evaluation validation_set_v001
 -> quality gates
 -> log MLflow
--> promotion = copie vers s3://iqa-models/prod/
+-> transition MLflow Registry vers prod si promotion
+-> artefacts stockes dans s3://iqa-models
 -> /admin/reload-model si promotion
 ```
 
@@ -271,7 +276,7 @@ s3://iqa-dvc             -> remote DVC
 s3://iqa-ingested-images -> images brutes recues ou rejouees
 s3://mlflow-artifacts  -> artefacts MLflow
 s3://iqa-heatmaps      -> heatmaps et overlays
-s3://iqa-models        -> prod, previous_prod, candidates archives
+s3://iqa-models        -> artefacts modeles candidats, promus et archives
 s3://iqa-backups       -> sauvegardes applicatives
 ```
 
@@ -294,7 +299,7 @@ replay/      -> lots, cadence, scenarios
 roi/         -> ROI segmenter fige, controle qualite ROI
 models/      -> code PyTorch teacher + Feature-AE
 inference/   -> pipeline prediction image/piece
-feedback/    -> oracle GT, feedback Sophie, regles de priorite
+feedback/    -> oracle GT MVP, vitrine Sophie, regles de priorite futures
 datasets/    -> datasets candidats good-only
 training/    -> train/eval/calibration/gates Feature-AE
 monitoring/  -> drift, metriques, alertes
@@ -305,6 +310,10 @@ api/         -> FastAPI routes et schemas
 
 `src/iqa/models/` contient le code modele. Les artefacts entraines sont stockes dans MinIO, principalement `s3://iqa-models`.
 
+Contrats detailles :
+- [Modele Feature-AE IQA](Modele-Feature-AE-IQA.md) ;
+- [Modele Segmentation ROI IQA](Modele-Segmentation-ROI-IQA.md).
+
 ## 8. Services Docker Compose
 
 Services cibles :
@@ -313,7 +322,10 @@ Services cibles :
 iqa-api
 iqa-inference
 iqa-streamlit
+iqa-ingestion
+iqa-replay
 iqa-trainer
+iqa-monitoring
 airflow-webserver
 airflow-scheduler
 mlflow
@@ -329,6 +341,7 @@ Airflow reste en mode leger :
 ```text
 LocalExecutor
 PostgreSQL metadata DB
+pool GPU Airflow max_active_tasks=1
 pas de CeleryExecutor
 pas de KubernetesExecutor
 concurrence limitee
@@ -344,7 +357,7 @@ Tests attendus :
 - storage : mapping URI logiques -> buckets/cles ;
 - MinIO integration : round-trip ecriture/lecture ;
 - model loading : chargement depuis `s3://iqa-models` ;
-- feedback : `human_sophie` prioritaire sur `oracle_gt` ;
+- feedback : oracle GT automatise le MVP ; Sophie reste une vitrine de revue ;
 - aggregation piece : Rouge/Orange/Vert ;
 - incidents rejouables : faux negatif, pic ROI fail, rollback.
 
@@ -361,7 +374,7 @@ Tests attendus :
 9. Scenario drift + isolation/reset par `scenario_id`.
 10. Monitoring Prometheus/Grafana.
 11. Streamlit dashboard Marc + review Sophie.
-12. Incidents rejouables, dont rollback par bascule `previous_prod` S3.
+12. Incidents rejouables, dont rollback via MLflow Registry.
 13. Deploiement Z420 Ubuntu Server + runbook.
 
 ## 11. Decisions retenues
@@ -376,7 +389,8 @@ Tests attendus :
 - Le module `src/iqa/storage` est le seul a parler a MinIO/boto3.
 - Le validation set est fige avant replay et hors calibration.
 - Les scenarios sont isoles par `scenario_id`.
-- Sophie peut saisir un verdict humain prioritaire.
+- L'interface Sophie est une vitrine MVP ; le feedback operationnel est l'oracle GT.
+- MLflow Registry est la source de verite de la promotion et du rollback.
 - Seul le Feature-AE est reentraine automatiquement.
 - Kubernetes et reentrainement ROI sont hors MVP.
 
@@ -386,8 +400,28 @@ Cette architecture devient la base cible IQA.
 
 Elle combine :
 ```text
-template MLOps + Airflow + MinIO + validation set fige
-+ feedback humain prioritaire + Feature-AE lifecycle + Ubuntu Server
+template MLOps + microservices Docker + Airflow + MinIO + validation set fige
++ oracle GT MVP + Feature-AE lifecycle + Ubuntu Server
 ```
 
 Elle reste suffisamment simple pour le MVP, tout en donnant une colonne vertebrale credible pour la soutenance et le deploiement sur la Z420.
+
+## 13. Decisions de convergence Ken/IQA
+
+Decisions adoptees :
+
+- `piece_event` est l'unite atomique de split, replay, feedback, validation,
+  calibration et train.
+- `calibration_set_v001` est good-only, fige avant replay, hors bootstrap,
+  replay, train et `validation_set_v001`.
+- Invariant dataset : `bootstrap ∩ calibration ∩ replay ∩ validation = vide`.
+- `event_time` represente le temps simule du replay ; `recorded_at` represente
+  l'horloge systeme ; `is_simulated` est derive de la source.
+- MLflow Registry est la source de verite ; MinIO stocke les artefacts.
+- Registered models par scenario : `feature_ae__production_replay_natural` et
+  `feature_ae__drift_domain_extension`.
+- API et inference restent deux services separes : `iqa-api` et `iqa-inference`.
+- Le pyproject.toml racine est conserve en phase initiale ; la migration vers
+  un dossier `services/` est reportee.
+- Sophie reste une vitrine MVP ; `human_sophie` est futur, `oracle_gt` pilote le
+  workflow operationnel.

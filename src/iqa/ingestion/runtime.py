@@ -14,6 +14,8 @@ def build_piece_event(
     lot_id: str,
     source_class: str,
     images: Iterable[IngestedImage],
+    event_time: str = "",
+    recorded_at: str = "",
 ) -> PieceEvent:
     image_tuple = tuple(images)
     if not image_tuple:
@@ -25,6 +27,8 @@ def build_piece_event(
         lot_id=lot_id,
         source_class=source_class,
         images=image_tuple,
+        event_time=event_time,
+        recorded_at=recorded_at,
     )
 
 

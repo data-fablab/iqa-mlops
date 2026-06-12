@@ -35,7 +35,7 @@ Le serveur doit couvrir :
 | Besoin du projet | Configuration serveur | Statut |
 |---|---|---|
 | Inference visuelle locale | RTX 3060 12 Go | OK |
-| Latence cible p95 < 1 seconde | GPU local + FastAPI | OK pour MVP |
+| Latence cible p95 < 1 seconde | GPU local + service inference | OK pour MVP |
 | Feature-AE good-only | GPU + 40 Go RAM | OK |
 | Teacher ResNet18 fige | GPU adapte | OK |
 | Segmenteur ROI fige | Inference GPU uniquement | OK |
@@ -61,7 +61,7 @@ La configuration est adaptee au MVP si l'architecture reste sur une station uniq
 | Python | Python 3.11 ou 3.12 |
 | Gestion dependances | uv |
 | Acces distant | SSH |
-| Reverse proxy | Nginx ou Traefik |
+| Reverse proxy | Nginx |
 
 Ubuntu Server est la cible officielle de deploiement. Windows + WSL2 n'est pas retenu pour le serveur IQA, afin de garder une base plus stable, plus proche d'une exploitation serveur et plus simple a administrer a distance. Kubernetes n'est pas recommande pour ce MVP : il complexifie le projet sans benefice suffisant sur une station unique.
 
@@ -79,17 +79,17 @@ DAGs courts et idempotents
 
 | Brique | Role |
 |---|---|
-| FastAPI | API d'inference et contrats `/predict`, `/feedback`, `/health`, `/metrics`, `/admin/reload-model` |
+| FastAPI | API applicative et contrats `/predict`, `/feedback`, `/health`, `/metrics`, `/admin/reload-model` |
 | Streamlit | Interface Sophie/Marc et vitrine du workflow qualite |
 | PyTorch CUDA | ROI segmenter fige, teacher ResNet18 fige, Feature-AE |
 | MLflow | Tracking experiments, registry modele, comparaison candidats |
-| PostgreSQL | Backend MLflow et metadata store applicatif obligatoire |
+| PostgreSQL | Une instance avec bases separees `iqa_metadata`, `mlflow`, `airflow` |
 | MinIO | Stockage objet local S3-compatible |
 | DVC | Versioning donnees avec remote `s3://iqa-dvc` |
 | Prometheus | Collecte metriques API, modele, drift, systeme |
 | Grafana | Dashboards supervision |
 | Airflow | Orchestration ingestion, replay, lifecycle Feature-AE, monitoring |
-| Nginx/Traefik | Routage HTTP et exposition propre des services |
+| Nginx | Routage HTTP et exposition propre des services |
 
 Airflow est plus lourd que Prefect, mais plus lisible pour ce projet car les DAGs rendent visibles les dependances MLOps : ingestion, replay, dataset candidat, entrainement, evaluation, promotion et reload.
 
@@ -97,9 +97,12 @@ Airflow est plus lourd que Prefect, mais plus lisible pour ce projet car les DAG
 
 ```text
 iqa-api
-iqa-streamlit
 iqa-inference
+iqa-streamlit
+iqa-ingestion
+iqa-replay
 iqa-trainer
+iqa-monitoring
 airflow-webserver
 airflow-scheduler
 mlflow
@@ -123,6 +126,7 @@ backup
 | Service | Port interne |
 |---|---:|
 | FastAPI | 8000 |
+| Inference PyTorch | 8100 |
 | Streamlit | 8501 |
 | MLflow | 5000 |
 | MinIO API | 9000 |
@@ -204,23 +208,24 @@ Le SSD de 500 Go est suffisant pour le MVP, mais impose une discipline de retent
 | Manifests CSV | Conserver dans Git si taille raisonnable |
 | DVC remote `iqa-dvc` | garder versions utiles, nettoyage DVC periodique |
 | MLflow artifacts | bucket `mlflow-artifacts`, garder runs promus et candidats recents |
-| Modeles | bucket `iqa-models`, garder `prod`, `previous_prod`, candidats archives |
+| Modeles | bucket `iqa-models`, artefacts candidats, promus et archives ; statut prod dans MLflow |
 | Heatmaps | bucket `iqa-heatmaps`, expiration automatique des lots, retention curated |
 | Logs applicatifs | Rotation automatique |
 | Prometheus | Retention courte a moyenne pour MVP |
 
 Regle simple MVP :
 ```text
-prod + previous_prod + 3 derniers candidats + rapports de validation
+prod MLflow + version rollback MLflow + 3 derniers candidats + rapports de validation
 ```
 
 ## 10. Repartition des ressources
 
 | Service | CPU/RAM | GPU |
 |---|---|---|
-| FastAPI | Faible a moyen | Non ou indirect |
+| FastAPI API | Faible a moyen | Non |
 | Inference PyTorch | Moyen | Oui |
 | Training Feature-AE | Moyen a eleve | Oui |
+| Ingestion/replay/monitoring batch | Faible a moyen | Non sauf calculs optionnels |
 | Streamlit | Faible | Non |
 | MLflow | Faible | Non |
 | MinIO | Faible a moyen | Non |
@@ -228,7 +233,10 @@ prod + previous_prod + 3 derniers candidats + rapports de validation
 | Prometheus/Grafana | Faible | Non |
 | Airflow webserver/scheduler | Moyen | Non |
 
-Bonne pratique : eviter de lancer un entrainement Feature-AE lourd pendant une demonstration d'inference temps reel. Les DAGs Airflow doivent declencher les traitements longs de maniere controlee, avec `LocalExecutor` et une concurrence limitee.
+Bonne pratique : l'inference et le training sont des services separes, mais ils
+partagent la meme RTX 3060. Airflow doit utiliser un pool ou verrou GPU avec
+`max_active_tasks=1`. Pendant une demonstration, `iqa-inference` est prioritaire
+et les entrainements lourds doivent etre suspendus ou controles.
 
 ## 11. Securite minimale
 
@@ -240,7 +248,7 @@ Pour un serveur local de demonstration :
 - URLs presignees courtes pour l'affichage des heatmaps si necessaire ;
 - reverse proxy unique en entree ;
 - ports internes non exposes si possible ;
-- sauvegarde reguliere de PostgreSQL, MLflow, manifests et modeles promus ;
+- sauvegarde reguliere de la base `iqa_metadata`, des manifests et des modeles promus ;
 - separation claire entre donnees brutes, simulations et artefacts de production ;
 - pas d'exposition Internet directe sans VPN ou tunnel controle.
 
@@ -276,3 +284,25 @@ Ubuntu Server 24.04 LTS
 Cette configuration est coherente avec le cadrage projet, a condition de conserver Kubernetes hors perimetre et de mettre en place une politique de retention des artefacts.
 
 Decision explicite : la procedure officielle de deploiement est `Ubuntu Server -> Docker Compose -> dvc pull -> docker compose up`. Windows + WSL2 peut rester un environnement de developpement individuel, mais pas la cible serveur retenue.
+
+## 13. Decisions de convergence infrastructure
+
+Le pyproject.toml racine reste conserve pour le repo initial. L'isolation fine
+se fait d'abord par Docker Compose ; une migration `services/` est reportee.
+
+`iqa-api` et `iqa-inference` restent deux services separes dans l'architecture
+cible. Airflow orchestre par contrats HTTP ou commandes batch.
+
+PostgreSQL est une seule instance avec trois bases logiques :
+
+```text
+iqa_metadata
+mlflow
+airflow
+```
+
+MLflow Registry est la source de verite de la promotion et du rollback. MinIO
+stocke les artefacts, sans prefixe S3 `prod` faisant autorite.
+
+Les faits metier portent `event_time`, `recorded_at` et `is_simulated` afin de
+separer le temps rejoue, le temps systeme et la nature simulation/production.

@@ -24,6 +24,12 @@ class PieceEvent:
     lot_id: str
     source_class: str
     images: tuple[IngestedImage, ...]
+    event_time: str = ""
+    recorded_at: str = ""
+
+    @property
+    def is_simulated(self) -> bool:
+        return self.source == "historical_replay"
 
 
 __all__ = ["IngestedImage", "IngestionSource", "PieceEvent"]

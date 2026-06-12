@@ -30,11 +30,16 @@ def test_piece_event_accepts_replay_and_production_sources(source: str) -> None:
         lot_id="lot-001",
         source_class="Casting_class1",
         images=[image],
+        event_time="2026-06-12T08:00:00Z",
+        recorded_at="2026-06-12T08:00:02Z",
     )
 
     assert isinstance(event, PieceEvent)
     assert event.source == source
     assert event.images == (image,)
+    assert event.event_time == "2026-06-12T08:00:00Z"
+    assert event.recorded_at == "2026-06-12T08:00:02Z"
+    assert event.is_simulated is (source == "historical_replay")
 
 
 def test_piece_event_requires_at_least_one_image() -> None:

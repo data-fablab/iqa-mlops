@@ -3,7 +3,21 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from iqa.api.main import PredictRequest, app, health, model_version, predict
+from iqa.api.main import (
+    FeedbackRequest,
+    PieceEventPredictRequest,
+    PredictRequest,
+    ReloadModelRequest,
+    app,
+    feedback,
+    health,
+    model_version,
+    predict,
+    predict_piece_event,
+    reload_model,
+    replay_scenarios,
+)
+from iqa.inference.service import health as inference_health
 
 
 def test_api_app_exposes_phase_1_contract_routes() -> None:
@@ -12,6 +26,10 @@ def test_api_app_exposes_phase_1_contract_routes() -> None:
     assert "/health" in route_paths
     assert "/model/version" in route_paths
     assert "/predict" in route_paths
+    assert "/piece-events/{event_id}/predict" in route_paths
+    assert "/feedback" in route_paths
+    assert "/replay-scenarios" in route_paths
+    assert "/admin/reload-model" in route_paths
 
 
 def test_health() -> None:
@@ -28,7 +46,52 @@ def test_model_version_reads_manifest_skeletons() -> None:
 def test_predict_is_explicit_placeholder() -> None:
     request = PredictRequest(piece_event_id="piece-1", scenario_id="demo", image_uri="s3://bucket/key.jpg")
 
-    with pytest.raises(HTTPException) as exc:
-        predict(request)
+    response = predict(request)
 
-    assert exc.value.status_code == 501
+    assert response["delegated_to"] == "iqa-inference"
+    assert response["prediction"]["decision"] == "Vert"
+
+
+def test_piece_event_predict_uses_path_event_id() -> None:
+    response = predict_piece_event(
+        "piece-from-path",
+        PieceEventPredictRequest(scenario_id="demo", image_uri="s3://bucket/key.jpg"),
+    )
+
+    assert response["prediction"]["piece_event_id"] == "piece-from-path"
+
+
+def test_inference_service_health() -> None:
+    assert inference_health() == {"status": "ok", "service": "iqa-inference"}
+
+
+def test_feedback_accepts_oracle_gt() -> None:
+    response = feedback(FeedbackRequest(piece_event_id="piece-1", scenario_id="demo", gt_mask_has_defect=True))
+
+    assert response["accepted"] is True
+    assert response["feedback"]["feedback_source"] == "oracle_gt"
+    assert response["feedback"]["verdict"] == "defective"
+
+
+def test_feedback_rejects_human_sophie_for_mvp() -> None:
+    response = feedback(FeedbackRequest(piece_event_id="piece-1", scenario_id="demo", feedback_source="human_sophie"))
+
+    assert response["accepted"] is False
+    assert "oracle_gt" in response["reason"]
+
+
+def test_admin_reload_requires_token_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
+
+    with pytest.raises(HTTPException) as exc_info:
+        reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="bad")
+
+    assert exc_info.value.status_code == 401
+    response = reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
+    assert response["source_of_truth"] == "mlflow_registry"
+
+
+def test_replay_scenarios_endpoint() -> None:
+    scenario_ids = {scenario["scenario_id"] for scenario in replay_scenarios()}
+
+    assert {"production_replay_natural", "drift_domain_extension"} <= scenario_ids

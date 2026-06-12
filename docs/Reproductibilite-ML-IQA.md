@@ -18,6 +18,11 @@ dataset source Casting
 
 Le ROI segmenter et le teacher ResNet18 sont figes. Le RD Feature-AE est le seul modele entrainable dans le MVP.
 
+Les contrats detailles des deux modeles sont separes :
+
+- [Modele Feature-AE IQA](Modele-Feature-AE-IQA.md) ;
+- [Modele Segmentation ROI IQA](Modele-Segmentation-ROI-IQA.md).
+
 ## Preprocessing Feature-AE
 
 Le preprocessing retenu reprend le principe de la source :
