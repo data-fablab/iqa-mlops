@@ -20,8 +20,15 @@ Creer `validation_set_v001` avant tout replay :
 
 Les gates de promotion et go/no-go sont calculees sur ce jeu.
 
+La decision ADR 0005 ajoute ensuite `calibration_set_v001`. L'invariant complet
+devient donc :
+
+```text
+bootstrap ∩ calibration ∩ replay ∩ validation = vide
+```
+
 ## Consequences
 
-- Les plans de replay doivent exclure `validation_set_v001`.
+- Les plans de replay doivent exclure `validation_set_v001` et `calibration_set_v001`.
 - L'evaluation devient credible pour le jury.
-- Un test automatique doit garantir la disjonction entre bootstrap, replay et validation.
+- Un test automatique doit garantir la disjonction entre bootstrap, calibration, replay et validation.

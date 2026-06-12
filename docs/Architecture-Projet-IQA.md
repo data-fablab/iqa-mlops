@@ -208,6 +208,7 @@ Sorties :
 ```text
 metadata + validation_set_v001
 -> bootstrap hors replay
+-> calibration_set_v001 hors replay
 -> production_replay_natural
 -> drift_domain_extension
 -> lots horodates
@@ -221,7 +222,7 @@ Sorties :
 
 Invariant :
 ```text
-bootstrap ∩ replay ∩ validation_set_v001 = vide
+bootstrap ∩ calibration ∩ replay ∩ validation = vide
 ```
 
 ### `iqa_lifecycle.py`
@@ -243,7 +244,7 @@ monitoring/feedback
 Contraintes :
 - aucun defaut dans le train normal ;
 - aucune ROI warning/fail dans le train normal ;
-- aucun piece event du validation set dans le train ou le replay ;
+- aucun piece event du validation set ou du calibration set dans le train ou le replay ;
 - le ROI segmenter et le teacher restent figes.
 
 ### `iqa_monitoring.py`
@@ -267,6 +268,7 @@ data/metadata/       -> manifests CSV
 data/processed/      -> ROI, features, heatmaps, exports
 data/model_datasets/ -> datasets candidats Feature-AE
 data/validation/     -> validation_set_v001
+data/metadata/       -> calibration_set_v001
 ```
 
 Stockage objet MinIO :
@@ -289,6 +291,7 @@ casting_flux_replay_plan_natural.csv
 casting_flux_replay_plan_drift.csv
 replay_scenarios.csv
 validation_set_v001.csv
+calibration_set_v001.csv
 ```
 
 ## 7. Package `src/iqa`
@@ -388,6 +391,7 @@ Tests attendus :
 - DVC utilise le remote `s3://iqa-dvc`.
 - Le module `src/iqa/storage` est le seul a parler a MinIO/boto3.
 - Le validation set est fige avant replay et hors calibration.
+- Le calibration set est good-only et exclu de bootstrap, replay, train et validation.
 - Les scenarios sont isoles par `scenario_id`.
 - L'interface Sophie est une vitrine MVP ; le feedback operationnel est l'oracle GT.
 - MLflow Registry est la source de verite de la promotion et du rollback.

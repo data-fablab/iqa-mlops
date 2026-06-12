@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 iqa-build-inventory = "scripts.build_casting_inventory:main"
+iqa-finalize-data-phase1 = "scripts.finalize_phase1_data_contracts:main"
 iqa-build-flux-plan = "scripts.build_casting_flux_plan:main"
 iqa-simulate-lifecycle = "scripts.simulate_iqa_mvp_lifecycle:main"
 iqa-prepare-sim-env = "scripts.prepare_iqa_mvp_sim_environment:main"
