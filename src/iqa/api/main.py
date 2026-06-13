@@ -33,6 +33,7 @@ app = FastAPI(title="Industrial Quality Assistant API", version="0.1.0")
 
 PREDICTION_STORE: dict[str, dict[str, Any]] = {}
 FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
+DISPLAY_FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
 
 
 # Legacy inline Pydantic schemas kept temporarily for review traceability.
@@ -181,13 +182,31 @@ def feedback(
 
     prediction = _get_open_prediction_for_feedback(request)
 
-    if request.feedback_source != "oracle_gt":
+    if request.feedback_source == "human_sophie":
+        DISPLAY_FEEDBACK_STORE[request.prediction_id] = {
+            "prediction_id": request.prediction_id,
+            "piece_event_id": request.piece_event_id,
+            "scenario_id": request.scenario_id,
+            "feedback_source": "human_sophie",
+            "display_decision_source": "human_sophie",
+            "train_eligibility_source": "oracle_gt",
+            "eligible_for_train": False,
+            "feedback_closed": False,
+            "reason": "human_sophie is accepted for display only; oracle_gt remains sovereign for train eligibility.",
+        }
+
         return {
-            "accepted": False,
+            "accepted": True,
             "prediction_id": request.prediction_id,
             "feedback_closed": False,
-            "reason": "MVP accepts only oracle_gt feedback; human_sophie is a future interface.",
+            "display_decision_source": "human_sophie",
+            "train_eligibility_source": "oracle_gt",
+            "eligible_for_train": False,
+            "reason": "human_sophie is accepted for display only; oracle_gt remains sovereign for train eligibility.",
         }
+
+    if request.feedback_source != "oracle_gt":
+        raise HTTPException(status_code=400, detail="Unknown feedback_source.")
 
     verdict = oracle_gt_verdict(
         OracleFeedbackRequest(
@@ -202,21 +221,38 @@ def feedback(
     prediction["feedback_closed"] = True
     prediction["feedback_closed_at"] = closed_at
 
+    verdict_dict = verdict.to_dict()
+    eligible_for_train = not request.gt_mask_has_defect
+
     FEEDBACK_STORE[request.prediction_id] = {
         "prediction_id": request.prediction_id,
         "piece_event_id": request.piece_event_id,
         "scenario_id": request.scenario_id,
-        "feedback_source": request.feedback_source,
+        "feedback_source": "oracle_gt",
         "feedback_closed": True,
         "closed_at": closed_at,
-        "verdict": verdict.to_dict(),
+        "verdict": verdict_dict,
+        "display_decision_source": "human_sophie"
+        if request.prediction_id in DISPLAY_FEEDBACK_STORE
+        else "oracle_gt",
+        "train_eligibility_source": "oracle_gt",
+        "eligible_for_train": eligible_for_train,
     }
+
+    display_decision_source = (
+        "human_sophie"
+        if request.prediction_id in DISPLAY_FEEDBACK_STORE
+        else "oracle_gt"
+    )
 
     return {
         "accepted": True,
         "prediction_id": request.prediction_id,
         "feedback_closed": True,
-        "feedback": verdict.to_dict(),
+        "display_decision_source": display_decision_source,
+        "train_eligibility_source": "oracle_gt",
+        "eligible_for_train": eligible_for_train,
+        "feedback": verdict_dict,
     }
 
 
