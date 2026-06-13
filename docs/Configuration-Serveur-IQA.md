@@ -318,6 +318,19 @@ IQA_ADMIN_TOKEN
 IQA_SERVICE_TOKEN
 ```
 
+MLflow valide le header `Host` pour limiter les attaques DNS rebinding. Les
+adresses exposees doivent donc etre listees avec et sans port dans :
+
+```text
+IQA_MLFLOW_ALLOWED_HOSTS
+```
+
+Exemple pour le serveur Z420 :
+
+```text
+localhost,localhost:5000,127.0.0.1,127.0.0.1:5000,10.0.0.27,10.0.0.27:5000,100.64.19.73,100.64.19.73:5000,mlflow,mlflow:5000
+```
+
 Demarrage socle :
 
 ```bash
