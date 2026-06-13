@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+# from pydantic import BaseModel, Field
+from iqa.api.schemas import (
+    FeedbackRequest,
+    PieceEventPredictRequest,
+    PredictRequest,
+    ReloadModelRequest,
+)
+
 
 from iqa.feedback import OracleFeedbackRequest, oracle_gt_verdict
 from iqa.inference.contracts import InferenceRequest, placeholder_inference
@@ -23,6 +30,10 @@ FEATURE_AE_MANIFEST = BASE_DIR / "models" / "manifests" / "rd_feature_ae_gated_v
 app = FastAPI(title="Industrial Quality Assistant API", version="0.1.0")
 
 
+# Legacy inline Pydantic schemas kept temporarily for review traceability.
+# They were moved to src/iqa/api/schemas.py to centralize API contracts.
+# This block can be removed after tests and review confirm the refactor.
+'''
 class PredictRequest(BaseModel):
     piece_event_id: str
     scenario_id: str = "production_replay_natural"
@@ -45,6 +56,7 @@ class FeedbackRequest(BaseModel):
 class ReloadModelRequest(BaseModel):
     scenario_id: str = "production_replay_natural"
     stage: str = "prod"
+'''
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:
