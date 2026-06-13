@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
 # from pydantic import BaseModel, Field
@@ -98,10 +100,31 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             image_uri=request.image_uri,
         )
     )
+
+    prediction_id = f"pred_{uuid4().hex}"
+    created_at = datetime.now(timezone.utc).isoformat()
+    prediction = inference_result.to_dict()
+    prediction["prediction_id"] = prediction_id
+    prediction["image_uri"] = request.image_uri
+    prediction["model_version"] = prediction.get("feature_ae_version")
+    prediction["audit_logged"] = True
+
     return {
         "service": "iqa-api",
         "delegated_to": "iqa-inference",
-        "prediction": inference_result.to_dict(),
+        "prediction": prediction,
+        "audit": {
+            "audit_logged": True,
+            "prediction_id": prediction_id,
+            "piece_event_id": request.piece_event_id,
+            "scenario_id": request.scenario_id,
+            "image_uri": request.image_uri,
+            "decision": prediction["decision"],
+            "model_version": prediction["feature_ae_version"],
+            "roi_model_version": prediction["roi_model_version"],
+            "created_at": created_at,
+            "audit_sink": "api_response_mvp",
+        },
     }
 
 
