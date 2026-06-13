@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from iqa.api.main import (
     ADMIN_RELOAD_LOG,
+    AI_SECURITY_METRICS,
     FeedbackRequest,
     PieceEventPredictRequest,
     PredictRequest,
@@ -14,6 +15,7 @@ from iqa.api.main import (
     feedback,
     health,
     model_version,
+    metrics,
     predict,
     predict_piece_event,
     reload_model,
@@ -261,6 +263,57 @@ def test_feedback_rejects_prediction_scenario_mismatch() -> None:
         )
 
     assert exc_info.value.status_code == 409
+
+
+
+def test_metrics_exposes_ai_security_counters() -> None:
+    body = metrics()
+
+    assert "iqa_feedback_conflict_total" in body
+    assert "iqa_ai_security_incident_total" in body
+    assert "iqa_unsafe_train_blocked_total" in body
+    assert "iqa_invalid_feedback_total" in body
+    assert "iqa_reload_refused_total" in body
+
+
+def test_metrics_count_feedback_conflict_and_train_block() -> None:
+    for key in AI_SECURITY_METRICS:
+        AI_SECURITY_METRICS[key] = 0
+
+    prediction_response = predict(
+        PredictRequest(piece_event_id="piece-metrics", scenario_id="demo", image_uri="s3://bucket/key.jpg")
+    )
+    prediction_id = prediction_response["prediction"]["prediction_id"]
+
+    with pytest.raises(HTTPException):
+        feedback(
+            FeedbackRequest(
+                prediction_id=prediction_id,
+                piece_event_id="piece-metrics-other",
+                scenario_id="demo",
+                gt_mask_has_defect=True,
+            )
+        )
+
+    prediction_response = predict(
+        PredictRequest(piece_event_id="piece-metrics-human", scenario_id="demo", image_uri="s3://bucket/key.jpg")
+    )
+    prediction_id = prediction_response["prediction"]["prediction_id"]
+
+    feedback(
+        FeedbackRequest(
+            prediction_id=prediction_id,
+            piece_event_id="piece-metrics-human",
+            scenario_id="demo",
+            feedback_source="human_sophie",
+        )
+    )
+
+    body = metrics()
+
+    assert "iqa_feedback_conflict_total 1" in body
+    assert "iqa_ai_security_incident_total 1" in body
+    assert "iqa_unsafe_train_blocked_total 1" in body
 
 
 def test_admin_reload_fails_when_admin_token_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
