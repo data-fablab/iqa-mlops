@@ -343,6 +343,26 @@ docker compose --env-file ../.env up -d postgres minio minio-init mlflow prometh
 docker compose ps
 ```
 
+Initialisation Airflow :
+
+```bash
+cd /opt/iqa/iqa-mlops/deploy
+docker compose --env-file ../.env run --rm airflow-webserver airflow db migrate
+docker compose --env-file ../.env run --rm airflow-webserver airflow users create \
+  --username admin \
+  --firstname IQA \
+  --lastname Admin \
+  --role Admin \
+  --email admin@example.local \
+  --password admin
+docker compose --env-file ../.env up -d airflow-webserver airflow-scheduler
+```
+
+Les services Airflow utilisent la base PostgreSQL `airflow` via
+`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`. Ne pas initialiser Airflow sans les
+variables du `docker-compose.yml`, sinon la base par defaut du conteneur peut
+etre utilisee a la place.
+
 Initialisation DVC cote serveur :
 
 ```bash

@@ -52,12 +52,22 @@ services:
   airflow-webserver:
     image: apache/airflow:2.10.5-python3.12
     command: webserver
+    env_file: ../.env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
     ports: ["8080:8080"]
     depends_on: [postgres]
 
   airflow-scheduler:
     image: apache/airflow:2.10.5-python3.12
     command: scheduler
+    env_file: ../.env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
     depends_on: [postgres]
 
   mlflow:
