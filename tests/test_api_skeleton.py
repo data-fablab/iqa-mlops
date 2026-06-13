@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from iqa.api.main import (
     FeedbackRequest,
@@ -200,6 +201,65 @@ def test_feedback_rejects_closed_prediction() -> None:
                 prediction_id=prediction_id,
                 piece_event_id="piece-closed",
                 scenario_id="demo",
+                gt_mask_has_defect=True,
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+
+def test_feedback_rejects_unknown_feedback_source_contract() -> None:
+    with pytest.raises(ValidationError):
+        FeedbackRequest(
+            prediction_id="pred-contract-source",
+            piece_event_id="piece-contract-source",
+            scenario_id="demo",
+            feedback_source="unknown_source",
+        )
+
+
+def test_feedback_rejects_forbidden_feedback_status_contract() -> None:
+    with pytest.raises(ValidationError):
+        FeedbackRequest(
+            prediction_id="pred-contract-status",
+            piece_event_id="piece-contract-status",
+            scenario_id="demo",
+            feedback_status="invalid_status",
+        )
+
+
+def test_feedback_rejects_prediction_piece_event_mismatch() -> None:
+    prediction_response = predict(
+        PredictRequest(piece_event_id="piece-valid", scenario_id="demo", image_uri="s3://bucket/key.jpg")
+    )
+    prediction_id = prediction_response["prediction"]["prediction_id"]
+
+    with pytest.raises(HTTPException) as exc_info:
+        feedback(
+            FeedbackRequest(
+                prediction_id=prediction_id,
+                piece_event_id="piece-other",
+                scenario_id="demo",
+                gt_mask_has_defect=True,
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+def test_feedback_rejects_prediction_scenario_mismatch() -> None:
+    prediction_response = predict(
+        PredictRequest(piece_event_id="piece-scenario", scenario_id="demo", image_uri="s3://bucket/key.jpg")
+    )
+    prediction_id = prediction_response["prediction"]["prediction_id"]
+
+    with pytest.raises(HTTPException) as exc_info:
+        feedback(
+            FeedbackRequest(
+                prediction_id=prediction_id,
+                piece_event_id="piece-scenario",
+                scenario_id="other-scenario",
                 gt_mask_has_defect=True,
             )
         )
