@@ -80,18 +80,91 @@ def test_inference_service_metrics() -> None:
 
 
 def test_feedback_accepts_oracle_gt() -> None:
-    response = feedback(FeedbackRequest(piece_event_id="piece-1", scenario_id="demo", gt_mask_has_defect=True))
+    prediction_response = predict(
+        PredictRequest(piece_event_id="piece-feedback-ok", scenario_id="demo", image_uri="s3://bucket/key.jpg")
+    )
+    prediction_id = prediction_response["prediction"]["prediction_id"]
+
+    response = feedback(
+        FeedbackRequest(
+            prediction_id=prediction_id,
+            piece_event_id="piece-feedback-ok",
+            scenario_id="demo",
+            gt_mask_has_defect=True,
+        )
+    )
 
     assert response["accepted"] is True
+    assert response["prediction_id"] == prediction_id
+    assert response["feedback_closed"] is True
     assert response["feedback"]["feedback_source"] == "oracle_gt"
     assert response["feedback"]["verdict"] == "defective"
 
 
 def test_feedback_rejects_human_sophie_for_mvp() -> None:
-    response = feedback(FeedbackRequest(piece_event_id="piece-1", scenario_id="demo", feedback_source="human_sophie"))
+    prediction_response = predict(
+        PredictRequest(piece_event_id="piece-human-sophie", scenario_id="demo", image_uri="s3://bucket/key.jpg")
+    )
+    prediction_id = prediction_response["prediction"]["prediction_id"]
+
+    response = feedback(
+        FeedbackRequest(
+            prediction_id=prediction_id,
+            piece_event_id="piece-human-sophie",
+            scenario_id="demo",
+            feedback_source="human_sophie",
+        )
+    )
 
     assert response["accepted"] is False
+    assert response["prediction_id"] == prediction_id
+    assert response["feedback_closed"] is False
     assert "oracle_gt" in response["reason"]
+
+
+def test_feedback_rejects_unknown_prediction_id() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        feedback(
+            FeedbackRequest(
+                prediction_id="pred_unknown",
+                piece_event_id="piece-unknown",
+                scenario_id="demo",
+                gt_mask_has_defect=True,
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+def test_feedback_rejects_closed_prediction() -> None:
+    prediction_response = predict(
+        PredictRequest(piece_event_id="piece-closed", scenario_id="demo", image_uri="s3://bucket/key.jpg")
+    )
+    prediction_id = prediction_response["prediction"]["prediction_id"]
+
+    first_response = feedback(
+        FeedbackRequest(
+            prediction_id=prediction_id,
+            piece_event_id="piece-closed",
+            scenario_id="demo",
+            gt_mask_has_defect=True,
+        )
+    )
+
+    assert first_response["accepted"] is True
+    assert first_response["feedback_closed"] is True
+
+    with pytest.raises(HTTPException) as exc_info:
+        feedback(
+            FeedbackRequest(
+                prediction_id=prediction_id,
+                piece_event_id="piece-closed",
+                scenario_id="demo",
+                gt_mask_has_defect=True,
+            )
+        )
+
+    assert exc_info.value.status_code == 409
 
 
 def test_admin_reload_requires_token_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
