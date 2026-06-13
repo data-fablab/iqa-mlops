@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from iqa.api.main import (
+    ADMIN_RELOAD_LOG,
     FeedbackRequest,
     PieceEventPredictRequest,
     PredictRequest,
@@ -267,15 +268,41 @@ def test_feedback_rejects_prediction_scenario_mismatch() -> None:
     assert exc_info.value.status_code == 409
 
 
+def test_admin_reload_fails_when_admin_token_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    ADMIN_RELOAD_LOG.clear()
+    monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
+
+    assert exc_info.value.status_code == 503
+    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "refused"
+    assert ADMIN_RELOAD_LOG[-1]["accepted"] is False
+    assert ADMIN_RELOAD_LOG[-1]["reason"] == "IQA_ADMIN_TOKEN is not configured."
+
+
 def test_admin_reload_requires_token_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    ADMIN_RELOAD_LOG.clear()
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
 
     with pytest.raises(HTTPException) as exc_info:
         reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="bad")
 
     assert exc_info.value.status_code == 401
+    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "refused"
+    assert ADMIN_RELOAD_LOG[-1]["accepted"] is False
+    assert ADMIN_RELOAD_LOG[-1]["reason"] == "Missing or invalid IQA_ADMIN_TOKEN."
+
     response = reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
+
+    assert response["accepted"] is True
+    assert response["reload_status"] == "accepted"
     assert response["source_of_truth"] == "mlflow_registry"
+    assert response["audit_logged"] is True
+    assert response["audit"]["reload_status"] == "accepted"
+    assert response["audit"]["accepted"] is True
+    assert response["audit"]["scenario_id"] == "demo"
+    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "accepted"
 
 
 def test_replay_scenarios_endpoint() -> None:

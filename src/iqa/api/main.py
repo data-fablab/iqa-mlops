@@ -34,6 +34,7 @@ app = FastAPI(title="Industrial Quality Assistant API", version="0.1.0")
 PREDICTION_STORE: dict[str, dict[str, Any]] = {}
 FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
 DISPLAY_FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
+ADMIN_RELOAD_LOG: list[dict[str, Any]] = []
 
 
 # Legacy inline Pydantic schemas kept temporarily for review traceability.
@@ -261,21 +262,96 @@ def metrics() -> str:
     return "# HELP iqa_api_up IQA API availability\n# TYPE iqa_api_up gauge\niqa_api_up 1\n"
 
 
+def _append_admin_reload_log(
+    *,
+    prediction_id: str | None = None,
+    scenario_id: str,
+    stage: Any,
+    reload_status: str,
+    accepted: bool,
+    reason: str,
+    model_name: str | None = None,
+) -> dict[str, Any]:
+    audit_event = {
+        "reload_event_id": f"reload_{uuid4().hex}",
+        "prediction_id": prediction_id,
+        "scenario_id": scenario_id,
+        "stage": getattr(stage, "value", stage),
+        "reload_status": reload_status,
+        "accepted": accepted,
+        "reason": reason,
+        "registered_model_name": model_name,
+        "source_of_truth": "mlflow_registry",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ADMIN_RELOAD_LOG.append(audit_event)
+    return audit_event
+
+
 @app.post("/admin/reload-model")
 def reload_model(
     request: ReloadModelRequest,
     x_iqa_admin_token: str | None = Header(default=None, alias="X-IQA-Admin-Token"),
 ) -> dict[str, Any]:
-    _require_token("IQA_ADMIN_TOKEN", x_iqa_admin_token)
+    expected_token = os.getenv("IQA_ADMIN_TOKEN")
+
+    if not expected_token:
+        audit_event = _append_admin_reload_log(
+            scenario_id=request.scenario_id,
+            stage=request.stage,
+            reload_status="refused",
+            accepted=False,
+            reason="IQA_ADMIN_TOKEN is not configured.",
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "reason": "IQA_ADMIN_TOKEN is not configured.",
+                "audit_logged": True,
+                "reload_event_id": audit_event["reload_event_id"],
+            },
+        )
+
+    if x_iqa_admin_token != expected_token:
+        audit_event = _append_admin_reload_log(
+            scenario_id=request.scenario_id,
+            stage=request.stage,
+            reload_status="refused",
+            accepted=False,
+            reason="Missing or invalid IQA_ADMIN_TOKEN.",
+        )
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "reason": "Missing or invalid IQA_ADMIN_TOKEN.",
+                "audit_logged": True,
+                "reload_event_id": audit_event["reload_event_id"],
+            },
+        )
+
     model_name = registered_model_name(request.scenario_id)
+    target = ModelRegistryRef(
+        scenario_id=request.scenario_id,
+        registered_model_name=model_name,
+        stage=request.stage,
+    ).to_dict()
+
+    audit_event = _append_admin_reload_log(
+        scenario_id=request.scenario_id,
+        stage=request.stage,
+        reload_status="accepted",
+        accepted=True,
+        reason="Admin reload accepted.",
+        model_name=model_name,
+    )
+
     return {
         "accepted": True,
+        "reload_status": "accepted",
         "source_of_truth": "mlflow_registry",
-        "target": ModelRegistryRef(
-            scenario_id=request.scenario_id,
-            registered_model_name=model_name,
-            stage=request.stage,
-        ).to_dict(),
+        "audit_logged": True,
+        "audit": audit_event,
+        "target": target,
     }
 
 
@@ -284,6 +360,7 @@ __all__ = [
     "PieceEventPredictRequest",
     "PredictRequest",
     "ReloadModelRequest",
+    "ADMIN_RELOAD_LOG",
     "app",
     "feedback",
     "health",
