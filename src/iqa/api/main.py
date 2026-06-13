@@ -36,6 +36,14 @@ FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
 DISPLAY_FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
 ADMIN_RELOAD_LOG: list[dict[str, Any]] = []
 
+AI_SECURITY_METRICS: dict[str, int] = {
+    "feedback_conflict_total": 0,
+    "ai_security_incident_total": 0,
+    "unsafe_train_blocked_total": 0,
+    "invalid_feedback_total": 0,
+    "reload_refused_total": 0,
+}
+
 
 # Legacy inline Pydantic schemas kept temporarily for review traceability.
 # They were moved to src/iqa/api/schemas.py to centralize API contracts.
@@ -76,6 +84,10 @@ def _require_token(env_name: str, provided_token: str | None) -> None:
     expected = os.getenv(env_name)
     if expected and provided_token != expected:
         raise HTTPException(status_code=401, detail=f"Missing or invalid {env_name}.")
+
+
+def _inc_security_metric(name: str) -> None:
+    AI_SECURITY_METRICS[name] = AI_SECURITY_METRICS.get(name, 0) + 1
 
 
 @app.get("/health")
@@ -160,15 +172,23 @@ def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any
     prediction = PREDICTION_STORE.get(request.prediction_id)
 
     if prediction is None:
+        _inc_security_metric("ai_security_incident_total")
+        _inc_security_metric("invalid_feedback_total")
         raise HTTPException(status_code=404, detail="Unknown prediction_id.")
 
     if prediction["piece_event_id"] != request.piece_event_id:
+        _inc_security_metric("feedback_conflict_total")
+        _inc_security_metric("ai_security_incident_total")
         raise HTTPException(status_code=409, detail="prediction_id does not match piece_event_id.")
 
     if prediction["scenario_id"] != request.scenario_id:
+        _inc_security_metric("feedback_conflict_total")
+        _inc_security_metric("ai_security_incident_total")
         raise HTTPException(status_code=409, detail="prediction_id does not match scenario_id.")
 
     if prediction.get("feedback_closed") is True:
+        _inc_security_metric("invalid_feedback_total")
+        _inc_security_metric("ai_security_incident_total")
         raise HTTPException(status_code=409, detail="Prediction already has a closed feedback.")
 
     return prediction
@@ -184,6 +204,7 @@ def feedback(
     prediction = _get_open_prediction_for_feedback(request)
 
     if request.feedback_source == "human_sophie":
+        _inc_security_metric("unsafe_train_blocked_total")
         DISPLAY_FEEDBACK_STORE[request.prediction_id] = {
             "prediction_id": request.prediction_id,
             "piece_event_id": request.piece_event_id,
@@ -207,6 +228,8 @@ def feedback(
         }
 
     if request.feedback_source != "oracle_gt":
+        _inc_security_metric("invalid_feedback_total")
+        _inc_security_metric("ai_security_incident_total")
         raise HTTPException(status_code=400, detail="Unknown feedback_source.")
 
     verdict = oracle_gt_verdict(
@@ -224,6 +247,8 @@ def feedback(
 
     verdict_dict = verdict.to_dict()
     eligible_for_train = not request.gt_mask_has_defect
+    if not eligible_for_train:
+        _inc_security_metric("unsafe_train_blocked_total")
 
     FEEDBACK_STORE[request.prediction_id] = {
         "prediction_id": request.prediction_id,
@@ -259,7 +284,27 @@ def feedback(
 
 @app.get("/metrics")
 def metrics() -> str:
-    return "# HELP iqa_api_up IQA API availability\n# TYPE iqa_api_up gauge\niqa_api_up 1\n"
+    lines = [
+        "# HELP iqa_api_up IQA API availability",
+        "# TYPE iqa_api_up gauge",
+        "iqa_api_up 1",
+        "# HELP iqa_feedback_conflict_total IQA feedback conflicts detected by API governance",
+        "# TYPE iqa_feedback_conflict_total counter",
+        f"iqa_feedback_conflict_total {AI_SECURITY_METRICS['feedback_conflict_total']}",
+        "# HELP iqa_ai_security_incident_total IQA AI security incidents detected by API governance",
+        "# TYPE iqa_ai_security_incident_total counter",
+        f"iqa_ai_security_incident_total {AI_SECURITY_METRICS['ai_security_incident_total']}",
+        "# HELP iqa_unsafe_train_blocked_total IQA train eligibility blocks for unsafe or non sovereign feedback",
+        "# TYPE iqa_unsafe_train_blocked_total counter",
+        f"iqa_unsafe_train_blocked_total {AI_SECURITY_METRICS['unsafe_train_blocked_total']}",
+        "# HELP iqa_invalid_feedback_total IQA invalid feedback events",
+        "# TYPE iqa_invalid_feedback_total counter",
+        f"iqa_invalid_feedback_total {AI_SECURITY_METRICS['invalid_feedback_total']}",
+        "# HELP iqa_reload_refused_total IQA admin reload refusals",
+        "# TYPE iqa_reload_refused_total counter",
+        f"iqa_reload_refused_total {AI_SECURITY_METRICS['reload_refused_total']}",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _append_admin_reload_log(
@@ -303,6 +348,8 @@ def reload_model(
             accepted=False,
             reason="IQA_ADMIN_TOKEN is not configured.",
         )
+        _inc_security_metric("reload_refused_total")
+        _inc_security_metric("ai_security_incident_total")
         raise HTTPException(
             status_code=503,
             detail={
@@ -320,6 +367,8 @@ def reload_model(
             accepted=False,
             reason="Missing or invalid IQA_ADMIN_TOKEN.",
         )
+        _inc_security_metric("reload_refused_total")
+        _inc_security_metric("ai_security_incident_total")
         raise HTTPException(
             status_code=401,
             detail={
@@ -361,6 +410,7 @@ __all__ = [
     "PredictRequest",
     "ReloadModelRequest",
     "ADMIN_RELOAD_LOG",
+    "AI_SECURITY_METRICS",
     "app",
     "feedback",
     "health",
