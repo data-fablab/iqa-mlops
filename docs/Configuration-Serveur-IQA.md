@@ -298,6 +298,10 @@ uv run --extra cpu --extra data ruff check src scripts tests
 uv run --extra cpu --extra data pytest -q
 ```
 
+Sur le serveur RTX 3060, les tests et taches data restent lances avec
+`--extra cpu --extra data`. Les services ou commandes qui executent PyTorch sur
+GPU doivent utiliser `--extra cu128`.
+
 Configuration environnement :
 
 ```bash
@@ -325,10 +329,10 @@ adresses exposees doivent donc etre listees avec et sans port dans :
 IQA_MLFLOW_ALLOWED_HOSTS
 ```
 
-Exemple pour le serveur Z420 :
+Exemple pour le serveur :
 
 ```text
-localhost,localhost:5000,127.0.0.1,127.0.0.1:5000,10.0.0.27,10.0.0.27:5000,100.64.19.73,100.64.19.73:5000,mlflow,mlflow:5000
+localhost,localhost:5000,127.0.0.1,127.0.0.1:5000,<SERVER_TAILSCALE_IP>,<SERVER_TAILSCALE_IP>:5000,mlflow,mlflow:5000
 ```
 
 Demarrage socle :
@@ -358,11 +362,17 @@ curl http://localhost/api/health
 curl http://localhost:8100/health
 ```
 
-Demarrage inference/trainer GPU RTX3060 :
+Demarrage du stack avec inference/trainer GPU RTX 3060 (`cu128`) :
 
 ```bash
 cd /opt/iqa/iqa-mlops/deploy
-docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml up -d --build iqa-inference iqa-trainer
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+Validation PyTorch CUDA dans le conteneur inference :
+
+```bash
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml exec iqa-inference uv run --extra cu128 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
 Validation GPU Docker :
@@ -374,7 +384,8 @@ docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi
 
 Note : le compose principal reste CPU pour etre portable. Le fichier
 `docker-compose.gpu.yml` active CUDA uniquement pour les services qui en ont
-besoin : `iqa-inference` et `iqa-trainer`.
+besoin : `iqa-inference` et `iqa-trainer`. Sur le serveur IQA, l'extra CUDA de
+reference est `cu128`.
 
 ## 13. Decisions de convergence infrastructure
 

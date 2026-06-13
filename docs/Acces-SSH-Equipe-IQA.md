@@ -90,11 +90,20 @@ git status
 uv run --extra cpu --extra data pytest -q
 ```
 
+Sur le serveur, les tests classiques restent en CPU. Les commandes de training
+ou inference GPU doivent utiliser `--extra cu128`.
+
 Services Docker :
 
 ```bash
 cd /opt/iqa/iqa-mlops/deploy
 docker compose --env-file ../.env ps
+```
+
+Stack Docker avec inference/training GPU :
+
+```bash
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 ```
 
 ## URLs Utiles
