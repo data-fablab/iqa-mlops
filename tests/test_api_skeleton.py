@@ -59,6 +59,15 @@ def test_piece_event_predict_uses_path_event_id() -> None:
     )
 
     assert response["prediction"]["piece_event_id"] == "piece-from-path"
+    assert response["prediction"]["decision"] == "Vert"
+    assert response["prediction"]["prediction_id"].startswith("pred_")
+    assert response["prediction"]["audit_logged"] is True
+    assert response["audit"]["audit_logged"] is True
+    assert response["audit"]["piece_event_id"] == "piece-from-path"
+    assert response["audit"]["scenario_id"] == "demo"
+    assert response["audit"]["image_uri"] == "s3://bucket/key.jpg"
+    assert response["audit"]["decision"] == "Vert"
+    assert response["audit"]["audit_sink"] == "api_response_mvp"
 
 
 def test_inference_service_health() -> None:
