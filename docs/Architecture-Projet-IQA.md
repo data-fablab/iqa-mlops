@@ -277,9 +277,29 @@ s3://iqa-source-datasets -> dataset historique immutable
 s3://iqa-dvc             -> remote DVC
 s3://iqa-ingested-images -> images brutes recues ou rejouees
 s3://mlflow-artifacts  -> artefacts MLflow
+s3://iqa-roi-masks     -> masques ROI produits par le segmenteur fige
 s3://iqa-heatmaps      -> heatmaps et overlays
 s3://iqa-models        -> artefacts modeles candidats, promus et archives
 s3://iqa-backups       -> sauvegardes applicatives
+```
+
+Flux bootstrap et cycle normal :
+
+```text
+bootstrap_v001
+-> feature_ae_bootstrap_events.csv
+-> ROI segmenter fige
+-> data/processed/roi/bootstrap_v001/roi_predictions.csv
+-> dataset Feature-AE V0 good-only + ROI-ok
+
+production_ingest / historical_replay
+-> s3://iqa-ingested-images
+-> ROI segmenter fige
+-> s3://iqa-roi-masks
+-> Feature-AE
+-> s3://iqa-heatmaps
+-> feedback oracle GT
+-> faits et URI PostgreSQL
 ```
 
 Manifests essentiels :

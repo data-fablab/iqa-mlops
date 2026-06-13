@@ -96,6 +96,6 @@ uv run --extra cpu iqa-predict-image `
 
 - Dataset source : `s3://iqa-source-datasets` et/ou DVC.
 - Images ingerees : `s3://iqa-ingested-images`, avec faits et URI dans PostgreSQL.
-- Artefacts : `s3://iqa-models`, `s3://iqa-heatmaps`, `s3://mlflow-artifacts`, `s3://iqa-dvc`.
+- Artefacts : `s3://iqa-models`, `s3://iqa-roi-masks`, `s3://iqa-heatmaps`, `s3://mlflow-artifacts`, `s3://iqa-dvc`.
 
 PostgreSQL stocke les faits et URI. MinIO stocke les fichiers lourds.

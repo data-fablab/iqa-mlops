@@ -8,7 +8,7 @@ Le projet distingue trois familles de donnees. Cette separation doit rester visi
 |---|---|---|---|
 | Dataset source | Historique Casting immutable utilise comme source de replay | `s3://iqa-source-datasets` et/ou DVC | Data / ingestion |
 | Donnees ingerees | Images entrees dans le runtime via `historical_replay` ou `production_ingest` | images dans `s3://iqa-ingested-images`, faits et URI dans PostgreSQL | Ingestion / backend |
-| Artefacts | Sorties produites par les pipelines : heatmaps, modeles, runs, rapports, datasets candidats | buckets dedies MinIO : `iqa-heatmaps`, `iqa-models`, `mlflow-artifacts`, `iqa-dvc` | ML / MLOps |
+| Artefacts | Sorties produites par les pipelines : masques ROI, heatmaps, modeles, runs, rapports, datasets candidats | buckets dedies MinIO : `iqa-roi-masks`, `iqa-heatmaps`, `iqa-models`, `mlflow-artifacts`, `iqa-dvc` | ML / MLOps |
 
 PostgreSQL ne stocke pas les images ni les checkpoints. Il stocke les faits, les statuts, les timestamps, les liens, les versions et les URI.
 
@@ -16,7 +16,7 @@ PostgreSQL ne stocke pas les images ni les checkpoints. Il stocke les faits, les
 
 - Restaurer structure repo, uv, tests, docs et contrats.
 - Documenter dataset source vs donnees ingerees vs artefacts.
-- Definir les buckets MinIO cibles : `iqa-source-datasets`, `iqa-ingested-images`, `iqa-dvc`, `mlflow-artifacts`, `iqa-heatmaps`, `iqa-models`, `iqa-backups`.
+- Definir les buckets MinIO cibles : `iqa-source-datasets`, `iqa-ingested-images`, `iqa-dvc`, `mlflow-artifacts`, `iqa-roi-masks`, `iqa-heatmaps`, `iqa-models`, `iqa-backups`.
 - Definir le contrat d'ingestion commun :
   - `historical_replay` pour le dataset Casting rejoue ;
   - `production_ingest` pour la future arrivee camera / poste qualite / MES.
@@ -41,6 +41,7 @@ artefacts lourds exclus de Git
 - Implementer l'ecriture des evenements, predictions, feedbacks et URI dans PostgreSQL.
 - Implementer lifecycle Feature-AE, monitoring et promotion.
 - Stocker les artefacts dans les buckets dedies :
+  - masques ROI dans `s3://iqa-roi-masks` ;
   - heatmaps et overlays dans `s3://iqa-heatmaps` ;
   - modeles promus/candidats dans `s3://iqa-models` ;
   - runs et artefacts MLflow dans `s3://mlflow-artifacts` ;

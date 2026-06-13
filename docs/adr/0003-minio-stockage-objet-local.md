@@ -18,6 +18,7 @@ iqa-source-datasets
 iqa-dvc
 iqa-ingested-images
 mlflow-artifacts
+iqa-roi-masks
 iqa-heatmaps
 iqa-models
 iqa-backups
@@ -34,6 +35,7 @@ src/iqa/storage/
 - DVC utilise `s3://iqa-dvc` avec `endpointurl` MinIO.
 - Les images brutes recues en `production_ingest` ou rejouees en `historical_replay` sont stockees dans `s3://iqa-ingested-images` quand elles entrent dans le runtime.
 - MLflow stocke ses artefacts dans `s3://mlflow-artifacts`.
+- Les masques ROI produits par le segmenteur fige sont stockes dans `s3://iqa-roi-masks`.
 - Les heatmaps sont stockees dans `s3://iqa-heatmaps`.
 - Les modeles promus et candidats archives sont stockes dans `s3://iqa-models`.
 - Les credentials MinIO restent dans `.env` et ne sont jamais commites.

@@ -10,6 +10,7 @@ IQA_BUCKETS = {
     "dvc": "iqa-dvc",
     "ingested_images": "iqa-ingested-images",
     "mlflow": "mlflow-artifacts",
+    "roi_masks": "iqa-roi-masks",
     "heatmaps": "iqa-heatmaps",
     "models": "iqa-models",
     "backups": "iqa-backups",

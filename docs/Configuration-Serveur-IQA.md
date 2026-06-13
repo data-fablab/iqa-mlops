@@ -190,6 +190,7 @@ iqa-source-datasets
 iqa-dvc
 iqa-ingested-images
 mlflow-artifacts
+iqa-roi-masks
 iqa-heatmaps
 iqa-models
 iqa-backups
@@ -209,6 +210,7 @@ Le SSD de 500 Go est suffisant pour le MVP, mais impose une discipline de retent
 | DVC remote `iqa-dvc` | garder versions utiles, nettoyage DVC periodique |
 | MLflow artifacts | bucket `mlflow-artifacts`, garder runs promus et candidats recents |
 | Modeles | bucket `iqa-models`, artefacts candidats, promus et archives ; statut prod dans MLflow |
+| Masques ROI | bucket `iqa-roi-masks`, masques produits par le segmenteur ROI fige |
 | Heatmaps | bucket `iqa-heatmaps`, expiration automatique des lots, retention curated |
 | Logs applicatifs | Rotation automatique |
 | Prometheus | Retention courte a moyenne pour MVP |
@@ -394,6 +396,23 @@ Validation PyTorch CUDA dans le conteneur inference :
 ```bash
 docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml exec iqa-inference uv run --extra cu128 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
+
+Generation ROI bootstrap V0 sur serveur RTX 3060 :
+
+```bash
+cd /opt/iqa/iqa-mlops
+uv run --extra cu128 --extra data iqa-generate-bootstrap-roi \
+  --manifest data/metadata/feature_ae_bootstrap_events.csv \
+  --image-root data/raw/hss-iad \
+  --checkpoint models/roi_segmenter_v001_fixed/checkpoint.pt \
+  --output-dir data/processed/roi/bootstrap_v001 \
+  --roi-model-version roi_segmenter_v001_fixed \
+  --device cuda
+```
+
+La sortie locale `data/processed/roi/bootstrap_v001` reste hors Git. En cible
+production/replay, ces masques sont stockes dans `s3://iqa-roi-masks` et seuls
+les URI/faits sont conserves dans PostgreSQL.
 
 Validation GPU Docker :
 
