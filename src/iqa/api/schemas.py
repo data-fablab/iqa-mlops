@@ -145,7 +145,7 @@ class PredictionResponse(IQABaseModel):
 
 
 class FeedbackRequest(IQABaseModel):
-    prediction_id: str | None = None
+    prediction_id: str
     piece_event_id: str
     scenario_id: str = DEFAULT_SCENARIO_ID
     feedback_source: FeedbackSource = FeedbackSource.oracle_gt
