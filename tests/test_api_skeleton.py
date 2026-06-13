@@ -101,7 +101,7 @@ def test_feedback_accepts_oracle_gt() -> None:
     assert response["feedback"]["verdict"] == "defective"
 
 
-def test_feedback_rejects_human_sophie_for_mvp() -> None:
+def test_feedback_accepts_human_sophie_for_display_only() -> None:
     prediction_response = predict(
         PredictRequest(piece_event_id="piece-human-sophie", scenario_id="demo", image_uri="s3://bucket/key.jpg")
     )
@@ -116,10 +116,50 @@ def test_feedback_rejects_human_sophie_for_mvp() -> None:
         )
     )
 
-    assert response["accepted"] is False
+    assert response["accepted"] is True
     assert response["prediction_id"] == prediction_id
     assert response["feedback_closed"] is False
+    assert response["display_decision_source"] == "human_sophie"
+    assert response["train_eligibility_source"] == "oracle_gt"
+    assert response["eligible_for_train"] is False
     assert "oracle_gt" in response["reason"]
+
+
+def test_oracle_gt_remains_sovereign_after_human_sophie_feedback() -> None:
+    prediction_response = predict(
+        PredictRequest(piece_event_id="piece-human-then-gt", scenario_id="demo", image_uri="s3://bucket/key.jpg")
+    )
+    prediction_id = prediction_response["prediction"]["prediction_id"]
+
+    human_response = feedback(
+        FeedbackRequest(
+            prediction_id=prediction_id,
+            piece_event_id="piece-human-then-gt",
+            scenario_id="demo",
+            feedback_source="human_sophie",
+        )
+    )
+
+    assert human_response["accepted"] is True
+    assert human_response["feedback_closed"] is False
+    assert human_response["display_decision_source"] == "human_sophie"
+
+    gt_response = feedback(
+        FeedbackRequest(
+            prediction_id=prediction_id,
+            piece_event_id="piece-human-then-gt",
+            scenario_id="demo",
+            feedback_source="oracle_gt",
+            gt_mask_has_defect=False,
+        )
+    )
+
+    assert gt_response["accepted"] is True
+    assert gt_response["feedback_closed"] is True
+    assert gt_response["display_decision_source"] == "human_sophie"
+    assert gt_response["train_eligibility_source"] == "oracle_gt"
+    assert gt_response["eligible_for_train"] is True
+    assert gt_response["feedback"]["verdict"] == "conforme"
 
 
 def test_feedback_rejects_unknown_prediction_id() -> None:
