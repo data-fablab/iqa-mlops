@@ -1,87 +1,50 @@
-# Acces Tailscale Et SSH - Serveur IQA
+# Acces Serveur IQA Via Tailscale
 
 ## Objectif
 
-Donner a l'equipe un acces controle au serveur IQA sans exposer directement le
-SSH sur Internet et sans ouvrir le reseau local de la maison.
+Permettre a l'equipe d'acceder au serveur IQA sans exposer le SSH sur Internet.
+L'acces se fait via Tailscale, puis SSH sur le compte projet partage.
 
-Le serveur IQA est accessible :
+Les vraies valeurs de connexion sont transmises en prive, jamais dans GitHub.
 
 ```text
-LAN local      <SERVER_LAN_IP>
 Tailscale      <SERVER_TAILSCALE_IP>
 Utilisateur    <SSH_USER>
 Hostname       <SERVER_HOSTNAME>
 ```
 
-Pour l'equipe, l'adresse a utiliser est l'adresse Tailscale :
+## Preparer Son Poste
 
-```bash
-ssh <SSH_USER>@<SERVER_TAILSCALE_IP>
-```
-
-## Regle De Securite
-
-Ne pas ouvrir le port `22` de la box Internet vers le serveur.
-
-Tailscale cree un reseau prive chiffre entre les machines autorisees. Les
-membres de l'equipe accedent au serveur via son IP Tailscale, sans rendre le
-serveur visible publiquement.
-
-Important : le serveur ne doit pas etre configure en routeur de sous-reseau
-Tailscale. L'objectif est de donner acces au serveur IQA, pas au reseau local.
-
-## Installation Tailscale
-
-Chaque membre installe Tailscale sur son poste :
+Installer Tailscale :
 
 ```text
 https://tailscale.com/download
 ```
 
-Puis il se connecte au tailnet du projet avec le compte invite par le
-responsable.
+Se connecter au tailnet du projet avec l'invitation fournie.
 
-Sur Windows, les commandes Tailscale peuvent etre lancees avec :
+Sur Windows, si la commande `tailscale` n'est pas reconnue, utiliser :
 
 ```powershell
-& "C:\Program Files\Tailscale\tailscale.exe" status
 & "C:\Program Files\Tailscale\tailscale.exe" up
+& "C:\Program Files\Tailscale\tailscale.exe" status
 ```
 
-Si la commande `tailscale` fonctionne directement dans le terminal, le chemin
-complet n'est pas necessaire.
-
-## Verification Tailscale
-
-Depuis le poste du membre :
+Verifier que le serveur est joignable :
 
 ```powershell
-& "C:\Program Files\Tailscale\tailscale.exe" status
 & "C:\Program Files\Tailscale\tailscale.exe" ping <SERVER_TAILSCALE_IP>
-```
-
-Resultat attendu :
-
-```text
-pong from <SERVER_HOSTNAME> (<SERVER_TAILSCALE_IP>)
-```
-
-Si `status` indique `Logged out`, relancer :
-
-```powershell
-& "C:\Program Files\Tailscale\tailscale.exe" up
 ```
 
 ## Connexion SSH
 
-Connexion au serveur :
+Depuis un terminal :
 
-```powershell
+```bash
 ssh <SSH_USER>@<SERVER_TAILSCALE_IP>
 ```
 
-Au premier acces, SSH affiche une question du type :
+Au premier acces, SSH demande de confirmer l'empreinte du serveur :
 
 ```text
 Are you sure you want to continue connecting (yes/no/[fingerprint])?
@@ -93,7 +56,9 @@ Repondre :
 yes
 ```
 
-Verification apres connexion :
+Le mot de passe du compte projet est communique en prive par le responsable.
+
+## Verification Apres Connexion
 
 ```bash
 hostname
@@ -109,65 +74,9 @@ Resultat attendu :
 /home/<SSH_USER>
 ```
 
-## Cle SSH Personnelle
+## Projet Et Services
 
-Chaque membre doit utiliser sa propre cle SSH.
-
-Sur Windows PowerShell :
-
-```powershell
-ssh-keygen -t ed25519 -C "prenom-iqa"
-```
-
-Accepter l'emplacement par defaut :
-
-```text
-C:\Users\<user>\.ssh\id_ed25519
-```
-
-Afficher la cle publique :
-
-```powershell
-type $env:USERPROFILE\.ssh\id_ed25519.pub
-```
-
-Envoyer uniquement la cle publique au responsable serveur.
-
-Ne jamais envoyer :
-
-```text
-id_ed25519
-```
-
-Le fichier prive reste sur le poste du membre.
-
-## Ajout D'une Cle Sur Le Serveur
-
-Sur le serveur, connecte en tant que `<SSH_USER>` :
-
-```bash
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-nano ~/.ssh/authorized_keys
-```
-
-Ajouter une ligne par membre :
-
-```text
-ssh-ed25519 AAAA... adrien-iqa
-ssh-ed25519 AAAA... natacha-iqa
-ssh-ed25519 AAAA... ken-iqa
-```
-
-Puis appliquer les permissions :
-
-```bash
-chmod 600 ~/.ssh/authorized_keys
-```
-
-## Acces Au Projet
-
-Le repo est installe sur le serveur ici :
+Le repo est installe ici :
 
 ```bash
 /opt/iqa/iqa-mlops
@@ -188,7 +97,7 @@ cd /opt/iqa/iqa-mlops/deploy
 docker compose --env-file ../.env ps
 ```
 
-## URLs Utiles Via Tailscale
+## URLs Utiles
 
 Depuis une machine connectee a Tailscale :
 
@@ -203,93 +112,27 @@ Grafana                  http://<SERVER_TAILSCALE_IP>:3000
 Prometheus               http://<SERVER_TAILSCALE_IP>:9090
 ```
 
-Pour MLflow, utiliser de preference l'URL Tailscale ci-dessus afin d'eviter les
-problemes de `Host header`.
+## Regles D'usage
 
-## Bonnes Pratiques Equipe
-
-- Ne pas partager le mot de passe du compte `iqa`.
-- Ne pas publier les vraies IPs du serveur dans GitHub.
-- Ne pas partager les cles privees SSH.
-- Une cle publique par personne.
-- Retirer la cle d'un membre qui quitte le projet.
-- Ne pas lancer de training GPU pendant une demonstration sans coordination.
+- Ne pas publier les vraies IPs, mots de passe ou tokens dans GitHub.
+- Ne pas partager l'acces hors de l'equipe projet.
 - Prevenir l'equipe avant de redemarrer Docker ou le serveur.
+- Ne pas lancer de training GPU pendant une demonstration sans coordination.
 - Ne pas modifier `.env` sans prevenir, car il pilote les services Docker.
 
 ## Depannage Rapide
 
-### `tailscale` n'est pas reconnu sur Windows
-
-Utiliser le chemin complet :
-
-```powershell
-& "C:\Program Files\Tailscale\tailscale.exe" status
-```
-
-### Tailscale indique `Logged out`
-
-Relancer l'authentification :
+Si Tailscale indique `Logged out` :
 
 ```powershell
 & "C:\Program Files\Tailscale\tailscale.exe" up
 ```
 
-### SSH timeout
-
-Verifier d'abord Tailscale :
+Si SSH ne repond pas :
 
 ```powershell
 & "C:\Program Files\Tailscale\tailscale.exe" ping <SERVER_TAILSCALE_IP>
 ```
 
-Si le ping Tailscale ne repond pas, le probleme vient de Tailscale ou de
-l'autorisation du poste dans le tailnet.
-
-### Le navigateur n'ouvre pas MLflow
-
-Tester depuis le poste :
-
-```powershell
-curl http://<SERVER_TAILSCALE_IP>:5000
-```
-
-Si le message parle de `Invalid Host header`, prevenir le responsable serveur :
-la liste `IQA_MLFLOW_ALLOWED_HOSTS` doit inclure l'adresse utilisee.
-
-## Retirer Un Acces
-
-Sur le serveur :
-
-```bash
-nano ~/.ssh/authorized_keys
-```
-
-Supprimer la ligne correspondant au membre, puis sauvegarder.
-
-Le changement est immediat pour les nouvelles connexions SSH.
-
-## Durcissement Prevu
-
-Quand toutes les connexions par cle sont testees, l'authentification SSH par mot
-de passe pourra etre desactivee :
-
-```bash
-sudo nano /etc/ssh/sshd_config
-```
-
-Configuration cible :
-
-```text
-PasswordAuthentication no
-PubkeyAuthentication yes
-```
-
-Puis :
-
-```bash
-sudo systemctl restart ssh
-```
-
-Important : tester une connexion SSH par cle dans une deuxieme fenetre avant de
-fermer la session existante.
+Si MLflow affiche `Invalid Host header`, prevenir le responsable serveur : la
+liste `IQA_MLFLOW_ALLOWED_HOSTS` doit inclure l'adresse utilisee.
