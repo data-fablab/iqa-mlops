@@ -31,6 +31,9 @@ FEATURE_AE_MANIFEST = BASE_DIR / "models" / "manifests" / "rd_feature_ae_gated_v
 
 app = FastAPI(title="Industrial Quality Assistant API", version="0.1.0")
 
+PREDICTION_STORE: dict[str, dict[str, Any]] = {}
+FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
+
 
 # Legacy inline Pydantic schemas kept temporarily for review traceability.
 # They were moved to src/iqa/api/schemas.py to centralize API contracts.
@@ -109,6 +112,18 @@ def predict(request: PredictRequest) -> dict[str, Any]:
     prediction["model_version"] = prediction.get("feature_ae_version")
     prediction["audit_logged"] = True
 
+    PREDICTION_STORE[prediction_id] = {
+        "prediction_id": prediction_id,
+        "piece_event_id": request.piece_event_id,
+        "scenario_id": request.scenario_id,
+        "image_uri": request.image_uri,
+        "decision": prediction["decision"],
+        "model_version": prediction["feature_ae_version"],
+        "roi_model_version": prediction["roi_model_version"],
+        "created_at": created_at,
+        "feedback_closed": False,
+    }
+
     return {
         "service": "iqa-api",
         "delegated_to": "iqa-inference",
@@ -139,17 +154,41 @@ def predict_piece_event(event_id: str, request: PieceEventPredictRequest) -> dic
     )
 
 
+def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any]:
+    prediction = PREDICTION_STORE.get(request.prediction_id)
+
+    if prediction is None:
+        raise HTTPException(status_code=404, detail="Unknown prediction_id.")
+
+    if prediction["piece_event_id"] != request.piece_event_id:
+        raise HTTPException(status_code=409, detail="prediction_id does not match piece_event_id.")
+
+    if prediction["scenario_id"] != request.scenario_id:
+        raise HTTPException(status_code=409, detail="prediction_id does not match scenario_id.")
+
+    if prediction.get("feedback_closed") is True:
+        raise HTTPException(status_code=409, detail="Prediction already has a closed feedback.")
+
+    return prediction
+
+
 @app.post("/feedback")
 def feedback(
     request: FeedbackRequest,
     x_iqa_service_token: str | None = Header(default=None, alias="X-IQA-Service-Token"),
 ) -> dict[str, Any]:
     _require_token("IQA_SERVICE_TOKEN", x_iqa_service_token)
+
+    prediction = _get_open_prediction_for_feedback(request)
+
     if request.feedback_source != "oracle_gt":
         return {
             "accepted": False,
+            "prediction_id": request.prediction_id,
+            "feedback_closed": False,
             "reason": "MVP accepts only oracle_gt feedback; human_sophie is a future interface.",
         }
+
     verdict = oracle_gt_verdict(
         OracleFeedbackRequest(
             piece_event_id=request.piece_event_id,
@@ -158,7 +197,27 @@ def feedback(
             gt_mask_has_defect=request.gt_mask_has_defect,
         )
     )
-    return {"accepted": True, "feedback": verdict.to_dict()}
+
+    closed_at = datetime.now(timezone.utc).isoformat()
+    prediction["feedback_closed"] = True
+    prediction["feedback_closed_at"] = closed_at
+
+    FEEDBACK_STORE[request.prediction_id] = {
+        "prediction_id": request.prediction_id,
+        "piece_event_id": request.piece_event_id,
+        "scenario_id": request.scenario_id,
+        "feedback_source": request.feedback_source,
+        "feedback_closed": True,
+        "closed_at": closed_at,
+        "verdict": verdict.to_dict(),
+    }
+
+    return {
+        "accepted": True,
+        "prediction_id": request.prediction_id,
+        "feedback_closed": True,
+        "feedback": verdict.to_dict(),
+    }
 
 
 @app.get("/metrics")
