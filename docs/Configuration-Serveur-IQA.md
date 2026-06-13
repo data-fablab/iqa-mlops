@@ -322,7 +322,7 @@ Demarrage socle :
 
 ```bash
 cd /opt/iqa/iqa-mlops/deploy
-docker compose up -d postgres minio minio-init mlflow prometheus grafana
+docker compose --env-file ../.env up -d postgres minio minio-init mlflow prometheus grafana
 docker compose ps
 ```
 
@@ -340,7 +340,7 @@ Demarrage API et inference CPU/smoke :
 
 ```bash
 cd /opt/iqa/iqa-mlops/deploy
-docker compose up -d iqa-api iqa-inference reverse-proxy
+docker compose --env-file ../.env up -d iqa-api iqa-inference reverse-proxy
 curl http://localhost/api/health
 curl http://localhost:8100/health
 ```
@@ -349,7 +349,7 @@ Demarrage inference/trainer GPU RTX3060 :
 
 ```bash
 cd /opt/iqa/iqa-mlops/deploy
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build iqa-inference iqa-trainer
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml up -d --build iqa-inference iqa-trainer
 ```
 
 Validation GPU Docker :
