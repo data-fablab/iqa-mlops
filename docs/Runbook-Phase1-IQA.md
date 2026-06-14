@@ -3,13 +3,16 @@
 Ce runbook couvre le perimetre de la Phase 1 (cf. `Architecture-Projet-IQA.md`
 section 10 et `Repartition-Taches-Phases-1-2.md`) : squelette repo, configs,
 CI, PostgreSQL, MinIO, API `/health`. Il decrit comment installer le projet et
-demarrer le socle Docker Compose sur la station de travail / le serveur Z420.
+demarrer le socle Docker Compose sur une station de travail ou sur le serveur
+IQA GPU RTX 3060.
 
 ## 1. Prerequis
 
 - Ubuntu Server (cible officielle) ou poste de dev Linux/WSL2.
 - `uv` installe (https://docs.astral.sh/uv/).
 - Docker + Docker Compose plugin v2.
+- Sur le serveur IQA GPU : driver NVIDIA, NVIDIA Container Toolkit et extra
+  `cu128` pour les commandes PyTorch GPU.
 - Python pilote par `uv` via `.python-version` (3.12) ; pas d'installation
   manuelle requise.
 
@@ -87,12 +90,28 @@ docker compose up -d prometheus grafana reverse-proxy
 
 ```bash
 docker compose up airflow-init   # une fois : db migrate + import pools.json
+docker compose run --rm airflow-webserver airflow users create \
+  --username admin \
+  --firstname IQA \
+  --lastname Admin \
+  --role Admin \
+  --email admin@example.local \
+  --password <mot-de-passe-admin-airflow>
 docker compose up -d airflow-webserver airflow-scheduler
 ```
 
 - `AIRFLOW__CORE__EXECUTOR=LocalExecutor` (pas de Celery/Kubernetes).
 - Le pool `iqa_gpu` (1 slot) est importe depuis `deploy/airflow/pools.json` et
   contraint les taches GPU du DAG `iqa_lifecycle` a `max_active_tasks=1`.
+- Ne pas commiter le mot de passe Airflow ; il reste un secret d'exploitation.
+
+Sur serveur RTX 3060, les tests d'inference/training GPU utilisent `cu128` :
+
+```bash
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml up -d iqa-inference
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml exec iqa-inference \
+  uv run --extra cu128 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+```
 
 ## 8. Streamlit (vitrine Sophie, placeholder)
 
@@ -104,6 +123,9 @@ Ouvre `http://localhost:8501` : modele actif (`/model/version`), lots
 (`/replay-scenarios`), statut piece (`/piece-events/{id}/predict`) et
 formulaire feedback `oracle_gt` (`/feedback`). C'est une vitrine MVP ; aucun
 historique PostgreSQL n'est encore branche en Phase 1.
+
+Le formulaire de feedback montre le parcours cible. Le workflow operationnel du
+MVP reste automatise par `oracle_gt`; `human_sophie` est futur.
 
 ## 9. CI
 
