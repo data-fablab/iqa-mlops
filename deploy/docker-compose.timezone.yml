@@ -1,0 +1,51 @@
+x-timezone: &timezone
+  environment:
+    TZ: Europe/Paris
+  volumes:
+    - /etc/localtime:/etc/localtime:ro
+    - /etc/timezone:/etc/timezone:ro
+
+services:
+  airflow-webserver:
+    <<: *timezone
+    environment:
+      TZ: Europe/Paris
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Paris
+      AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Europe/Paris
+
+  airflow-scheduler:
+    <<: *timezone
+    environment:
+      TZ: Europe/Paris
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Paris
+
+  iqa-api:
+    <<: *timezone
+
+  iqa-inference:
+    <<: *timezone
+
+  iqa-streamlit:
+    <<: *timezone
+
+  reverse-proxy:
+    <<: *timezone
+
+  grafana:
+    <<: *timezone
+
+  mlflow:
+    <<: *timezone
+
+  postgres:
+    <<: *timezone
+
+  minio:
+    <<: *timezone
+    environment:
+      TZ: CET-1CEST,M3.5.0,M10.5.0/3
+
+  prometheus:
+    <<: *timezone
+    environment:
+      TZ: CET-1CEST,M3.5.0,M10.5.0/3
