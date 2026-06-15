@@ -182,6 +182,14 @@ dans `s3://iqa-roi-masks` et PostgreSQL conserve les URI et faits associes.
 
 Commande bootstrap serveur :
 
+L'artefact officiel du segmenteur ROI fige est stocke dans MinIO :
+`s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`. Le manifest Git
+`models/manifests/roi_segmenter_v001_fixed/model_manifest.json` reference la
+version `roi_segmenter_v001_fixed`, la source `checkpoint_epoch_003.pt` et le
+SHA256 attendu. La CLI actuelle charge un chemin local ; le fichier
+`models/roi_segmenter_v001_fixed/checkpoint.pt` est donc une copie/cache hors Git
+a restaurer depuis MinIO avant execution.
+
 ```bash
 uv run --extra cu128 --extra data iqa-generate-bootstrap-roi \
   --manifest data/metadata/feature_ae_bootstrap_events.csv \

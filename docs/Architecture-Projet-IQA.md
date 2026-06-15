@@ -176,7 +176,7 @@ Documents cibles :
 - `architecture.md` : structure technique et responsabilites ;
 - `Modele-Feature-AE-IQA.md` : contrat du modele vivant, training, evaluation, checkpoints ;
 - `Modele-Segmentation-ROI-IQA.md` : contrat du segmenteur ROI fige et usage downstream ;
-- `server-config.md` : configuration Z420 Ubuntu Server ;
+- `server-config.md` : configuration du serveur IQA GPU RTX 3060 ;
 - `adr/0001` : validation set fige hors replay ;
 - `adr/0002` : Airflow comme orchestrateur ;
 - `adr/0003` : MinIO comme stockage objet local.
@@ -398,7 +398,7 @@ Tests attendus :
 10. Monitoring Prometheus/Grafana.
 11. Streamlit dashboard Marc + review Sophie.
 12. Incidents rejouables, dont rollback via MLflow Registry.
-13. Deploiement Z420 Ubuntu Server + runbook.
+13. Deploiement serveur IQA GPU RTX 3060 + runbook.
 
 ## 11. Decisions retenues
 
@@ -428,7 +428,7 @@ template MLOps + microservices Docker + Airflow + MinIO + validation set fige
 + oracle GT MVP + Feature-AE lifecycle + Ubuntu Server
 ```
 
-Elle reste suffisamment simple pour le MVP, tout en donnant une colonne vertebrale credible pour la soutenance et le deploiement sur la Z420.
+Elle reste suffisamment simple pour le MVP, tout en donnant une colonne vertebrale credible pour la soutenance et le deploiement sur le serveur IQA GPU RTX 3060.
 
 ## 13. Decisions de convergence Ken/IQA
 

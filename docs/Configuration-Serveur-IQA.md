@@ -256,7 +256,7 @@ Pour un serveur local de demonstration :
 
 ## 12. Verdict
 
-La station HP Z420 avec Xeon E5-1680 v2, 40 Go RAM et RTX 3060 12 Go est adaptee pour heberger le MVP MLOps IQA.
+Le serveur IQA GPU RTX 3060, base sur la station HP Z420 avec Xeon E5-1680 v2 et 40 Go RAM, est adapte pour heberger le MVP MLOps IQA.
 
 Elle permet de faire tourner :
 - le replay des scenarios ;
@@ -398,6 +398,12 @@ docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.ym
 ```
 
 Generation ROI bootstrap V0 sur serveur RTX 3060 :
+
+Le checkpoint ROI officiel est versionne par manifest Git et stocke dans MinIO :
+`s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`. La commande
+ci-dessous consomme une copie locale/cache hors Git dans
+`models/roi_segmenter_v001_fixed/checkpoint.pt`, a restaurer depuis MinIO si le
+fichier local est absent.
 
 ```bash
 cd /opt/iqa/iqa-mlops

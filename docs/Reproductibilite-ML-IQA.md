@@ -99,3 +99,6 @@ uv run --extra cpu iqa-predict-image `
 - Artefacts : `s3://iqa-models`, `s3://iqa-roi-masks`, `s3://iqa-heatmaps`, `s3://mlflow-artifacts`, `s3://iqa-dvc`.
 
 PostgreSQL stocke les faits et URI. MinIO stocke les fichiers lourds.
+Les checkpoints `.pt` ne sont pas versionnes dans Git : Git conserve les
+manifests, les versions, les URI MinIO et les checksums ; MinIO conserve les
+artefacts lourds comme `s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`.

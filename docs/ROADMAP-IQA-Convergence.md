@@ -44,7 +44,7 @@ MVP.
 - Lots d'incident hors train/calibration/replay nominal : FN, pic ROI fail,
   rollback.
 - Grafana pour Marc ; Streamlit vitrine Sophie.
-- Runbook Z420 Ubuntu Server.
+- Runbook serveur IQA GPU RTX 3060.
 
 ## Reports explicites
 
