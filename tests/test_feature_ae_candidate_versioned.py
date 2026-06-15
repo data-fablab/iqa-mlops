@@ -8,7 +8,6 @@ import subprocess
 from pathlib import Path
 from unittest import mock
 
-import pytest
 import torch
 from PIL import Image
 
@@ -310,7 +309,7 @@ class TestFeatureAECandidateSmokeTraining:
             val_fraction=0.25,
         )
 
-        trained = FeatureAECandidate.train(config)
+        FeatureAECandidate.train(config)
 
         # Load the trained model
         loaded = FeatureAECandidate.load(checkpoint)

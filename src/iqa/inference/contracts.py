@@ -23,7 +23,7 @@ class InferenceResult:
     piece_event_id: str
     scenario_id: str
     score: float
-    statut: Decision
+    decision: Decision
     heatmap_uri: str | None
     roi_status: str | None
     roi_model_version: str
@@ -38,7 +38,7 @@ def placeholder_inference(request: InferenceRequest) -> InferenceResult:
         piece_event_id=request.piece_event_id,
         scenario_id=request.scenario_id,
         score=0.0,
-        statut="Vert",
+        decision="Vert",
         heatmap_uri=None,
         roi_status=None,
         roi_model_version="roi_segmenter_v001_fixed",

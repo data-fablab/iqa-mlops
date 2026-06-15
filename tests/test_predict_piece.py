@@ -9,14 +9,14 @@ def _inference_result(
     piece_event_id: str = "piece_001",
     scenario_id: str = "natural",
     score: float = 0.0,
-    statut: str = "Vert",
+    decision: str = "Vert",
 ) -> InferenceResult:
     """Create a test inference result."""
     return InferenceResult(
         piece_event_id=piece_event_id,
         scenario_id=scenario_id,
         score=score,
-        statut=statut,
+        decision=decision,
         heatmap_uri=None,
         roi_status=None,
         roi_model_version="roi_v001",
@@ -31,7 +31,7 @@ class TestPiecePredictionAggregation:
         """Single green view produces green aggregate."""
         from iqa.inference.piece import aggregate_piece_predictions
 
-        views = [_inference_result(score=0.01, statut="Vert")]
+        views = [_inference_result(score=0.01, decision="Vert")]
         result = aggregate_piece_predictions(views)
         assert result == "Vert"
 
@@ -40,9 +40,9 @@ class TestPiecePredictionAggregation:
         from iqa.inference.piece import aggregate_piece_predictions
 
         views = [
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.02, statut="Vert"),
-            _inference_result(score=0.015, statut="Vert"),
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.02, decision="Vert"),
+            _inference_result(score=0.015, decision="Vert"),
         ]
         result = aggregate_piece_predictions(views)
         assert result == "Vert"
@@ -52,9 +52,9 @@ class TestPiecePredictionAggregation:
         from iqa.inference.piece import aggregate_piece_predictions
 
         views = [
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.03, statut="Orange"),
-            _inference_result(score=0.02, statut="Vert"),
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.03, decision="Orange"),
+            _inference_result(score=0.02, decision="Vert"),
         ]
         result = aggregate_piece_predictions(views)
         assert result == "Orange"
@@ -64,8 +64,8 @@ class TestPiecePredictionAggregation:
         from iqa.inference.piece import aggregate_piece_predictions
 
         views = [
-            _inference_result(score=0.025, statut="Orange"),
-            _inference_result(score=0.035, statut="Orange"),
+            _inference_result(score=0.025, decision="Orange"),
+            _inference_result(score=0.035, decision="Orange"),
         ]
         result = aggregate_piece_predictions(views)
         assert result == "Orange"
@@ -75,9 +75,9 @@ class TestPiecePredictionAggregation:
         from iqa.inference.piece import aggregate_piece_predictions
 
         views = [
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.03, statut="Orange"),
-            _inference_result(score=0.06, statut="Rouge"),
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.03, decision="Orange"),
+            _inference_result(score=0.06, decision="Rouge"),
         ]
         result = aggregate_piece_predictions(views)
         assert result == "Rouge"
@@ -86,7 +86,7 @@ class TestPiecePredictionAggregation:
         """Single red view produces red aggregate."""
         from iqa.inference.piece import aggregate_piece_predictions
 
-        views = [_inference_result(score=0.06, statut="Rouge")]
+        views = [_inference_result(score=0.06, decision="Rouge")]
         result = aggregate_piece_predictions(views)
         assert result == "Rouge"
 
@@ -98,14 +98,14 @@ class TestPiecePredictionAggregation:
         result = aggregate_piece_predictions(views)
         assert result == "Vert"
 
-    def test_aggregate_case_insensitive_statut(self) -> None:
-        """Aggregation handles different case variations of statut."""
+    def test_aggregate_case_insensitive_decision(self) -> None:
+        """Aggregation handles different case variations of decision."""
         from iqa.inference.piece import aggregate_piece_predictions
 
         views = [
-            _inference_result(statut="Vert"),
-            _inference_result(statut="vert"),  # Lowercase
-            _inference_result(statut="VERT"),  # Uppercase
+            _inference_result(decision="Vert"),
+            _inference_result(decision="vert"),  # Lowercase
+            _inference_result(decision="VERT"),  # Uppercase
         ]
         result = aggregate_piece_predictions(views)
         assert result in {"Vert", "vert"}
@@ -115,11 +115,11 @@ class TestPiecePredictionAggregation:
         from iqa.inference.piece import aggregate_piece_predictions
 
         views = [
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.03, statut="Orange"),  # One orange
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.03, decision="Orange"),  # One orange
         ]
         result = aggregate_piece_predictions(views)
         assert result == "Orange"
@@ -129,12 +129,12 @@ class TestPiecePredictionAggregation:
         from iqa.inference.piece import aggregate_piece_predictions
 
         views = [
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.03, statut="Orange"),
-            _inference_result(score=0.01, statut="Vert"),
-            _inference_result(score=0.03, statut="Orange"),
-            _inference_result(score=0.06, statut="Rouge"),  # One red
-            _inference_result(score=0.01, statut="Vert"),
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.03, decision="Orange"),
+            _inference_result(score=0.01, decision="Vert"),
+            _inference_result(score=0.03, decision="Orange"),
+            _inference_result(score=0.06, decision="Rouge"),  # One red
+            _inference_result(score=0.01, decision="Vert"),
         ]
         result = aggregate_piece_predictions(views)
         assert result == "Rouge"
@@ -147,9 +147,9 @@ class TestPiecePredictionIntegration:
         """Aggregation covers all three expected statuses."""
         from iqa.inference.piece import aggregate_piece_predictions
 
-        green_views = [_inference_result(statut="Vert")]
-        orange_views = [_inference_result(statut="Orange")]
-        red_views = [_inference_result(statut="Rouge")]
+        green_views = [_inference_result(decision="Vert")]
+        orange_views = [_inference_result(decision="Orange")]
+        red_views = [_inference_result(decision="Rouge")]
 
         assert aggregate_piece_predictions(green_views) == "Vert"
         assert aggregate_piece_predictions(orange_views) == "Orange"
@@ -157,13 +157,12 @@ class TestPiecePredictionIntegration:
 
     def test_aggregate_respects_decision_type(self) -> None:
         """Aggregation produces valid Decision type values."""
-        from iqa.inference.contracts import Decision
         from iqa.inference.piece import aggregate_piece_predictions
 
         views = [
-            _inference_result(statut="Vert"),
-            _inference_result(statut="Orange"),
-            _inference_result(statut="Rouge"),
+            _inference_result(decision="Vert"),
+            _inference_result(decision="Orange"),
+            _inference_result(decision="Rouge"),
         ]
 
         for view in views:

@@ -331,7 +331,6 @@ class TestProductionPromotionWrapper:
         self, tmp_path
     ) -> None:
         """promote_model_with_gates succeeds: load config, check gates, transition, resolve artifacts."""
-        from pathlib import Path
 
         gates_config_content = """
 feature_ae:
@@ -344,7 +343,7 @@ feature_ae:
 
         with patch("mlflow.tracking.MlflowClient") as mock_client_class, patch(
             "mlflow.set_tracking_uri"
-        ) as mock_set_uri:
+        ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
 
@@ -378,7 +377,6 @@ feature_ae:
 
     def test_promote_model_blocked_when_gates_fail(self, tmp_path) -> None:
         """promote_model_with_gates blocks promotion when gates fail (no MLflow transition)."""
-        from pathlib import Path
 
         gates_config_content = """
 feature_ae:
@@ -391,7 +389,7 @@ feature_ae:
 
         with patch("mlflow.tracking.MlflowClient") as mock_client_class, patch(
             "mlflow.set_tracking_uri"
-        ) as mock_set_uri:
+        ):
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
 

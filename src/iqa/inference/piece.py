@@ -28,7 +28,7 @@ def aggregate_piece_predictions(
     if not predictions:
         return "Vert"
 
-    statuses = {pred.statut.lower() for pred in predictions}
+    statuses = {pred.decision.lower() for pred in predictions}
 
     if "rouge" in statuses:
         return "Rouge"

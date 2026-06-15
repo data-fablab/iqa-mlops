@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-import pytest
 
 GATES_YAML = Path("configs/promotion_gates.yaml")
 GATES_DOC = Path("docs/gates.md")
