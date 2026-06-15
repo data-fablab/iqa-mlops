@@ -1,7 +1,6 @@
 """Contract tests for Airflow DAGs (IQA1_KEN09)."""
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 

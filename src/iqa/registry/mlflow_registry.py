@@ -9,7 +9,6 @@ States: candidate, test, prod, archived (per scenario_id)
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any
 
 try:
     import mlflow

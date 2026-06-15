@@ -16,7 +16,6 @@ from iqa.models.feature_ae import (
     ReverseDistillationGatedDualContextResNet18,
 )
 from iqa.models.feature_ae_candidate import FeatureAECandidate
-from iqa.training.feature_ae_evaluation import FeatureAEEvaluationConfig
 
 
 @pytest.fixture
@@ -90,7 +89,7 @@ class TestFeatureAECandidateSaveLoad:
 
             loaded = FeatureAECandidate.load(checkpoint_path)
 
-            assert type(loaded.model) == type(minimal_candidate.model)
+            assert type(loaded.model) is type(minimal_candidate.model)
 
 
 class TestFeatureAECandidatePredict:

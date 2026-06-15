@@ -25,9 +25,9 @@ def test_inference_result_exposes_roi_status() -> None:
     assert "roi_status" in _RESULT_FIELD_NAMES
 
 
-def test_inference_result_exposes_statut_not_decision() -> None:
-    assert "statut" in _RESULT_FIELD_NAMES
-    assert "decision" not in _RESULT_FIELD_NAMES
+def test_inference_result_exposes_decision_not_statut() -> None:
+    assert "decision" in _RESULT_FIELD_NAMES
+    assert "statut" not in _RESULT_FIELD_NAMES
 
 
 def test_piece_event_importable_from_inference_contracts() -> None:

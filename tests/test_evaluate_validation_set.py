@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from iqa.training.feature_ae_evaluation import EvaluationReport, evaluate_on_validation_set_v001
 

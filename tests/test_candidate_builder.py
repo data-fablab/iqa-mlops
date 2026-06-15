@@ -287,7 +287,7 @@ class TestBuildCandidateDataset:
         """Build candidate dataset replaces dataset_version with candidate version."""
         output = tmp_path / "candidate.csv"
         sample = _sample(dataset_version="v001")
-        result = build_candidate_dataset([sample], output, version="candidate_v005")
+        build_candidate_dataset([sample], output, version="candidate_v005")
 
         content = output.read_text(encoding="utf-8")
         lines = content.strip().split("\n")

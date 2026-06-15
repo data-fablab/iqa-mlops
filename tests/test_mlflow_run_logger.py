@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from unittest import mock
 
-import pytest
 import torch
 
 from iqa.training.feature_ae import FeatureAETrainingConfig

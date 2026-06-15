@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iqa.datasets import (
     VALIDATION_SET_ID,
