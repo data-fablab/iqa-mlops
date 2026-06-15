@@ -190,6 +190,7 @@ iqa-source-datasets
 iqa-dvc
 iqa-ingested-images
 mlflow-artifacts
+iqa-roi-masks
 iqa-heatmaps
 iqa-models
 iqa-backups
@@ -209,6 +210,7 @@ Le SSD de 500 Go est suffisant pour le MVP, mais impose une discipline de retent
 | DVC remote `iqa-dvc` | garder versions utiles, nettoyage DVC periodique |
 | MLflow artifacts | bucket `mlflow-artifacts`, garder runs promus et candidats recents |
 | Modeles | bucket `iqa-models`, artefacts candidats, promus et archives ; statut prod dans MLflow |
+| Masques ROI | bucket `iqa-roi-masks`, masques produits par le segmenteur ROI fige |
 | Heatmaps | bucket `iqa-heatmaps`, expiration automatique des lots, retention curated |
 | Logs applicatifs | Rotation automatique |
 | Prometheus | Retention courte a moyenne pour MVP |
@@ -254,7 +256,7 @@ Pour un serveur local de demonstration :
 
 ## 12. Verdict
 
-La station HP Z420 avec Xeon E5-1680 v2, 40 Go RAM et RTX 3060 12 Go est adaptee pour heberger le MVP MLOps IQA.
+Le serveur IQA GPU RTX 3060, base sur la station HP Z420 avec Xeon E5-1680 v2 et 40 Go RAM, est adapte pour heberger le MVP MLOps IQA.
 
 Elle permet de faire tourner :
 - le replay des scenarios ;
@@ -284,6 +286,151 @@ Ubuntu Server 24.04 LTS
 Cette configuration est coherente avec le cadrage projet, a condition de conserver Kubernetes hors perimetre et de mettre en place une politique de retention des artefacts.
 
 Decision explicite : la procedure officielle de deploiement est `Ubuntu Server -> Docker Compose -> dvc pull -> docker compose up`. Windows + WSL2 peut rester un environnement de developpement individuel, mais pas la cible serveur retenue.
+
+## 14. Procedure serveur MVP
+
+Initialisation du repo :
+
+```bash
+cd /opt/iqa
+git clone https://github.com/data-fablab/iqa-mlops.git
+cd iqa-mlops
+uv sync --extra cpu --extra data
+uv run --extra cpu --extra data ruff check src scripts tests
+uv run --extra cpu --extra data pytest -q
+```
+
+Sur le serveur RTX 3060, les tests et taches data restent lances avec
+`--extra cpu --extra data`. Les services ou commandes qui executent PyTorch sur
+GPU doivent utiliser `--extra cu128`.
+
+Configuration environnement :
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Le fichier `.env` serveur doit remplacer tous les secrets `change-me-*` :
+
+```text
+IQA_POSTGRES_PASSWORD
+MINIO_ROOT_USER
+MINIO_ROOT_PASSWORD
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+GF_SECURITY_ADMIN_PASSWORD
+IQA_ADMIN_TOKEN
+IQA_SERVICE_TOKEN
+```
+
+MLflow valide le header `Host` pour limiter les attaques DNS rebinding. Les
+adresses exposees doivent donc etre listees avec et sans port dans :
+
+```text
+IQA_MLFLOW_ALLOWED_HOSTS
+```
+
+Exemple pour le serveur :
+
+```text
+localhost,localhost:5000,127.0.0.1,127.0.0.1:5000,<SERVER_TAILSCALE_IP>,<SERVER_TAILSCALE_IP>:5000,mlflow,mlflow:5000
+```
+
+Demarrage socle :
+
+```bash
+cd /opt/iqa/iqa-mlops/deploy
+docker compose --env-file ../.env up -d postgres minio minio-init mlflow prometheus grafana
+docker compose ps
+```
+
+Initialisation Airflow :
+
+```bash
+cd /opt/iqa/iqa-mlops/deploy
+docker compose --env-file ../.env run --rm airflow-webserver airflow db migrate
+docker compose --env-file ../.env run --rm airflow-webserver airflow users create \
+  --username admin \
+  --firstname IQA \
+  --lastname Admin \
+  --role Admin \
+  --email admin@example.local \
+  --password admin
+docker compose --env-file ../.env up -d airflow-webserver airflow-scheduler
+```
+
+Les services Airflow utilisent la base PostgreSQL `airflow` via
+`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`. Ne pas initialiser Airflow sans les
+variables du `docker-compose.yml`, sinon la base par defaut du conteneur peut
+etre utilisee a la place.
+
+Initialisation DVC cote serveur :
+
+```bash
+cd /opt/iqa/iqa-mlops
+uv run --extra cpu --extra data dvc remote modify --local iqa-minio endpointurl http://localhost:9000
+uv run --extra cpu --extra data dvc remote modify --local iqa-minio access_key_id "$MINIO_ROOT_USER"
+uv run --extra cpu --extra data dvc remote modify --local iqa-minio secret_access_key "$MINIO_ROOT_PASSWORD"
+uv run --extra cpu --extra data dvc pull
+```
+
+Demarrage API et inference CPU/smoke :
+
+```bash
+cd /opt/iqa/iqa-mlops/deploy
+docker compose --env-file ../.env up -d iqa-api iqa-inference reverse-proxy
+curl http://localhost/api/health
+curl http://localhost:8100/health
+```
+
+Demarrage du stack avec inference/trainer GPU RTX 3060 (`cu128`) :
+
+```bash
+cd /opt/iqa/iqa-mlops/deploy
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+Validation PyTorch CUDA dans le conteneur inference :
+
+```bash
+docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.yml exec iqa-inference uv run --extra cu128 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+```
+
+Generation ROI bootstrap V0 sur serveur RTX 3060 :
+
+Le checkpoint ROI officiel est versionne par manifest Git et stocke dans MinIO :
+`s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`. La commande
+ci-dessous consomme une copie locale/cache hors Git dans
+`models/roi_segmenter_v001_fixed/checkpoint.pt`, a restaurer depuis MinIO si le
+fichier local est absent.
+
+```bash
+cd /opt/iqa/iqa-mlops
+uv run --extra cu128 --extra data iqa-generate-bootstrap-roi \
+  --manifest data/metadata/feature_ae_bootstrap_events.csv \
+  --image-root data/raw/hss-iad \
+  --checkpoint models/roi_segmenter_v001_fixed/checkpoint.pt \
+  --output-dir data/processed/roi/bootstrap_v001 \
+  --roi-model-version roi_segmenter_v001_fixed \
+  --device cuda
+```
+
+La sortie locale `data/processed/roi/bootstrap_v001` reste hors Git. En cible
+production/replay, ces masques sont stockes dans `s3://iqa-roi-masks` et seuls
+les URI/faits sont conserves dans PostgreSQL.
+
+Validation GPU Docker :
+
+```bash
+nvidia-smi
+docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi
+```
+
+Note : le compose principal reste CPU pour etre portable. Le fichier
+`docker-compose.gpu.yml` active CUDA uniquement pour les services qui en ont
+besoin : `iqa-inference` et `iqa-trainer`. Sur le serveur IQA, l'extra CUDA de
+reference est `cu128`.
 
 ## 13. Decisions de convergence infrastructure
 

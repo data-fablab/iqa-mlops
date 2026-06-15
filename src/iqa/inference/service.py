@@ -22,6 +22,11 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "iqa-inference"}
 
 
+@app.get("/metrics")
+def metrics() -> str:
+    return "# HELP iqa_inference_up IQA inference availability\n# TYPE iqa_inference_up gauge\niqa_inference_up 1\n"
+
+
 @app.post("/predict")
 def predict(request: InferenceServiceRequest) -> dict[str, str | float | None]:
     result = placeholder_inference(
@@ -34,4 +39,4 @@ def predict(request: InferenceServiceRequest) -> dict[str, str | float | None]:
     return result.to_dict()
 
 
-__all__ = ["InferenceServiceRequest", "app", "health", "predict"]
+__all__ = ["InferenceServiceRequest", "app", "health", "metrics", "predict"]

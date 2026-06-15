@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+# from pydantic import BaseModel, Field
+from iqa.api.schemas import (
+    FeedbackRequest,
+    PieceEventPredictRequest,
+    PredictRequest,
+    ReloadModelRequest,
+)
+
 
 from iqa.feedback import OracleFeedbackRequest, oracle_gt_verdict
 from iqa.inference.contracts import InferenceRequest, placeholder_inference
@@ -22,7 +31,24 @@ FEATURE_AE_MANIFEST = BASE_DIR / "models" / "manifests" / "rd_feature_ae_gated_v
 
 app = FastAPI(title="Industrial Quality Assistant API", version="0.1.0")
 
+PREDICTION_STORE: dict[str, dict[str, Any]] = {}
+FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
+DISPLAY_FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
+ADMIN_RELOAD_LOG: list[dict[str, Any]] = []
 
+AI_SECURITY_METRICS: dict[str, int] = {
+    "feedback_conflict_total": 0,
+    "ai_security_incident_total": 0,
+    "unsafe_train_blocked_total": 0,
+    "invalid_feedback_total": 0,
+    "reload_refused_total": 0,
+}
+
+
+# Legacy inline Pydantic schemas kept temporarily for review traceability.
+# They were moved to src/iqa/api/schemas.py to centralize API contracts.
+# This block can be removed after tests and review confirm the refactor.
+'''
 class PredictRequest(BaseModel):
     piece_event_id: str
     scenario_id: str = "production_replay_natural"
@@ -45,6 +71,7 @@ class FeedbackRequest(BaseModel):
 class ReloadModelRequest(BaseModel):
     scenario_id: str = "production_replay_natural"
     stage: str = "prod"
+'''
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:
@@ -57,6 +84,10 @@ def _require_token(env_name: str, provided_token: str | None) -> None:
     expected = os.getenv(env_name)
     if expected and provided_token != expected:
         raise HTTPException(status_code=401, detail=f"Missing or invalid {env_name}.")
+
+
+def _inc_security_metric(name: str) -> None:
+    AI_SECURITY_METRICS[name] = AI_SECURITY_METRICS.get(name, 0) + 1
 
 
 @app.get("/health")
@@ -86,10 +117,43 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             image_uri=request.image_uri,
         )
     )
+
+    prediction_id = f"pred_{uuid4().hex}"
+    created_at = datetime.now(timezone.utc).isoformat()
+    prediction = inference_result.to_dict()
+    prediction["prediction_id"] = prediction_id
+    prediction["image_uri"] = request.image_uri
+    prediction["model_version"] = prediction.get("feature_ae_version")
+    prediction["audit_logged"] = True
+
+    PREDICTION_STORE[prediction_id] = {
+        "prediction_id": prediction_id,
+        "piece_event_id": request.piece_event_id,
+        "scenario_id": request.scenario_id,
+        "image_uri": request.image_uri,
+        "decision": prediction["decision"],
+        "model_version": prediction["feature_ae_version"],
+        "roi_model_version": prediction["roi_model_version"],
+        "created_at": created_at,
+        "feedback_closed": False,
+    }
+
     return {
         "service": "iqa-api",
         "delegated_to": "iqa-inference",
-        "prediction": inference_result.to_dict(),
+        "prediction": prediction,
+        "audit": {
+            "audit_logged": True,
+            "prediction_id": prediction_id,
+            "piece_event_id": request.piece_event_id,
+            "scenario_id": request.scenario_id,
+            "image_uri": request.image_uri,
+            "decision": prediction["decision"],
+            "model_version": prediction["feature_ae_version"],
+            "roi_model_version": prediction["roi_model_version"],
+            "created_at": created_at,
+            "audit_sink": "api_response_mvp",
+        },
     }
 
 
@@ -104,17 +168,70 @@ def predict_piece_event(event_id: str, request: PieceEventPredictRequest) -> dic
     )
 
 
+def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any]:
+    prediction = PREDICTION_STORE.get(request.prediction_id)
+
+    if prediction is None:
+        _inc_security_metric("ai_security_incident_total")
+        _inc_security_metric("invalid_feedback_total")
+        raise HTTPException(status_code=404, detail="Unknown prediction_id.")
+
+    if prediction["piece_event_id"] != request.piece_event_id:
+        _inc_security_metric("feedback_conflict_total")
+        _inc_security_metric("ai_security_incident_total")
+        raise HTTPException(status_code=409, detail="prediction_id does not match piece_event_id.")
+
+    if prediction["scenario_id"] != request.scenario_id:
+        _inc_security_metric("feedback_conflict_total")
+        _inc_security_metric("ai_security_incident_total")
+        raise HTTPException(status_code=409, detail="prediction_id does not match scenario_id.")
+
+    if prediction.get("feedback_closed") is True:
+        _inc_security_metric("invalid_feedback_total")
+        _inc_security_metric("ai_security_incident_total")
+        raise HTTPException(status_code=409, detail="Prediction already has a closed feedback.")
+
+    return prediction
+
+
 @app.post("/feedback")
 def feedback(
     request: FeedbackRequest,
     x_iqa_service_token: str | None = Header(default=None, alias="X-IQA-Service-Token"),
 ) -> dict[str, Any]:
     _require_token("IQA_SERVICE_TOKEN", x_iqa_service_token)
-    if request.feedback_source != "oracle_gt":
-        return {
-            "accepted": False,
-            "reason": "MVP accepts only oracle_gt feedback; human_sophie is a future interface.",
+
+    prediction = _get_open_prediction_for_feedback(request)
+
+    if request.feedback_source == "human_sophie":
+        _inc_security_metric("unsafe_train_blocked_total")
+        DISPLAY_FEEDBACK_STORE[request.prediction_id] = {
+            "prediction_id": request.prediction_id,
+            "piece_event_id": request.piece_event_id,
+            "scenario_id": request.scenario_id,
+            "feedback_source": "human_sophie",
+            "display_decision_source": "human_sophie",
+            "train_eligibility_source": "oracle_gt",
+            "eligible_for_train": False,
+            "feedback_closed": False,
+            "reason": "human_sophie is accepted for display only; oracle_gt remains sovereign for train eligibility.",
         }
+
+        return {
+            "accepted": True,
+            "prediction_id": request.prediction_id,
+            "feedback_closed": False,
+            "display_decision_source": "human_sophie",
+            "train_eligibility_source": "oracle_gt",
+            "eligible_for_train": False,
+            "reason": "human_sophie is accepted for display only; oracle_gt remains sovereign for train eligibility.",
+        }
+
+    if request.feedback_source != "oracle_gt":
+        _inc_security_metric("invalid_feedback_total")
+        _inc_security_metric("ai_security_incident_total")
+        raise HTTPException(status_code=400, detail="Unknown feedback_source.")
+
     verdict = oracle_gt_verdict(
         OracleFeedbackRequest(
             piece_event_id=request.piece_event_id,
@@ -123,12 +240,97 @@ def feedback(
             gt_mask_has_defect=request.gt_mask_has_defect,
         )
     )
-    return {"accepted": True, "feedback": verdict.to_dict()}
+
+    closed_at = datetime.now(timezone.utc).isoformat()
+    prediction["feedback_closed"] = True
+    prediction["feedback_closed_at"] = closed_at
+
+    verdict_dict = verdict.to_dict()
+    eligible_for_train = not request.gt_mask_has_defect
+    if not eligible_for_train:
+        _inc_security_metric("unsafe_train_blocked_total")
+
+    FEEDBACK_STORE[request.prediction_id] = {
+        "prediction_id": request.prediction_id,
+        "piece_event_id": request.piece_event_id,
+        "scenario_id": request.scenario_id,
+        "feedback_source": "oracle_gt",
+        "feedback_closed": True,
+        "closed_at": closed_at,
+        "verdict": verdict_dict,
+        "display_decision_source": "human_sophie"
+        if request.prediction_id in DISPLAY_FEEDBACK_STORE
+        else "oracle_gt",
+        "train_eligibility_source": "oracle_gt",
+        "eligible_for_train": eligible_for_train,
+    }
+
+    display_decision_source = (
+        "human_sophie"
+        if request.prediction_id in DISPLAY_FEEDBACK_STORE
+        else "oracle_gt"
+    )
+
+    return {
+        "accepted": True,
+        "prediction_id": request.prediction_id,
+        "feedback_closed": True,
+        "display_decision_source": display_decision_source,
+        "train_eligibility_source": "oracle_gt",
+        "eligible_for_train": eligible_for_train,
+        "feedback": verdict_dict,
+    }
 
 
 @app.get("/metrics")
 def metrics() -> str:
-    return "# HELP iqa_api_up IQA API availability\n# TYPE iqa_api_up gauge\niqa_api_up 1\n"
+    lines = [
+        "# HELP iqa_api_up IQA API availability",
+        "# TYPE iqa_api_up gauge",
+        "iqa_api_up 1",
+        "# HELP iqa_feedback_conflict_total IQA feedback conflicts detected by API governance",
+        "# TYPE iqa_feedback_conflict_total counter",
+        f"iqa_feedback_conflict_total {AI_SECURITY_METRICS['feedback_conflict_total']}",
+        "# HELP iqa_ai_security_incident_total IQA AI security incidents detected by API governance",
+        "# TYPE iqa_ai_security_incident_total counter",
+        f"iqa_ai_security_incident_total {AI_SECURITY_METRICS['ai_security_incident_total']}",
+        "# HELP iqa_unsafe_train_blocked_total IQA train eligibility blocks for unsafe or non sovereign feedback",
+        "# TYPE iqa_unsafe_train_blocked_total counter",
+        f"iqa_unsafe_train_blocked_total {AI_SECURITY_METRICS['unsafe_train_blocked_total']}",
+        "# HELP iqa_invalid_feedback_total IQA invalid feedback events",
+        "# TYPE iqa_invalid_feedback_total counter",
+        f"iqa_invalid_feedback_total {AI_SECURITY_METRICS['invalid_feedback_total']}",
+        "# HELP iqa_reload_refused_total IQA admin reload refusals",
+        "# TYPE iqa_reload_refused_total counter",
+        f"iqa_reload_refused_total {AI_SECURITY_METRICS['reload_refused_total']}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _append_admin_reload_log(
+    *,
+    prediction_id: str | None = None,
+    scenario_id: str,
+    stage: Any,
+    reload_status: str,
+    accepted: bool,
+    reason: str,
+    model_name: str | None = None,
+) -> dict[str, Any]:
+    audit_event = {
+        "reload_event_id": f"reload_{uuid4().hex}",
+        "prediction_id": prediction_id,
+        "scenario_id": scenario_id,
+        "stage": getattr(stage, "value", stage),
+        "reload_status": reload_status,
+        "accepted": accepted,
+        "reason": reason,
+        "registered_model_name": model_name,
+        "source_of_truth": "mlflow_registry",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ADMIN_RELOAD_LOG.append(audit_event)
+    return audit_event
 
 
 @app.post("/admin/reload-model")
@@ -136,16 +338,69 @@ def reload_model(
     request: ReloadModelRequest,
     x_iqa_admin_token: str | None = Header(default=None, alias="X-IQA-Admin-Token"),
 ) -> dict[str, Any]:
-    _require_token("IQA_ADMIN_TOKEN", x_iqa_admin_token)
+    expected_token = os.getenv("IQA_ADMIN_TOKEN")
+
+    if not expected_token:
+        audit_event = _append_admin_reload_log(
+            scenario_id=request.scenario_id,
+            stage=request.stage,
+            reload_status="refused",
+            accepted=False,
+            reason="IQA_ADMIN_TOKEN is not configured.",
+        )
+        _inc_security_metric("reload_refused_total")
+        _inc_security_metric("ai_security_incident_total")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "reason": "IQA_ADMIN_TOKEN is not configured.",
+                "audit_logged": True,
+                "reload_event_id": audit_event["reload_event_id"],
+            },
+        )
+
+    if x_iqa_admin_token != expected_token:
+        audit_event = _append_admin_reload_log(
+            scenario_id=request.scenario_id,
+            stage=request.stage,
+            reload_status="refused",
+            accepted=False,
+            reason="Missing or invalid IQA_ADMIN_TOKEN.",
+        )
+        _inc_security_metric("reload_refused_total")
+        _inc_security_metric("ai_security_incident_total")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "reason": "Missing or invalid IQA_ADMIN_TOKEN.",
+                "audit_logged": True,
+                "reload_event_id": audit_event["reload_event_id"],
+            },
+        )
+
     model_name = registered_model_name(request.scenario_id)
+    target = ModelRegistryRef(
+        scenario_id=request.scenario_id,
+        registered_model_name=model_name,
+        stage=request.stage,
+    ).to_dict()
+
+    audit_event = _append_admin_reload_log(
+        scenario_id=request.scenario_id,
+        stage=request.stage,
+        reload_status="accepted",
+        accepted=True,
+        reason="Admin reload accepted.",
+        model_name=model_name,
+    )
+
     return {
         "accepted": True,
+        "reload_status": "accepted",
         "source_of_truth": "mlflow_registry",
-        "target": ModelRegistryRef(
-            scenario_id=request.scenario_id,
-            registered_model_name=model_name,
-            stage=request.stage,
-        ).to_dict(),
+        "audit_logged": True,
+        "audit": audit_event,
+        "target": target,
     }
 
 
@@ -154,6 +409,8 @@ __all__ = [
     "PieceEventPredictRequest",
     "PredictRequest",
     "ReloadModelRequest",
+    "ADMIN_RELOAD_LOG",
+    "AI_SECURITY_METRICS",
     "app",
     "feedback",
     "health",

@@ -3,7 +3,10 @@
   "model_type": "functional_unet_resnet18_det1_context2b",
   "status": "fixed",
   "artifact_uri": "s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt",
-  "sha256": "pending-restore",
+  "sha256": "a2d9c0ed1c039dcc6fc81f312a67906ea9dbbb7ef10bc1306b35e16497b3e61e",
+  "source_run": "Casting_multiclass_v42b_from_v41b_e002_round2_top100_selected_ft",
+  "source_checkpoint": "checkpoint_epoch_003.pt",
+  "usage_note": "Temporary ROI checkpoint for integration testing; not asserted as champion.",
   "runtime": {
     "package": "iqa.models.segmentation",
     "loader": "build_segmentation_model"

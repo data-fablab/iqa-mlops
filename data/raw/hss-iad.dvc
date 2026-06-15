@@ -1,0 +1,6 @@
+outs:
+- md5: 6950aec2a9977551fecd9beffdd2a55d.dir
+  size: 130649421
+  nfiles: 2275
+  hash: md5
+  path: hss-iad

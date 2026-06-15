@@ -9,6 +9,7 @@ storage:
   source_datasets_bucket: "iqa-source-datasets"
   ingested_images_bucket: "iqa-ingested-images"
   dvc_bucket: "iqa-dvc"
+  roi_masks_bucket: "iqa-roi-masks"
   heatmaps_bucket: "iqa-heatmaps"
   models_bucket: "iqa-models"
   mlflow_bucket: "mlflow-artifacts"

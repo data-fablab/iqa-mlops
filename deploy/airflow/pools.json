@@ -1,0 +1,7 @@
+{
+  "iqa_gpu": {
+    "description": "Single GPU pool for Feature-AE training/eval tasks (iqa_lifecycle DAG). slots=1 enforces max_active_tasks=1 on GPU-bound tasks.",
+    "slots": 1,
+    "include_deferred": false
+  }
+}

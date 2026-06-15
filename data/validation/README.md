@@ -1,13 +1,19 @@
-# Validation Set Contract
+# Validation And Calibration Contracts
 
 `validation_set_v001` is frozen before replay. It is excluded from bootstrap,
-calibration, replay plans, and candidate Feature-AE datasets.
+calibration, replay plans, candidate Feature-AE datasets and threshold
+calibration.
+
+`calibration_set_v001` is a good-only set reserved for Feature-AE threshold
+calibration. It is excluded from bootstrap, replay, train and validation.
 
 Required invariant:
 
 ```text
-bootstrap_events ∩ replay_events ∩ validation_set_v001 = empty
+bootstrap ∩ calibration ∩ replay ∩ validation = empty
 ```
 
-The validation set must be stored as manifests and referenced by deterministic
-IDs; heavy images stay outside Git.
+The Casting dataset is a historical source replayed through IQA ingestion
+contracts. Runtime production images will be stored in MinIO and traced in
+PostgreSQL, but Phase 1 remains locally testable through deterministic
+manifests. Heavy images stay outside Git and are versioned through DVC/MinIO.
