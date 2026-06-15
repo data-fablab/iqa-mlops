@@ -56,7 +56,9 @@ class ProdModelLoader:
         )
 
         artifact_uri = artifact_info["artifact_uri"]
-        version = self._extract_version_from_uri(artifact_uri)
+        # Prefer the authoritative MLflow registry version; fall back to parsing the
+        # artifact URI only when resolve_model_artifacts cannot supply it.
+        version = artifact_info.get("version") or self._extract_version_from_uri(artifact_uri)
 
         checkpoint_path = self._resolve_checkpoint_path(artifact_uri)
         model = load_rd_feature_ae_gated(checkpoint_path)

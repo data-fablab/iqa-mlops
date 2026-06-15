@@ -198,7 +198,7 @@ def handle_stage_change_event(event):
         )
         # Log la transition
         log_transition(
-            event, 
+            event,
             triggered_by="rollback_agent" if event["previous_stage"] == "archived" else "mlops"
         )
 ```
@@ -265,22 +265,22 @@ def auto_rollback_if_needed():
     """Appelé par monitoring agent toutes les minutes."""
     current_metrics = get_inference_metrics()
     thresholds = load_rollback_triggers()
-    
+
     if any(exceeds_threshold(m, thresholds) for m in current_metrics.values()):
         # Déclenche rollback auto
         prod_version = get_current_prod_version()
         previous_version = get_previous_prod_version()
-        
+
         # Log incident
         create_incident(
             title="Auto-rollback triggered",
             description=f"Rolled back from v{prod_version} to v{previous_version}"
         )
-        
+
         # Bascule MLflow
         set_stage(previous_version, "prod")
         set_stage(prod_version, "archived")
-        
+
         # Reload
         trigger_reload()
 ```
@@ -307,10 +307,10 @@ def log_transition(transition_event):
         "user_email": transition_event.get("user"),
         "metrics": transition_event.get("metrics_snapshot"),
     }
-    
+
     # Log strukturé
     logger.info("model_transition", extra=entry)
-    
+
     # Stockage PostgreSQL
     db.model_transitions.insert(entry)
 ```
@@ -329,17 +329,17 @@ def log_transition(transition_event):
 
 ## FAQ
 
-**Q: Comment savoir quelle version est actuellement en prod ?**  
+**Q: Comment savoir quelle version est actuellement en prod ?**
 A: Query MLflow : `get_latest_versions(model_name, stages=["prod"])`
 
-**Q: Que se passe-t-il si un artifact MinIO disparaît ?**  
+**Q: Que se passe-t-il si un artifact MinIO disparaît ?**
 A: Impossible de loader cette version. Rollback sera bloqué. Audit logs indiqueront la corruption.
 
-**Q: Peut-on avoir plusieurs versions en stage `prod` ?**  
+**Q: Peut-on avoir plusieurs versions en stage `prod` ?**
 A: Non. MLflow enforce : un seul registered model + version en stage `prod` à la fois (immutable stage rule).
 
-**Q: Combien de temps pour un rollback ?**  
+**Q: Combien de temps pour un rollback ?**
 A: < 1 minute : change stage MLflow + reload inference service.
 
-**Q: Les gates sont-ils re-validées lors du rollback ?**  
+**Q: Les gates sont-ils re-validées lors du rollback ?**
 A: Non. Si v2 était en prod avant, elle a déjà passé les gates. Rollback est une restauration, pas une nouvelle promotion.

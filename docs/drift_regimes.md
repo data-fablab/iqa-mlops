@@ -192,13 +192,13 @@ Les tâches reçoivent les paramètres via le contexte :
 def task_dataset(**context):
     regime = context.get("regime", "natural")
     scenario_id = context.get("scenario_id", "production_replay_natural")
-    
+
     # Charger le bon plan
     if regime == "natural":
         plan_file = "casting_flux_replay_plan_natural.csv"
     else:
         plan_file = "casting_flux_replay_plan_drift.csv"
-    
+
     return build_candidate_dataset(plan_file=plan_file)
 ```
 

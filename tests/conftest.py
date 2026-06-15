@@ -6,11 +6,9 @@ import sys
 from pathlib import Path
 
 import pytest
-import torch
-from PIL import Image
 
-from iqa.datasets import FEATURE_AE_TILE_SIZE
-from iqa.models.feature_ae import DEFAULT_FEATURE_LAYERS, ReverseDistillationGatedDualContextResNet18
+# NOTE: heavy imports (torch, PIL, iqa.models.feature_ae, iqa.datasets) are
+# deferred into the fixtures that need them so test collection stays lightweight.
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +21,9 @@ for path in (ROOT, ROOT / "src"):
 @pytest.fixture
 def synthetic_feature_ae_checkpoint(tmp_path: Path) -> Path:
     """Create a minimal Feature AE checkpoint for testing."""
+    import torch
+    from iqa.models.feature_ae import DEFAULT_FEATURE_LAYERS, ReverseDistillationGatedDualContextResNet18
+
     checkpoint_path = tmp_path / "checkpoint.pt"
     model = ReverseDistillationGatedDualContextResNet18(layers=DEFAULT_FEATURE_LAYERS)
     torch.save(model.state_dict(), checkpoint_path)
@@ -65,6 +66,9 @@ def synthetic_validation_manifest(tmp_path: Path) -> Path:
 @pytest.fixture
 def synthetic_image_root(tmp_path: Path, synthetic_validation_manifest: Path) -> Path:
     """Create synthetic validation images."""
+    from PIL import Image
+    from iqa.datasets import FEATURE_AE_TILE_SIZE
+
     image_dir = tmp_path / "images"
     image_dir.mkdir()
     for i in range(4):
