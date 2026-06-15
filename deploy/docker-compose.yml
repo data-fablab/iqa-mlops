@@ -118,6 +118,7 @@ services:
     env_file: ../.env
     volumes:
       - ./minio/init-buckets.sh:/init-buckets.sh:ro
+      - ./minio/lifecycle-heatmaps.json:/lifecycle-heatmaps.json:ro
     entrypoint: ["/bin/sh", "/init-buckets.sh"]
     depends_on: [minio]
 

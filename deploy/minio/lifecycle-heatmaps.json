@@ -1,0 +1,14 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-heatmap-lots",
+      "Filter": {
+        "Prefix": "lots/"
+      },
+      "Status": "Enabled",
+      "Expiration": {
+        "Days": 30
+      }
+    }
+  ]
+}
