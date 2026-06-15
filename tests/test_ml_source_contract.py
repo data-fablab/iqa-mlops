@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import tomllib
 from pathlib import Path
 
@@ -13,8 +14,31 @@ from iqa.datasets import (
     CastingImageDataset,
 )
 from iqa.inference import predict_feature_ae_image
+from iqa.inference.contracts import InferenceResult
 from iqa.models.feature_ae import ReverseDistillationGatedDualContextResNet18
 from iqa.training.feature_ae import FeatureAETrainingConfig, train_feature_ae
+
+_RESULT_FIELD_NAMES = {f.name for f in dataclasses.fields(InferenceResult)}
+
+
+def test_inference_result_exposes_roi_status() -> None:
+    assert "roi_status" in _RESULT_FIELD_NAMES
+
+
+def test_inference_result_exposes_statut_not_decision() -> None:
+    assert "statut" in _RESULT_FIELD_NAMES
+    assert "decision" not in _RESULT_FIELD_NAMES
+
+
+def test_piece_event_importable_from_inference_contracts() -> None:
+    from iqa.inference.contracts import PieceEvent  # noqa: F401
+
+
+def test_inference_contracts_all_exposes_required_symbols() -> None:
+    import iqa.inference.contracts as contracts
+
+    required = {"PieceEvent", "InferenceRequest", "InferenceResult", "Decision", "placeholder_inference"}
+    assert required <= set(contracts.__all__)
 
 
 def _write_rgb_image(path: Path) -> None:
