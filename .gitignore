@@ -37,3 +37,5 @@ reports/mvp_validation/candidate_datasets/*.csv
 reports/mvp_validation/evaluation/*.csv
 reports/mvp_validation/incidents/*.csv
 reports/mvp_validation/validation_matrix.csv
+IQA_Planning_Fusion.md
+tâche_s1_s2.md
