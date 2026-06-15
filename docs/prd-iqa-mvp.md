@@ -14,7 +14,10 @@ IQA produit, pour chaque `piece_event` multi-vues :
 - une heatmap explicable ;
 - une trace `sha256 -> piece_event -> scenario -> lot -> dataset_version -> model_version -> prediction -> feedback`.
 
-Le dataset Casting est consomme comme un flux historique rejoue (`historical_replay`). La production reelle utilisera le meme contrat via `production_ingest`. Dans les deux cas, PostgreSQL conserve les faits et URI, tandis que MinIO conserve les fichiers images et artefacts.
+Le dataset Casting est consomme comme un flux historique rejoue
+(`historical_replay`). La production reelle utilisera le meme contrat via
+`production_ingest`. Dans la cible MVP, PostgreSQL conserve les faits et URI,
+tandis que MinIO conserve les fichiers images et artefacts.
 
 Pipeline ML :
 ```text
@@ -36,7 +39,7 @@ image
 - Le Feature-AE est le seul modele vivant.
 - Les scenarios de replay sont isoles par `scenario_id`.
 - `validation_set_v001` est fige hors replay et hors calibration.
-- Les promotions de modeles passent par MLflow et des gates chiffrees.
+- Les promotions de modeles doivent passer par MLflow et des gates chiffrees.
 - La CI code et la boucle modele Airflow sont separees.
 - Le serveur cible est le serveur IQA GPU RTX 3060 sous Ubuntu Server, pas Windows + WSL2.
 
@@ -75,7 +78,7 @@ Inclus :
 - DVC ;
 - MinIO ;
 - Prometheus/Grafana ;
-- Feature-AE lifecycle ;
+- contrat Feature-AE lifecycle ;
 - replay naturel et drift controle ;
 - incidents rejouables.
 
@@ -91,7 +94,7 @@ Hors scope :
 ## 7. Jalons
 
 ```text
-J7  -> tracer bullet : une piece traverse API, feedback, PostgreSQL, MLflow
+J7  -> tracer bullet cible : une piece traverse API, feedback, PostgreSQL, MLflow
 J14 -> replay naturel + premiere boucle de promotion
 J21 -> drift, dashboards, review Sophie, incidents
 J24 -> feature freeze + deploiement serveur IQA GPU RTX 3060 + runbook
@@ -108,7 +111,7 @@ J28 -> soutenance
 - Train Feature-AE = good-only + ROI-ok + hors validation/calibration/incident.
 - GT defaut oracle = apres prediction uniquement ; le GT reste souverain pour
   l'eligibilite train.
-- MLflow Registry est la source de verite de la promotion et du rollback.
+- MLflow Registry est la source de verite cible de la promotion et du rollback.
 - Registered models par scenario : `feature_ae__production_replay_natural` et
   `feature_ae__drift_domain_extension`.
 - `event_time`, `recorded_at` et `is_simulated` separent le temps simule, le

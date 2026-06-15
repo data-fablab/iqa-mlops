@@ -1,10 +1,10 @@
 # Runbook Phase 1 - Squelette IQA
 
-Ce runbook couvre le perimetre de la Phase 1 (cf. `Architecture-Projet-IQA.md`
-section 10 et `Repartition-Taches-Phases-1-2.md`) : squelette repo, configs,
-CI, PostgreSQL, MinIO, API `/health`. Il decrit comment installer le projet et
-demarrer le socle Docker Compose sur une station de travail ou sur le serveur
-IQA GPU RTX 3060.
+Ce runbook couvre le perimetre de la Phase 1 (cf. `architecture-iqa.md`
+section 12 et `repartition-taches-phases-1-2.md`) : squelette repo, configs,
+CI, PostgreSQL infra, MinIO, API `/health`, ROI bootstrap et smoke tests. Il
+decrit comment installer le projet et demarrer le socle Docker Compose sur une
+station de travail ou sur le serveur IQA GPU RTX 3060.
 
 ## 1. Prerequis
 
@@ -28,7 +28,8 @@ make test      # uv run pytest -q
 
 `make test` valide les contrats : DAGs Airflow importables, services Docker
 Compose presents, configs presentes, documentation a jour (voir
-`tests/test_architecture_contract.py` et `tests/test_repo_init_contract.py`).
+`tests/contracts/test_architecture_contract.py` et
+`tests/contracts/test_repo_contract.py`).
 
 ## 3. Configuration de l'environnement
 
@@ -89,20 +90,23 @@ docker compose up -d prometheus grafana reverse-proxy
 ## 7. Airflow (LocalExecutor, pool GPU)
 
 ```bash
-docker compose up airflow-init   # une fois : db migrate + import pools.json
-docker compose run --rm airflow-webserver airflow users create \
+cd deploy
+docker compose --env-file ../.env up airflow-init   # une fois : db migrate + import pools.json
+docker compose --env-file ../.env run --rm airflow-webserver airflow users create \
   --username admin \
   --firstname IQA \
   --lastname Admin \
   --role Admin \
   --email admin@example.local \
   --password <mot-de-passe-admin-airflow>
-docker compose up -d airflow-webserver airflow-scheduler
+docker compose --env-file ../.env up -d airflow-webserver airflow-scheduler
 ```
 
 - `AIRFLOW__CORE__EXECUTOR=LocalExecutor` (pas de Celery/Kubernetes).
 - Le pool `iqa_gpu` (1 slot) est importe depuis `deploy/airflow/pools.json` et
   contraint les taches GPU du DAG `iqa_lifecycle` a `max_active_tasks=1`.
+- Les DAGs Phase 1 sont importables et exposent les bonnes frontieres batch ;
+  certaines commandes appelees restent des squelettes avec statut `planned`.
 - Ne pas commiter le mot de passe Airflow ; il reste un secret d'exploitation.
 
 Sur serveur RTX 3060, les tests d'inference/training GPU utilisent `cu128` :
@@ -113,7 +117,7 @@ docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.ym
   uv run --extra cu128 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-## 8. Streamlit (vitrine Sophie, placeholder)
+## 8. Streamlit (vitrine Sophie Phase 1)
 
 ```bash
 docker compose up -d iqa-streamlit
@@ -131,7 +135,7 @@ MVP reste automatise par `oracle_gt`; `human_sophie` est futur.
 
 `.github/workflows/ci.yml` execute `ruff check` puis `pytest -q` sur chaque
 push/PR vers `main`. La CI ne declenche jamais d'entrainement (decision
-Phase 1, cf. `Architecture-Projet-IQA.md` section 11).
+Phase 1, cf. `architecture-iqa.md` section 13).
 
 ## 10. Tout arreter
 

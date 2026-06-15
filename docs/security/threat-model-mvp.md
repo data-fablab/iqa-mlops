@@ -30,5 +30,5 @@ by the governance matrix.
 - API contracts: `src/iqa/api/schemas.py`
 - API implementation: `src/iqa/api/main.py`
 - Security tests: `tests/security/test_api_security_contracts.py`
-- Governance matrix: `docs/governance/iqa_phase1_governance_matrix.md`
+- Governance matrix: `docs/governance/iqa-phase1-governance-matrix.md`
 - Reports: `reports/phase1/`

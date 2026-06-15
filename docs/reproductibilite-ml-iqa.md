@@ -6,7 +6,7 @@ Cette page decrit le chemin minimal permettant de repartir du dataset source Cas
 
 Le repo initial doit livrer le code source reproductible, pas seulement des manifests ou des artefacts deja generes.
 
-Chemin cible :
+Chemin reproductible cible :
 ```text
 dataset source Casting
 -> ingestion / manifests
@@ -20,8 +20,8 @@ Le ROI segmenter et le teacher ResNet18 sont figes. Le RD Feature-AE est le seul
 
 Les contrats detailles des deux modeles sont separes :
 
-- [Modele Feature-AE IQA](Modele-Feature-AE-IQA.md) ;
-- [Modele Segmentation ROI IQA](Modele-Segmentation-ROI-IQA.md).
+- [Modele Feature-AE IQA](modele-feature-ae-iqa.md) ;
+- [Modele Segmentation ROI IQA](modele-segmentation-roi-iqa.md).
 
 ## Preprocessing Feature-AE
 
@@ -95,10 +95,12 @@ uv run --extra cpu iqa-predict-image `
 ## Stockage
 
 - Dataset source : `s3://iqa-source-datasets` et/ou DVC.
-- Images ingerees : `s3://iqa-ingested-images`, avec faits et URI dans PostgreSQL.
+- Images ingerees : `s3://iqa-ingested-images`, avec faits et URI dans
+  PostgreSQL en cible runtime.
 - Artefacts : `s3://iqa-models`, `s3://iqa-roi-masks`, `s3://iqa-heatmaps`, `s3://mlflow-artifacts`, `s3://iqa-dvc`.
 
-PostgreSQL stocke les faits et URI. MinIO stocke les fichiers lourds.
+PostgreSQL est la cible pour les faits et URI runtime. MinIO stocke les
+fichiers lourds.
 Les checkpoints `.pt` ne sont pas versionnes dans Git : Git conserve les
 manifests, les versions, les URI MinIO et les checksums ; MinIO conserve les
 artefacts lourds comme `s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`.

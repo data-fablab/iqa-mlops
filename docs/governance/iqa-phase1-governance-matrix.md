@@ -18,7 +18,7 @@ The system is not legally classified as a high risk AI system in this phase. The
 
 | Governance area | Phase 1 control | Technical evidence | Status |
 | --- | --- | --- | --- |
-| Risk management | MVP AI security threat model defines key threats T1 to T10 | docs/security/threat_model_mvp.md and Word threat model report | Implemented |
+| Risk management | MVP AI security threat model defines key threats T1 to T10 | docs/security/threat-model-mvp.md and Word threat model report | Implemented |
 | API contracts | Pydantic schemas reject invalid or unexpected fields | src/iqa/api/schemas.py and pytest contract tests | Implemented |
 | Prediction traceability | Prediction returns prediction_id, piece_event_id, scenario_id, model versions and audit block | src/iqa/api/main.py and tests/security/test_api_security_contracts.py | Implemented |
 | Feedback governance | Feedback requires prediction_id and cannot be replayed after closure | feedback lifecycle tests | Implemented |
