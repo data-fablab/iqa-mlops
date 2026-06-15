@@ -246,6 +246,29 @@ class TestModelVersionTracking:
 
             assert result.version == "unknown"
 
+    def test_version_uses_registry_version_when_available(self, tmp_path: Path) -> None:
+        """The authoritative MLflow registry version takes precedence over URI parsing."""
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir()
+        checkpoint_artifact = artifact_dir / "checkpoint.pt"
+        torch.save(torch.nn.Linear(10, 5).state_dict(), checkpoint_artifact)
+
+        with patch("iqa.inference.model_loader.registered_model_name"), \
+             patch("iqa.inference.model_loader.resolve_model_artifacts") as mock_resolve, \
+             patch("iqa.inference.model_loader.load_rd_feature_ae_gated") as mock_load:
+
+            mock_resolve.return_value = {
+                "artifact_uri": str(artifact_dir),
+                "stage": "prod",
+                "version": "7",
+            }
+            mock_load.return_value = MagicMock()
+
+            loader = ProdModelLoader("production_replay_natural")
+            result = loader.load()
+
+            assert result.version == "7"
+
 
 class TestReloadAfterPromotion:
     """Support reloading model after promotion."""

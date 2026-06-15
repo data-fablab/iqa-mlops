@@ -192,8 +192,14 @@ class TestMLflowStateTransition:
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
 
+        # get_model_version reports the stage *before* the transition.
+        mock_existing_version = MagicMock()
+        mock_existing_version.current_stage = "candidate"
+        mock_client.get_model_version.return_value = mock_existing_version
+
+        # transition returns the version with its new stage.
         mock_model_version = MagicMock()
-        mock_model_version.current_stage = "candidate"
+        mock_model_version.current_stage = "test"
         mock_client.transition_model_version_stage.return_value = mock_model_version
 
         result = transition_model_stage(

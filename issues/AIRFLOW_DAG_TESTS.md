@@ -32,7 +32,7 @@ When Airflow is not available, `DAG = None`, and the DAG creation is skipped (li
 
 ## Skip Messages
 - `DAG dependencies not available` → Airflow imports failed
-- `DAG is None (Airflow not available)` → DAG creation was skipped  
+- `DAG is None (Airflow not available)` → DAG creation was skipped
 - `Airflow not installed: No module named 'airflow.models'` → Direct import failure
 
 ## Resolution
@@ -49,7 +49,7 @@ pytest tests/test_iqa_lifecycle_dag.py tests/test_airflow_dags.py -v
 - Execution tests **SKIP** gracefully: No Airflow → skip, not fail
 
 ## Tests that Always Pass (No Airflow Needed)
-✅ `test_iqa_lifecycle_dag_imports_without_error`  
+✅ `test_iqa_lifecycle_dag_imports_without_error`
 ✅ `test_iqa_lifecycle_dag_source_declares_seven_tasks`
 
 These tests verify the DAG **structure** without needing Airflow runtime.
