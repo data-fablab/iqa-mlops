@@ -6,6 +6,7 @@ import json
 import math
 import shutil
 import csv
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -61,9 +62,38 @@ class FeatureAEEvaluationConfig:
     score_smoothing: str = "median3"
     score_image: str = "topk_mean"
     topk_fraction: float = 0.005
+    threshold_orange: float = 0.02
+    threshold_red: float = 0.05
     save_score_maps: bool = False
     save_previews: bool = False
     max_previews: int = 31
+
+
+@dataclass(frozen=True)
+class EvaluationReport:
+    """Structured evaluation report for Feature AE model on validation set."""
+
+    model_version: str
+    average_precision: float
+    recall: float
+    orange_rate: float
+    latency_ms: float
+    sample_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "model_version": self.model_version,
+            "average_precision": self.average_precision,
+            "recall": self.recall,
+            "orange_rate": self.orange_rate,
+            "latency_ms": self.latency_ms,
+            "sample_count": self.sample_count,
+        }
+
+    def to_json(self) -> str:
+        """Convert to JSON string."""
+        return json.dumps(self.to_dict(), indent=2)
 
 
 def parse_layer_loss_weights(values: list[str] | tuple[str, ...] | None) -> dict[str, float]:
@@ -148,6 +178,55 @@ def compute_binary_metrics(
     return metrics
 
 
+def compute_decision_metrics(
+    image_labels: list[bool],
+    image_scores: list[float],
+    *,
+    threshold_orange: float,
+    threshold_red: float,
+    latencies_ms: list[float] | None = None,
+) -> dict[str, float | int]:
+    """Compute decision metrics for the recall gate from per-image scores.
+
+    Detection rule: a defect is detected when its score crosses threshold_orange
+    (anything that is not "green"). A defective image that stays green is a false
+    negative, which the ``recall == 1.0`` gate must catch.
+
+    Args:
+        image_labels: True where the image is defective.
+        image_scores: Per-image anomaly scores aligned with ``image_labels``.
+        threshold_orange: Score at/above which an image is flagged (Orange/Rouge).
+        threshold_red: Score at/above which an image is Rouge.
+        latencies_ms: Optional per-image inference latencies for the p95 latency.
+
+    Returns:
+        Dict with recall, false_negatives, orange_rate and latency_ms (p95).
+    """
+    labels = np.asarray(image_labels, dtype=bool)
+    scores = np.asarray(image_scores, dtype=np.float64)
+
+    detected = scores >= threshold_orange
+    defect_count = int(labels.sum())
+    false_negatives = int((labels & ~detected).sum())
+    recall = 1.0 if defect_count == 0 else float((labels & detected).sum() / defect_count)
+
+    orange = (scores >= threshold_orange) & (scores < threshold_red)
+    orange_rate = float(orange.mean()) if scores.size else 0.0
+
+    latency_ms = (
+        float(np.percentile(np.asarray(latencies_ms, dtype=np.float64), 95))
+        if latencies_ms
+        else 0.0
+    )
+
+    return {
+        "recall": recall,
+        "false_negatives": false_negatives,
+        "orange_rate": orange_rate,
+        "latency_ms": latency_ms,
+    }
+
+
 def _normalized_low_fpr_auc(labels: np.ndarray, scores: np.ndarray) -> float:
     fpr, tpr, _ = roc_curve(labels, scores)
     low, high = 1e-5, 1e-3
@@ -182,8 +261,10 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             items = [dataset[index] for index in range(batch_start, min(len(dataset), batch_start + config.batch_size))]
             images = torch.stack([item["image"] for item in items]).to(device)
             contexts = torch.stack([item["context_image"] for item in items]).to(device)
+            start = time.perf_counter()
             maps = feature_anomaly_map(teacher(images), model(images, context_images=contexts))
             maps = F.interpolate(maps, size=(config.image_size, config.image_size), mode="bilinear", align_corners=False)
+            tile_latency_ms = (time.perf_counter() - start) * 1000.0 / max(len(items), 1)
             for item, score_tensor in zip(items, maps.cpu(), strict=True):
                 image_id = str(item["image_id"])
                 width, height = item["image_size"]
@@ -197,8 +278,10 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
                         "gt": np.zeros((height, width), dtype=np.float32),
                         "is_defective": bool(item["is_defective"]),
                         "relative_path": str(item["relative_path"]),
+                        "latency_ms": 0.0,
                     },
                 )
+                entry["latency_ms"] += tile_latency_ms
                 score = score_tensor.squeeze(0).numpy()
                 roi = item["roi_mask"].squeeze(0).numpy()
                 gt = item["gt_mask"].squeeze(0).numpy()
@@ -222,6 +305,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
 
     image_labels: list[bool] = []
     image_scores: list[float] = []
+    image_latencies_ms: list[float] = []
     pixel_labels: list[np.ndarray] = []
     pixel_scores: list[np.ndarray] = []
     per_image: list[dict[str, Any]] = []
@@ -247,6 +331,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         gt = (entry["gt"] > 0).astype(np.uint8)
         image_labels.append(bool(entry["is_defective"]))
         image_scores.append(image_score)
+        image_latencies_ms.append(float(entry["latency_ms"]))
         pixel_labels.append(gt)
         pixel_scores.append(score_map.astype(np.float32))
         per_image.append(
@@ -264,6 +349,17 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             _save_preview(previews_dir / f"{image_id}.png", score_map)
 
     metrics = compute_binary_metrics(image_labels, image_scores, pixel_labels, pixel_scores)
+    decision = compute_decision_metrics(
+        image_labels,
+        image_scores,
+        threshold_orange=config.threshold_orange,
+        threshold_red=config.threshold_red,
+        latencies_ms=image_latencies_ms,
+    )
+    metrics["image_recall"] = decision["recall"]
+    metrics["false_negatives"] = decision["false_negatives"]
+    metrics["orange_rate"] = decision["orange_rate"]
+    metrics["latency_ms"] = decision["latency_ms"]
     result = {
         "checkpoint": str(config.checkpoint_path),
         "validation_set_id": config.validation_set_id,
@@ -339,12 +435,89 @@ def _load_gt_mask_lookup(path: Path | None) -> dict[str, Path]:
     return masks
 
 
+def evaluate_on_validation_set_v001(
+    checkpoint_path: Path | str,
+    manifest_path: Path | str,
+    image_root: Path | str,
+    output_dir: Path | str,
+    model_version: str = "candidate",
+) -> EvaluationReport:
+    """Evaluate Feature AE model on frozen validation_set_v001.
+
+    Args:
+        checkpoint_path: Path to trained Feature AE checkpoint.
+        manifest_path: Path to validation manifest CSV.
+        image_root: Root directory for images.
+        output_dir: Directory to save evaluation report.
+        model_version: Version identifier for the model.
+
+    Returns:
+        EvaluationReport with AP, recall, Orange rate, latency metrics.
+
+    Saves:
+        JSON report at output_dir/evaluation_report.json.
+    """
+    checkpoint_path = Path(checkpoint_path)
+    manifest_path = Path(manifest_path)
+    image_root = Path(image_root)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Run evaluation using existing infrastructure
+    config = FeatureAEEvaluationConfig(
+        checkpoint_path=checkpoint_path,
+        manifest_path=manifest_path,
+        image_root=image_root,
+        output_dir=output_dir,
+        validation_set_id="validation_set_v001",
+        device="cpu",
+    )
+
+    result = evaluate_feature_ae_checkpoint(config)
+    metrics = result["metrics"]
+
+    # Count evaluated images (falls back to manifest rows if none aggregated)
+    num_samples = 0
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            num_samples = sum(1 for line in f) - 1  # -1 for header
+    except Exception:
+        pass
+
+    # Extract key metrics from evaluation results. image_ap/auroc are None when
+    # the validation set is single-class; fall back to 0.0 in that case.
+    ap = metrics.get("image_ap") or 0.0
+    recall = metrics.get("image_recall", 0.0)
+    orange_rate = metrics.get("orange_rate", 0.0)
+    latency_ms = metrics.get("latency_ms", 0.0)
+    sample_count = max(len(result.get("images", [])), num_samples)
+
+    # Create report
+    report = EvaluationReport(
+        model_version=model_version,
+        average_precision=float(ap),
+        recall=float(recall),
+        orange_rate=float(orange_rate),
+        latency_ms=float(latency_ms),
+        sample_count=int(sample_count),
+    )
+
+    # Save report
+    report_path = output_dir / "evaluation_report.json"
+    report_path.write_text(report.to_json())
+
+    return report
+
+
 __all__ = [
+    "EvaluationReport",
     "FeatureAEEvaluationConfig",
     "METRIC_BEST_FILES",
     "apply_median_mad",
     "compute_binary_metrics",
+    "compute_decision_metrics",
     "evaluate_feature_ae_checkpoint",
+    "evaluate_on_validation_set_v001",
     "median_mad_stats",
     "parse_layer_loss_weights",
     "score_image_map",

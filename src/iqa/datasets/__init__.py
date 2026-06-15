@@ -1,5 +1,11 @@
 """Datasets used by IQA training and inference pipelines."""
 
+from iqa.datasets.candidate_builder import (
+    CandidateDataset,
+    build_candidate_dataset,
+    filter_candidate_samples,
+    write_candidate_manifest,
+)
 from iqa.datasets.casting import (
     CALIBRATION_SET_ID,
     FEATURE_AE_CONTEXT_SIZE,
@@ -23,6 +29,7 @@ from iqa.datasets.casting import (
 
 __all__ = [
     "CALIBRATION_SET_ID",
+    "CandidateDataset",
     "FEATURE_AE_CONTEXT_SIZE",
     "FEATURE_AE_EXCLUDED_TRAIN_SETS",
     "FEATURE_AE_PREPROCESSING_MODES",
@@ -34,10 +41,13 @@ __all__ = [
     "CastingImageSample",
     "ResizeLetterbox",
     "TiledFeatureAEDataset",
+    "build_candidate_dataset",
+    "filter_candidate_samples",
     "is_calibration_sample",
     "iter_manifest_image_samples",
     "load_image_tensor",
     "load_mask_tensor",
     "tile_boxes",
     "validate_good_only_samples",
+    "write_candidate_manifest",
 ]

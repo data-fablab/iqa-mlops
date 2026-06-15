@@ -127,12 +127,14 @@ def test_convergence_decisions_are_documented() -> None:
 
 def test_no_heavy_model_or_sqlite_artifacts_in_repo_tree() -> None:
     forbidden_suffixes = {".pt", ".pth", ".ckpt", ".onnx", ".sqlite"}
+    # Exclude: venv, cache, MLflow artifacts (temp test outputs), pytest temp files
+    excluded_dirs = {".venv", ".pytest_cache", "mlruns", "__pycache__", ".mypy_cache"}
     offenders = [
         path
         for path in ROOT.rglob("*")
         if path.is_file()
         and path.suffix.lower() in forbidden_suffixes
-        and ".venv" not in path.parts
+        and not any(excluded in path.parts for excluded in excluded_dirs)
     ]
 
     assert offenders == []
