@@ -29,7 +29,7 @@ The system is not legally classified as a high risk AI system in this phase. The
 | Security metrics | AI security counters are exposed through /metrics | metrics endpoint and pytest tests | Implemented |
 | Source of truth | reload target is resolved from MLflow registry reference | reload_model target response | Implemented for MVP |
 | Secrets governance | real secrets must stay outside Git | .gitignore, .env policy and project operating rule | Documented |
-| Reproducibility | tests are executed on CubeAI and must be replayed on Z420 | pytest outputs and future validation report | In progress |
+| Reproducibility | tests are executed locally and must be replayed on the IQA GPU RTX 3060 server | pytest outputs and future validation report | In progress |
 
 ## EU AI Act alignment
 
@@ -54,7 +54,7 @@ The system is not legally classified as a high risk AI system in this phase. The
 
 ## Current limits
 
-The Phase 1 logs are in memory and are sufficient for MVP demonstration and unit tests. On the Z420 environment, persistent logging should be implemented in PostgreSQL, JSONL logs or another agreed logging sink.
+The Phase 1 logs are in memory and are sufficient for MVP demonstration and unit tests. On the IQA GPU RTX 3060 server, persistent logging should be implemented in PostgreSQL, JSONL logs or another agreed logging sink.
 
 The governance matrix does not replace a DPIA, a legal GDPR assessment, an EU AI Act classification analysis or a full production compliance package.
 
