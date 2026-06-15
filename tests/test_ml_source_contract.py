@@ -128,4 +128,6 @@ def test_reproducible_ml_cli_commands_are_exposed() -> None:
 
     assert scripts["iqa-train-feature-ae"] == "scripts.train_feature_ae:main"
     assert scripts["iqa-predict-image"] == "scripts.predict_image:main"
+    assert scripts["iqa-predict-roi"] == "scripts.predict_roi:main"
+    assert scripts["iqa-generate-bootstrap-roi"] == "scripts.generate_bootstrap_roi:main"
     assert scripts["iqa-validate-ml-source"] == "scripts.validate_ml_source:main"

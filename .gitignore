@@ -24,7 +24,9 @@ mlruns/
 airflow/logs/
 /prometheus/
 /grafana/
-data/raw/
+data/raw/*
+!data/raw/.gitignore
+!data/raw/*.dvc
 data/processed/
 data/model_datasets/
 source-datasets/

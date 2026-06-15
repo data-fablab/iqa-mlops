@@ -110,7 +110,7 @@ taux defaut piece ~ 4,2 %
 ```
 
 ## 6. Scenarios de replay
-Deux scenarios utilisent la meme API, la meme architecture modele et les memes pipelines, mais leurs lots, datasets, metriques et versions candidates sont isoles par `scenario_id`. Seul le bootstrap V0 est partage. La simulation MVP impose trois garde-fous : amorce hors replay, drift good-only avant defauts, validation set fige hors replay.
+Deux scenarios utilisent la meme API, la meme architecture modele et les memes pipelines, mais leurs lots, datasets, metriques et versions candidates sont isoles par `scenario_id`. Seul le bootstrap V0 est partage. La simulation MVP impose quatre garde-fous : amorce hors replay, drift good-only avant defauts, validation set fige hors replay, calibration set good-only hors train et hors replay.
 
 ### Production naturelle
 ```text

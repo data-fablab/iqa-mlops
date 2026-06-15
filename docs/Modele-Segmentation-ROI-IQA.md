@@ -32,8 +32,11 @@ API publique attendue :
 ROI_SEGMENTER_MODEL_TYPE
 FunctionalSurfaceUNetResNet18Det1Context2B
 build_segmentation_model
+load_roi_segmenter
+load_roi_segmenter_checkpoint
 mask_logits_from_output
 replace_segmentation_head
+surface_probability_from_logits
 ```
 
 Les anciennes architectures de segmentation, variantes experimentales et exports training ne font pas partie du contrat public du MVP.
@@ -78,7 +81,9 @@ Le helper officiel est :
 mask_logits = mask_logits_from_output(output)
 ```
 
-Le masque binaire ROI est derive des logits par seuillage dans les modules de runtime ou d'adaptation ROI.
+Le masque binaire ROI est derive des logits dans les modules de runtime ou
+d'adaptation ROI. Pour un checkpoint multiclasses, la sortie officielle utilise
+l'`argmax` semantique et conserve la classe `functional_surface`.
 
 ## 5. Utilisation par le Feature-AE
 
@@ -152,7 +157,50 @@ PostgreSQL -> URI, version modele, statut ROI, piece_event_id
 
 Le stockage cible manipule des URI. Les fichiers lourds ne doivent pas etre stockes directement dans PostgreSQL.
 
-## 9. Non-objectifs MVP
+Bucket cible :
+
+```text
+s3://iqa-roi-masks
+```
+
+## 9. Bootstrap et cycle normal
+
+Le bootstrap Feature-AE utilise le meme contrat logique que le cycle normal :
+
+```text
+image_uri -> roi_mask_uri -> roi_quality_status -> Feature-AE
+```
+
+En Phase 1, les masques ROI bootstrap peuvent etre generes localement sous :
+
+```text
+data/processed/roi/bootstrap_v001/
+```
+
+Ce dossier reste hors Git. En cible production/replay, les masques sont stockes
+dans `s3://iqa-roi-masks` et PostgreSQL conserve les URI et faits associes.
+
+Commande bootstrap serveur :
+
+L'artefact officiel du segmenteur ROI fige est stocke dans MinIO :
+`s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`. Le manifest Git
+`models/manifests/roi_segmenter_v001_fixed/model_manifest.json` reference la
+version `roi_segmenter_v001_fixed`, la source `checkpoint_epoch_003.pt` et le
+SHA256 attendu. La CLI actuelle charge un chemin local ; le fichier
+`models/roi_segmenter_v001_fixed/checkpoint.pt` est donc une copie/cache hors Git
+a restaurer depuis MinIO avant execution.
+
+```bash
+uv run --extra cu128 --extra data iqa-generate-bootstrap-roi \
+  --manifest data/metadata/feature_ae_bootstrap_events.csv \
+  --image-root data/raw/hss-iad \
+  --checkpoint models/roi_segmenter_v001_fixed/checkpoint.pt \
+  --output-dir data/processed/roi/bootstrap_v001 \
+  --roi-model-version roi_segmenter_v001_fixed \
+  --device cuda
+```
+
+## 10. Non-objectifs MVP
 
 Hors perimetre MVP :
 

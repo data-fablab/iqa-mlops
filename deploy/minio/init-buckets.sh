@@ -13,6 +13,7 @@ for bucket in \
     iqa-dvc \
     iqa-ingested-images \
     mlflow-artifacts \
+    iqa-roi-masks \
     iqa-heatmaps \
     iqa-models \
     iqa-backups

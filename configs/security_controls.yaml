@@ -1,0 +1,39 @@
+phase: phase1_mvp
+scope:
+  - api_prediction
+  - api_feedback
+  - admin_reload
+  - ai_security_metrics
+  - model_artifact_governance
+
+controls:
+  feedback_requires_prediction_id:
+    status: implemented
+    evidence:
+      - src/iqa/api/schemas.py
+      - tests/security/test_api_security_contracts.py
+  oracle_gt_train_sovereignty:
+    status: implemented
+    evidence:
+      - src/iqa/api/main.py
+      - tests/security/test_api_security_contracts.py
+  human_sophie_display_only:
+    status: implemented
+    evidence:
+      - src/iqa/api/main.py
+      - tests/security/test_api_security_contracts.py
+  admin_reload_token_required:
+    status: implemented
+    evidence:
+      - src/iqa/api/main.py
+      - tests/security/test_api_security_contracts.py
+  ai_security_metrics:
+    status: implemented
+    evidence:
+      - src/iqa/api/main.py
+      - tests/security/test_api_security_contracts.py
+  heavy_artifacts_outside_git:
+    status: implemented
+    evidence:
+      - models/manifests/roi_segmenter_v001_fixed/model_manifest.json
+      - docs/Reproductibilite-ML-IQA.md

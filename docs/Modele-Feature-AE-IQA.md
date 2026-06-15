@@ -124,6 +124,16 @@ Regles d'entree :
 - bootstrap hors replay ;
 - candidats replay versionnes par scenario.
 
+Avant le bootstrap V0, les images `feature_ae_bootstrap_events.csv` passent par
+le segmenteur ROI fige. L'index ROI produit devient l'entree qui permet de
+conserver uniquement les images `good` avec `roi_quality_status=ok`.
+
+Sortie locale Phase 1 :
+
+```text
+data/processed/roi/bootstrap_v001/roi_predictions.csv
+```
+
 Configuration champion cible :
 
 ```text

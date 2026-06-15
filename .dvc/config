@@ -1,0 +1,6 @@
+[core]
+    analytics = false
+    remote = iqa-minio
+['remote "iqa-minio"']
+    url = s3://iqa-dvc
+    endpointurl = http://localhost:9000

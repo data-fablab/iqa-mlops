@@ -176,7 +176,7 @@ Documents cibles :
 - `architecture.md` : structure technique et responsabilites ;
 - `Modele-Feature-AE-IQA.md` : contrat du modele vivant, training, evaluation, checkpoints ;
 - `Modele-Segmentation-ROI-IQA.md` : contrat du segmenteur ROI fige et usage downstream ;
-- `server-config.md` : configuration Z420 Ubuntu Server ;
+- `server-config.md` : configuration du serveur IQA GPU RTX 3060 ;
 - `adr/0001` : validation set fige hors replay ;
 - `adr/0002` : Airflow comme orchestrateur ;
 - `adr/0003` : MinIO comme stockage objet local.
@@ -208,6 +208,7 @@ Sorties :
 ```text
 metadata + validation_set_v001
 -> bootstrap hors replay
+-> calibration_set_v001 hors replay
 -> production_replay_natural
 -> drift_domain_extension
 -> lots horodates
@@ -221,7 +222,7 @@ Sorties :
 
 Invariant :
 ```text
-bootstrap ∩ replay ∩ validation_set_v001 = vide
+bootstrap ∩ calibration ∩ replay ∩ validation = vide
 ```
 
 ### `iqa_lifecycle.py`
@@ -243,7 +244,7 @@ monitoring/feedback
 Contraintes :
 - aucun defaut dans le train normal ;
 - aucune ROI warning/fail dans le train normal ;
-- aucun piece event du validation set dans le train ou le replay ;
+- aucun piece event du validation set ou du calibration set dans le train ou le replay ;
 - le ROI segmenter et le teacher restent figes.
 
 ### `iqa_monitoring.py`
@@ -267,6 +268,7 @@ data/metadata/       -> manifests CSV
 data/processed/      -> ROI, features, heatmaps, exports
 data/model_datasets/ -> datasets candidats Feature-AE
 data/validation/     -> validation_set_v001
+data/metadata/       -> calibration_set_v001
 ```
 
 Stockage objet MinIO :
@@ -275,9 +277,29 @@ s3://iqa-source-datasets -> dataset historique immutable
 s3://iqa-dvc             -> remote DVC
 s3://iqa-ingested-images -> images brutes recues ou rejouees
 s3://mlflow-artifacts  -> artefacts MLflow
+s3://iqa-roi-masks     -> masques ROI produits par le segmenteur fige
 s3://iqa-heatmaps      -> heatmaps et overlays
 s3://iqa-models        -> artefacts modeles candidats, promus et archives
 s3://iqa-backups       -> sauvegardes applicatives
+```
+
+Flux bootstrap et cycle normal :
+
+```text
+bootstrap_v001
+-> feature_ae_bootstrap_events.csv
+-> ROI segmenter fige
+-> data/processed/roi/bootstrap_v001/roi_predictions.csv
+-> dataset Feature-AE V0 good-only + ROI-ok
+
+production_ingest / historical_replay
+-> s3://iqa-ingested-images
+-> ROI segmenter fige
+-> s3://iqa-roi-masks
+-> Feature-AE
+-> s3://iqa-heatmaps
+-> feedback oracle GT
+-> faits et URI PostgreSQL
 ```
 
 Manifests essentiels :
@@ -289,6 +311,7 @@ casting_flux_replay_plan_natural.csv
 casting_flux_replay_plan_drift.csv
 replay_scenarios.csv
 validation_set_v001.csv
+calibration_set_v001.csv
 ```
 
 ## 7. Package `src/iqa`
@@ -375,7 +398,7 @@ Tests attendus :
 10. Monitoring Prometheus/Grafana.
 11. Streamlit dashboard Marc + review Sophie.
 12. Incidents rejouables, dont rollback via MLflow Registry.
-13. Deploiement Z420 Ubuntu Server + runbook.
+13. Deploiement serveur IQA GPU RTX 3060 + runbook.
 
 ## 11. Decisions retenues
 
@@ -388,6 +411,7 @@ Tests attendus :
 - DVC utilise le remote `s3://iqa-dvc`.
 - Le module `src/iqa/storage` est le seul a parler a MinIO/boto3.
 - Le validation set est fige avant replay et hors calibration.
+- Le calibration set est good-only et exclu de bootstrap, replay, train et validation.
 - Les scenarios sont isoles par `scenario_id`.
 - L'interface Sophie est une vitrine MVP ; le feedback operationnel est l'oracle GT.
 - MLflow Registry est la source de verite de la promotion et du rollback.
@@ -404,7 +428,7 @@ template MLOps + microservices Docker + Airflow + MinIO + validation set fige
 + oracle GT MVP + Feature-AE lifecycle + Ubuntu Server
 ```
 
-Elle reste suffisamment simple pour le MVP, tout en donnant une colonne vertebrale credible pour la soutenance et le deploiement sur la Z420.
+Elle reste suffisamment simple pour le MVP, tout en donnant une colonne vertebrale credible pour la soutenance et le deploiement sur le serveur IQA GPU RTX 3060.
 
 ## 13. Decisions de convergence Ken/IQA
 

@@ -3,7 +3,9 @@ services:
     build:
       context: ..
     command: uv run --extra cpu iqa-api
-    env_file: ../.env.example
+    env_file: ../.env
+    environment:
+      IQA_INFERENCE_URL: http://iqa-inference:8100
     ports: ["8000:8000"]
     depends_on: [iqa-inference, postgres]
 
@@ -11,68 +13,109 @@ services:
     build:
       context: ..
     command: uv run --extra cpu iqa-inference
-    env_file: ../.env.example
+    env_file: ../.env
     ports: ["8100:8100"]
 
   iqa-streamlit:
     image: python:3.12-slim
-    command: python -m http.server 8501
+    working_dir: /app
+    command: sh -c "pip install --no-cache-dir streamlit==1.40.* requests && streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
+    env_file: ../.env
+    environment:
+      IQA_API_URL: http://iqa-api:8000
     ports: ["8501:8501"]
+    volumes:
+      - ./streamlit/app.py:/app/app.py:ro
+    depends_on: [iqa-api]
 
   iqa-ingestion:
     build:
       context: ..
     command: uv run --extra cpu iqa-run-ingestion
-    env_file: ../.env.example
+    env_file: ../.env
     profiles: ["batch"]
 
   iqa-replay:
     build:
       context: ..
     command: uv run --extra cpu iqa-run-replay
-    env_file: ../.env.example
+    env_file: ../.env
     profiles: ["batch"]
 
   iqa-trainer:
     build:
       context: ..
     command: uv run --extra cpu iqa-run-lifecycle
-    env_file: ../.env.example
+    env_file: ../.env
     profiles: ["batch"]
 
   iqa-monitoring:
     build:
       context: ..
     command: uv run --extra cpu iqa-run-monitoring
-    env_file: ../.env.example
+    env_file: ../.env
     profiles: ["batch"]
+
+  airflow-init:
+    image: apache/airflow:2.10.5-python3.12
+    entrypoint: /bin/bash
+    command: ["-c", "airflow db migrate && airflow pools import /opt/airflow/pools.json"]
+    env_file: ../.env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
+    volumes:
+      - ./airflow/pools.json:/opt/airflow/pools.json:ro
+    depends_on: [postgres]
 
   airflow-webserver:
     image: apache/airflow:2.10.5-python3.12
     command: webserver
+    env_file: ../.env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
     ports: ["8080:8080"]
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_started
+      airflow-init:
+        condition: service_completed_successfully
 
   airflow-scheduler:
     image: apache/airflow:2.10.5-python3.12
     command: scheduler
-    depends_on: [postgres]
+    env_file: ../.env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
+    depends_on:
+      postgres:
+        condition: service_started
+      airflow-init:
+        condition: service_completed_successfully
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
-    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql://mlflow:mlflow_password@postgres:5432/mlflow --default-artifact-root s3://mlflow-artifacts
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/mlflow --default-artifact-root s3://mlflow-artifacts --allowed-hosts ${IQA_MLFLOW_ALLOWED_HOSTS:-localhost,localhost:5000,127.0.0.1,127.0.0.1:5000,mlflow,mlflow:5000}
+    env_file: ../.env
     ports: ["5000:5000"]
     depends_on: [postgres, minio]
 
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
+    env_file: ../.env
     ports: ["9000:9000", "9001:9001"]
     volumes:
       - minio_data:/data
 
   minio-init:
     image: minio/mc:latest
+    env_file: ../.env
     volumes:
       - ./minio/init-buckets.sh:/init-buckets.sh:ro
     entrypoint: ["/bin/sh", "/init-buckets.sh"]
@@ -82,8 +125,8 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: postgres
-      POSTGRES_USER: iqa
-      POSTGRES_PASSWORD: iqa_password
+      POSTGRES_USER: ${IQA_POSTGRES_USER:-iqa}
+      POSTGRES_PASSWORD: ${IQA_POSTGRES_PASSWORD:-iqa_password}
     ports: ["5432:5432"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -97,6 +140,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    env_file: ../.env
     ports: ["3000:3000"]
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning

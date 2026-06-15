@@ -1,12 +1,7 @@
--- Provisions the additional databases/users expected by .env.example
--- (IQA_METADATA_DB_URL, IQA_MLFLOW_DB_URL, IQA_AIRFLOW_DB_URL).
--- The default "iqa" user/database are created by the postgres image itself
--- from POSTGRES_USER / POSTGRES_DB.
+-- Provisions the logical databases expected by .env.example.
+-- The default "iqa" user is created by the postgres image itself from
+-- POSTGRES_USER / POSTGRES_PASSWORD and owns these databases.
 
 CREATE DATABASE iqa_metadata OWNER iqa;
-
-CREATE USER mlflow WITH PASSWORD 'mlflow_password';
-CREATE DATABASE mlflow OWNER mlflow;
-
-CREATE USER airflow WITH PASSWORD 'airflow_password';
-CREATE DATABASE airflow OWNER airflow;
+CREATE DATABASE mlflow OWNER iqa;
+CREATE DATABASE airflow OWNER iqa;
