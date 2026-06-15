@@ -18,6 +18,9 @@ st.set_page_config(page_title="IQA - Vitrine Sophie", layout="wide")
 st.title("Industrial Quality Assistant - Vitrine Sophie")
 st.caption(f"iqa-api: {API_URL}")
 
+if "last_prediction" not in st.session_state:
+    st.session_state["last_prediction"] = None
+
 
 def _get(path: str):
     response = requests.get(f"{API_URL}{path}", timeout=5)
@@ -62,6 +65,7 @@ if submitted:
             f"/piece-events/{piece_event_id}/predict",
             {"scenario_id": scenario_id, "image_uri": image_uri},
         )
+        st.session_state["last_prediction"] = result
         st.json(result)
     except requests.RequestException as exc:
         st.error(f"Predict indisponible : {exc}")
@@ -69,8 +73,14 @@ if submitted:
 st.divider()
 
 st.header("Feedback (oracle GT)")
-st.caption("MVP : seul oracle_gt est operationnel ; human_sophie reste une vitrine future.")
+st.caption("MVP : oracle_gt ferme le feedback ; human_sophie reste limitee a l'affichage.")
+last_prediction = st.session_state.get("last_prediction") or {}
+last_prediction_payload = last_prediction.get("prediction", {})
+last_prediction_id = last_prediction_payload.get("prediction_id", "")
+if last_prediction_id:
+    st.info(f"Derniere prediction disponible : {last_prediction_id}")
 with st.form("feedback_form"):
+    prediction_id = st.text_input("prediction_id", value=last_prediction_id)
     fb_piece_event_id = st.text_input("piece_event_id ", value="demo-piece-0001")
     fb_scenario_id = st.text_input("scenario_id ", value="production_replay_natural")
     gt_mask_has_defect = st.checkbox("gt_mask_has_defect")
@@ -84,6 +94,7 @@ if fb_submitted:
         result = _post(
             "/feedback",
             {
+                "prediction_id": prediction_id,
                 "piece_event_id": fb_piece_event_id,
                 "scenario_id": fb_scenario_id,
                 "feedback_source": "oracle_gt",
