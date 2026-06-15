@@ -30,3 +30,7 @@ scenario_id -> registered model MLflow -> stage prod -> artifact URI -> reload i
 ## Consequences
 
 Aucun test ni module runtime ne doit dependre d'un prefixe S3 `prod` comme source de verite. Les artefacts MinIO restent des fichiers, pas une decision de promotion.
+
+## Documentation
+
+Voir [docs/MLflow-Registry.md](../MLflow-Registry.md) pour l'architecture complète, la configuration et les buckets MinIO associés.
