@@ -19,6 +19,11 @@ from iqa.api.main import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_service_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
+
+
 def _reset_security_metrics() -> None:
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0

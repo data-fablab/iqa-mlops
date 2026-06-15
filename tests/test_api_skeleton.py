@@ -25,6 +25,11 @@ from iqa.inference.service import health as inference_health
 from iqa.inference.service import metrics as inference_metrics
 
 
+@pytest.fixture(autouse=True)
+def _clear_service_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
+
+
 def test_api_app_exposes_phase_1_contract_routes() -> None:
     route_paths = {route.path for route in app.routes}
 
