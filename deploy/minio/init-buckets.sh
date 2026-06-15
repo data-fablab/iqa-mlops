@@ -20,3 +20,7 @@ for bucket in \
 do
     mc mb --ignore-existing "iqa-minio/${bucket}"
 done
+
+# iqa-heatmaps layout: "lots/" (per-batch heatmaps) auto-expire after 30 days,
+# "curated/" (reviewed heatmaps kept for the demo/report) has no expiration rule.
+mc ilm import "iqa-minio/iqa-heatmaps" < /lifecycle-heatmaps.json

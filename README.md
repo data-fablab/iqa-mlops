@@ -13,9 +13,10 @@ service artifacts stay outside Git.
 The Casting dataset is treated as historical plant data, not as the production
 store itself. For the school MVP, replay jobs emit `historical_replay` piece
 events through the same ingestion contract expected from a future factory flow.
-In production, camera/MES adapters will emit `production_ingest` events: raw
-images go to MinIO, especially `s3://iqa-ingested-images`, while PostgreSQL keeps
-piece events, timestamps, model links, predictions, feedback, and artifact URIs.
+In production, camera/MES adapters will emit `production_ingest` events. The
+runtime target is: raw images go to MinIO, especially
+`s3://iqa-ingested-images`, while PostgreSQL stores piece events, timestamps,
+model links, predictions, feedback, and artifact URIs.
 
 The source dataset and the ingested images are intentionally separate:
 
@@ -39,23 +40,34 @@ uv run --extra cpu ruff check src scripts tests
 
 ```powershell
 uv run --extra cpu iqa-build-inventory --help
+uv run --extra cpu iqa-finalize-data-phase1 --help
 uv run --extra cpu iqa-build-flux-plan --help
 uv run --extra cpu iqa-simulate-lifecycle --help
+uv run --extra cpu iqa-prepare-sim-env --help
 uv run --extra cpu iqa-validate-mvp --help
 uv run --extra cpu iqa-validate-ml-source --help
 uv run --extra cpu iqa-train-feature-ae --help
+uv run --extra cpu iqa-evaluate-feature-ae --help
 uv run --extra cpu iqa-predict-image --help
+uv run --extra cpu iqa-predict-roi --help
+uv run --extra cpu iqa-generate-bootstrap-roi --help
+uv run --extra cpu iqa-api --help
+uv run --extra cpu iqa-inference --help
+uv run --extra cpu iqa-run-ingestion --help
+uv run --extra cpu iqa-run-replay --help
+uv run --extra cpu iqa-run-monitoring --help
+uv run --extra cpu iqa-run-lifecycle --help
 ```
 
-See [docs/Reproductibilite-ML-IQA.md](docs/Reproductibilite-ML-IQA.md) for the
+See [docs/reproductibilite-ml-iqa.md](docs/reproductibilite-ml-iqa.md) for the
 source-to-prediction path: dataset source, ingestion/manifests, Feature-AE train,
 checkpoint, and image prediction. The retained Feature-AE preprocessing uses
 `tiled_context` with explicit `image_size=384` and `context_size=768`; the old
 source name `tile_256_overlap` is intentionally not reused.
 
 Model-specific contracts are documented in:
-- [docs/Modele-Feature-AE-IQA.md](docs/Modele-Feature-AE-IQA.md)
-- [docs/Modele-Segmentation-ROI-IQA.md](docs/Modele-Segmentation-ROI-IQA.md)
+- [docs/modele-feature-ae-iqa.md](docs/modele-feature-ae-iqa.md)
+- [docs/modele-segmentation-roi-iqa.md](docs/modele-segmentation-roi-iqa.md)
 
 ## API Skeleton
 
@@ -91,7 +103,7 @@ Data and model lifecycle rules:
 - `calibration_set_v001` is a good-only set, sealed away from bootstrap, replay,
   training, and `validation_set_v001`.
 - Replay events carry `event_time`, `recorded_at`, and derived `is_simulated`.
-- MLflow Registry is the source of truth for promotion and rollback.
+- MLflow Registry is the target source of truth for promotion and rollback.
 - Registered models are isolated by scenario:
   `feature_ae__production_replay_natural` and
   `feature_ae__drift_domain_extension`.

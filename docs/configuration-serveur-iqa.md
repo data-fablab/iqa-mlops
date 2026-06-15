@@ -91,9 +91,13 @@ DAGs courts et idempotents
 | Airflow | Orchestration ingestion, replay, lifecycle Feature-AE, monitoring |
 | Nginx | Routage HTTP et exposition propre des services |
 
-Airflow est plus lourd que Prefect, mais plus lisible pour ce projet car les DAGs rendent visibles les dependances MLOps : ingestion, replay, dataset candidat, entrainement, evaluation, promotion et reload.
+Airflow est plus lourd que Prefect, mais plus lisible pour ce projet car les
+DAGs rendent visibles les dependances MLOps : ingestion, replay, dataset
+candidat, entrainement, evaluation, promotion et reload. En Phase 1, ces DAGs
+sont importables et initialisables ; plusieurs taches restent des frontieres
+batch/squelettes avant le branchement complet PostgreSQL, MLflow et promotion.
 
-## 6. Services Docker Compose cibles
+## 6. Services Docker Compose du repo
 
 ```text
 iqa-api
@@ -103,6 +107,7 @@ iqa-ingestion
 iqa-replay
 iqa-trainer
 iqa-monitoring
+airflow-init
 airflow-webserver
 airflow-scheduler
 mlflow
@@ -113,6 +118,10 @@ prometheus
 grafana
 reverse-proxy
 ```
+
+`docker-compose.gpu.yml` active l'extra serveur `cu128` pour `iqa-inference` et
+`iqa-trainer`. `docker-compose.timezone.yml` ajoute les overrides de fuseau
+horaire Europe/Paris pour l'exploitation serveur.
 
 Services optionnels selon avancement :
 ```text
@@ -205,7 +214,7 @@ Le SSD de 500 Go est suffisant pour le MVP, mais impose une discipline de retent
 | Artefact | Regle recommandee |
 |---|---|
 | Dataset source Casting | bucket `iqa-source-datasets`, immutable |
-| Images brutes production/replay | bucket `iqa-ingested-images`, tracees par `sha256` et URI PostgreSQL |
+| Images brutes production/replay | bucket `iqa-ingested-images`, tracees par `sha256` ; URI PostgreSQL cible |
 | Manifests CSV | Conserver dans Git si taille raisonnable |
 | DVC remote `iqa-dvc` | garder versions utiles, nettoyage DVC periodique |
 | MLflow artifacts | bucket `mlflow-artifacts`, garder runs promus et candidats recents |
@@ -287,7 +296,7 @@ Cette configuration est coherente avec le cadrage projet, a condition de conserv
 
 Decision explicite : la procedure officielle de deploiement est `Ubuntu Server -> Docker Compose -> dvc pull -> docker compose up`. Windows + WSL2 peut rester un environnement de developpement individuel, mais pas la cible serveur retenue.
 
-## 14. Procedure serveur MVP
+## 13. Procedure serveur MVP
 
 Initialisation du repo :
 
@@ -349,21 +358,28 @@ Initialisation Airflow :
 
 ```bash
 cd /opt/iqa/iqa-mlops/deploy
-docker compose --env-file ../.env run --rm airflow-webserver airflow db migrate
+docker compose --env-file ../.env up airflow-init
 docker compose --env-file ../.env run --rm airflow-webserver airflow users create \
   --username admin \
   --firstname IQA \
   --lastname Admin \
   --role Admin \
   --email admin@example.local \
-  --password admin
+  --password <mot-de-passe-admin-airflow>
 docker compose --env-file ../.env up -d airflow-webserver airflow-scheduler
 ```
 
 Les services Airflow utilisent la base PostgreSQL `airflow` via
-`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`. Ne pas initialiser Airflow sans les
-variables du `docker-compose.yml`, sinon la base par defaut du conteneur peut
-etre utilisee a la place.
+`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN`. Le service `airflow-init` est la
+procedure officielle d'initialisation : il execute `airflow db migrate` et
+importe `deploy/airflow/pools.json`, dont le pool GPU `iqa_gpu`. Ne pas lancer
+une initialisation Airflow hors compose, sinon la base par defaut du conteneur
+peut etre utilisee a la place.
+
+Etat serveur actuel : Airflow est installe et demarrable via
+`airflow-webserver` et `airflow-scheduler`. Les DAGs Phase 1 sont importables ;
+plusieurs taches restent des frontieres batch/squelettes avant le branchement
+complet PostgreSQL, MLflow et promotion modele.
 
 Initialisation DVC cote serveur :
 
@@ -432,7 +448,7 @@ Note : le compose principal reste CPU pour etre portable. Le fichier
 besoin : `iqa-inference` et `iqa-trainer`. Sur le serveur IQA, l'extra CUDA de
 reference est `cu128`.
 
-## 13. Decisions de convergence infrastructure
+## 14. Decisions de convergence infrastructure
 
 Le pyproject.toml racine reste conserve pour le repo initial. L'isolation fine
 se fait d'abord par Docker Compose ; une migration `services/` est reportee.
@@ -448,8 +464,8 @@ mlflow
 airflow
 ```
 
-MLflow Registry est la source de verite de la promotion et du rollback. MinIO
-stocke les artefacts, sans prefixe S3 `prod` faisant autorite.
+MLflow Registry est la source de verite cible de la promotion et du rollback.
+MinIO stocke les artefacts, sans prefixe S3 `prod` faisant autorite.
 
 Les faits metier portent `event_time`, `recorded_at` et `is_simulated` afin de
 separer le temps rejoue, le temps systeme et la nature simulation/production.

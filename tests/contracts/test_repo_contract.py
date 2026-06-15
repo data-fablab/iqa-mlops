@@ -49,7 +49,7 @@ def test_metadata_store_is_documented_as_postgresql() -> None:
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     docs_and_examples = [
         ROOT / "README.md",
-        ROOT / "docs" / "Configuration-Serveur-IQA.md",
+        ROOT / "docs" / "configuration-serveur-iqa.md",
         ROOT / "deploy" / "mvp_simulation" / ".env.sim.example",
         ROOT / "reports" / "mvp_environment_simulation" / "README.md",
     ]
@@ -67,9 +67,9 @@ def test_architecture_documents_microservices_and_registry_truth() -> None:
     docs = "\n".join(
         path.read_text(encoding="utf-8")
         for path in [
-            ROOT / "docs" / "Architecture-Projet-IQA.md",
-            ROOT / "docs" / "Configuration-Serveur-IQA.md",
-            ROOT / "docs" / "Decisions-Questions-Ouvertes-IQA.md",
+                ROOT / "docs" / "architecture-iqa.md",
+                ROOT / "docs" / "configuration-serveur-iqa.md",
+                ROOT / "docs" / "decisions-iqa.md",
         ]
     )
 
@@ -84,9 +84,9 @@ def test_ingestion_abstraction_is_documented() -> None:
     expected_terms = ["historical_replay", "production_ingest", "iqa-ingested-images"]
     docs = [
         ROOT / "README.md",
-        ROOT / "docs" / "Architecture-Projet-IQA.md",
-        ROOT / "docs" / "Cadrage-Projet-MLOps-IQA.md",
-        ROOT / "docs" / "Configuration-Serveur-IQA.md",
+        ROOT / "docs" / "architecture-iqa.md",
+        ROOT / "docs" / "archive" / "cadrage-projet-mlops-iqa.md",
+        ROOT / "docs" / "configuration-serveur-iqa.md",
         ROOT / "docs" / "adr" / "0003-minio-stockage-objet-local.md",
         ROOT / "docs" / "adr" / "0004-postgresql-comme-metadata-store.md",
     ]
@@ -101,10 +101,10 @@ def test_convergence_decisions_are_documented() -> None:
         path.read_text(encoding="utf-8")
         for path in [
             ROOT / "README.md",
-            ROOT / "docs" / "Architecture-Projet-IQA.md",
-            ROOT / "docs" / "Cadrage-Projet-MLOps-IQA.md",
-            ROOT / "docs" / "PRD-IQA-MVP.md",
-            ROOT / "docs" / "Configuration-Serveur-IQA.md",
+                ROOT / "docs" / "architecture-iqa.md",
+                ROOT / "docs" / "archive" / "cadrage-projet-mlops-iqa.md",
+                ROOT / "docs" / "prd-iqa-mvp.md",
+                ROOT / "docs" / "configuration-serveur-iqa.md",
             ROOT / "docs" / "adr" / "0005-calibration-set-etanche-et-split-piece-event.md",
             ROOT / "docs" / "adr" / "0006-mlflow-registry-source-verite.md",
             ROOT / "docs" / "adr" / "0007-architecture-services-avec-pyproject-racine.md",

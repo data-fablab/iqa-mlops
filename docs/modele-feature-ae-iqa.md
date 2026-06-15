@@ -4,7 +4,8 @@
 
 Le Feature-AE est le modele vivant du MVP IQA. Il detecte les anomalies sur la surface fonctionnelle deja isolee par le segmenteur ROI.
 
-Il est le seul modele reentraine automatiquement dans la boucle MLOps :
+Il est le seul modele destine au reentrainement automatique dans la boucle MLOps
+cible :
 
 ```text
 images ingerees
@@ -14,7 +15,7 @@ images ingerees
 -> score anomalie + heatmap
 -> decision Vert / Orange / Rouge
 -> feedback oracle GT apres prediction
--> monitoring / lifecycle / promotion MLflow
+-> monitoring / lifecycle / promotion MLflow cible
 ```
 
 Le Feature-AE ne segmente pas la surface fonctionnelle. Il reconstruit des features teacher et mesure l'erreur de reconstruction.
@@ -257,6 +258,10 @@ metrics
 
 ## 8. Replay et lifecycle
 
+Etat actuel : le bootstrap ROI et le smoke test Feature-AE GPU sont
+operationnels. Le lifecycle complet train/eval/gates/promotion reste une cible
+de Phase 2.
+
 Le bootstrap produit le V0 et reste hors replay.
 
 Tout candidat issu d'un replay doit porter :
@@ -289,7 +294,8 @@ versions modele
 URI artefacts
 ```
 
-Le service inference n'entraine jamais. Il sert uniquement le modele actif expose par le registry.
+Le service inference n'entraine jamais. En cible, il sert uniquement le modele
+actif expose par le registry.
 
 ## 10. Non-objectifs MVP
 
