@@ -87,7 +87,16 @@ def transition_model_stage(
     client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
 
     try:
-        model_version = client.transition_model_version_stage(
+        # Capture the stage before transitioning: transition_model_version_stage
+        # returns the version *after* the change, so its current_stage is the new one.
+        try:
+            previous_stage = client.get_model_version(
+                registered_model_name, str(version)
+            ).current_stage
+        except Exception:
+            previous_stage = None
+
+        client.transition_model_version_stage(
             name=registered_model_name,
             version=str(version),
             stage=target_stage,
@@ -97,7 +106,7 @@ def transition_model_stage(
             "registered_model_name": registered_model_name,
             "version": str(version),
             "new_stage": target_stage,
-            "previous_stage": model_version.current_stage,
+            "previous_stage": previous_stage,
         }
     except Exception as e:
         return {
@@ -196,9 +205,11 @@ def promote_model_with_gates(
     else:
         gates_config_path = Path(gates_config_path)
 
-    # Load gates config from file
+    # Load gates config from file. Read the full content before parsing so the
+    # loader does not depend on stream chunking semantics (a file handle whose
+    # read() never signals EOF would make yaml.safe_load(f) loop forever).
     with open(gates_config_path, "r") as f:
-        gates_config = yaml.safe_load(f)
+        gates_config = yaml.safe_load(f.read())
 
     # Evaluate gates
     gate_decision = evaluate_gates_for_promotion(

@@ -132,27 +132,27 @@ Pour charger le modèle actif en inférence :
 ```python
 def reload_model_for_scenario(scenario_id: str):
     """Récupère le modèle actif en prod pour un scénario."""
-    
+
     # Étape 1-2: Construit le nom
     registered_model_name = f"feature_ae__{scenario_id}"
-    
+
     # Étape 3: Query MLflow (source de vérité)
     versions = mlflow.client.get_latest_versions(
         name=registered_model_name,
         stages=["prod"]
     )
-    
+
     if not versions:
         raise ValueError(f"No prod version for {registered_model_name}")
-    
+
     prod_version = versions[0]  # Un seul par invariant MLflow
-    
+
     # Étape 4: Récupère URI depuis MLflow
     artifact_uri = prod_version.source  # e.g., "s3://mlflow-artifacts/.../model"
-    
+
     # Étape 5: Load depuis MinIO (stockage passif)
     model = load_model_from_s3(artifact_uri)
-    
+
     return model
 ```
 
@@ -184,23 +184,23 @@ run_id = mlflow.active_run().info.run_id  # Récupéré par task_mlflow
 ```python
 def task_mlflow(run_id, scenario_id):
     """Enregistre le run comme version candidate."""
-    
+
     registered_model_name = f"feature_ae__{scenario_id}"
-    
+
     # Crée ou récupère le registered model
     # Crée une nouvelle version avec les artefacts du run
     model_version = mlflow.register_model(
         model_uri=f"runs:/{run_id}/model",
         name=registered_model_name
     )
-    
+
     # Assign stage: candidate
     mlflow.set_registered_model_alias(
         name=registered_model_name,
         alias="candidate",
         version=model_version.version
     )
-    
+
     return {
         "registered_model_name": registered_model_name,
         "version": model_version.version,
@@ -213,7 +213,7 @@ def task_mlflow(run_id, scenario_id):
 ```python
 def task_promotion(registered_model_name, version):
     """Promeut de candidate → staging → prod."""
-    
+
     # candidate → staging
     mlflow.transition_model_version_stage(
         name=registered_model_name,
@@ -221,7 +221,7 @@ def task_promotion(registered_model_name, version):
         stage="staging",
         archive_existing_versions=False
     )
-    
+
     # [Manual step] staging → prod
     # MLOps valide les métriques, puis:
     mlflow.transition_model_version_stage(
@@ -237,15 +237,15 @@ def task_promotion(registered_model_name, version):
 ```python
 def reload_model_in_inference_service(scenario_id):
     """Charge le modèle prod pour le scénario."""
-    
+
     registered_model_name = f"feature_ae__{scenario_id}"
-    
+
     # Query MLflow (source de vérité)
     versions = mlflow.client.get_latest_versions(
         name=registered_model_name,
         stages=["prod"]
     )
-    
+
     if versions:
         version = versions[0]
         # POST /admin/reload-model avec artifact_uri
