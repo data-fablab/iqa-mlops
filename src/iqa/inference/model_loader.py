@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import torch
 
 from iqa.models.feature_ae import load_rd_feature_ae_gated
 from iqa.promotion import resolve_model_artifacts

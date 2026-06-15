@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 
-import pytest
 
-from iqa.registry import register_run_to_model, registered_model_name
+from iqa.registry import register_run_to_model
 
 
 class TestRegisterRunToModel:

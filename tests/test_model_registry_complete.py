@@ -64,7 +64,7 @@ class TestModelContractOutputValidation:
             piece_event_id="piece_001",
             scenario_id="production_replay_natural",
             score=0.025,
-            statut="Orange",
+            decision="Orange",
             heatmap_uri=None,
             roi_status=None,
             roi_model_version="roi_v001",
@@ -78,7 +78,7 @@ class TestModelContractOutputValidation:
             piece_event_id="piece_001",
             scenario_id="production_replay_natural",
             score=0.025,
-            statut="Orange",
+            decision="Orange",
             heatmap_uri=None,
             roi_status=None,
             roi_model_version="roi_v001",
@@ -92,7 +92,7 @@ class TestModelContractOutputValidation:
             piece_event_id="piece_001",
             scenario_id="production_replay_natural",
             score=0.025,
-            statut="Orange",
+            decision="Orange",
             heatmap_uri=None,
             roi_status=None,
             roi_model_version="roi_v001",
@@ -101,20 +101,20 @@ class TestModelContractOutputValidation:
         assert result.score == 0.025
         assert isinstance(result.score, float)
 
-    def test_inference_result_requires_statut_decision_type(self) -> None:
-        """InferenceResult requires statut in {Vert, Orange, Rouge}."""
-        for statut in ["Vert", "Orange", "Rouge"]:
+    def test_inference_result_requires_decision_type(self) -> None:
+        """InferenceResult requires decision in {Vert, Orange, Rouge}."""
+        for decision in ["Vert", "Orange", "Rouge"]:
             result = InferenceResult(
                 piece_event_id="piece_001",
                 scenario_id="production_replay_natural",
                 score=0.0,
-                statut=statut,
+                decision=decision,
                 heatmap_uri=None,
                 roi_status=None,
                 roi_model_version="roi_v001",
                 feature_ae_version="ae_v001",
             )
-            assert result.statut == statut
+            assert result.decision == decision
 
     def test_inference_result_requires_model_versions(self) -> None:
         """InferenceResult requires roi_model_version and feature_ae_version."""
@@ -122,7 +122,7 @@ class TestModelContractOutputValidation:
             piece_event_id="piece_001",
             scenario_id="production_replay_natural",
             score=0.0,
-            statut="Vert",
+            decision="Vert",
             heatmap_uri=None,
             roi_status=None,
             roi_model_version="roi_v001",
@@ -137,7 +137,7 @@ class TestModelContractOutputValidation:
             piece_event_id="piece_001",
             scenario_id="production_replay_natural",
             score=0.025,
-            statut="Orange",
+            decision="Orange",
             heatmap_uri="s3://bucket/heatmap.png",
             roi_status="ok",
             roi_model_version="roi_v001",
@@ -147,7 +147,7 @@ class TestModelContractOutputValidation:
         assert result_dict["piece_event_id"] == "piece_001"
         assert result_dict["scenario_id"] == "production_replay_natural"
         assert result_dict["score"] == 0.025
-        assert result_dict["statut"] == "Orange"
+        assert result_dict["decision"] == "Orange"
         assert result_dict["heatmap_uri"] == "s3://bucket/heatmap.png"
         assert result_dict["roi_status"] == "ok"
 

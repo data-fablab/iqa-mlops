@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from iqa.promotion.promotion import evaluate_gates_for_promotion, promote_model_with_gates
 from iqa.promotion.rollback import (
-    get_previous_prod,
     rollback_model,
     save_previous_prod_before_promotion,
 )

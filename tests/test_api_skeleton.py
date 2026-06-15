@@ -59,7 +59,7 @@ def test_predict_is_explicit_placeholder() -> None:
     response = predict(request)
 
     assert response["delegated_to"] == "iqa-inference"
-    assert response["prediction"]["statut"] == "Vert"
+    assert response["prediction"]["decision"] == "Vert"
 
 
 def test_piece_event_predict_uses_path_event_id() -> None:
