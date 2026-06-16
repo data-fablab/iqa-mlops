@@ -72,6 +72,8 @@ testpaths = ["tests"]
 markers = [
     "cuda: tests requiring CUDA",
     "slow: longer-running validation tests",
+    "unit: pure unit tests, no external runtime required",
+    "docker_contract: tests requiring a live Airflow runtime (Docker image); skipped locally",
 ]
 
 # ---------------------------------------------------------------------------

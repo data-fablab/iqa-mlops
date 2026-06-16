@@ -17,6 +17,7 @@ def _read_dag_source() -> str:
     return (DAG_FOLDER / "iqa_lifecycle.py").read_text(encoding="utf-8")
 
 
+@pytest.mark.docker_contract
 def test_iqa_lifecycle_dag_imports_without_error() -> None:
     """Test that the iqa_lifecycle DAG can be imported."""
     try:
@@ -25,6 +26,7 @@ def test_iqa_lifecycle_dag_imports_without_error() -> None:
         pytest.skip(f"Airflow not installed: {e}")
 
 
+@pytest.mark.docker_contract
 def test_iqa_lifecycle_dag_has_seven_tasks() -> None:
     """Test that iqa_lifecycle DAG has all 7 pipeline tasks."""
     try:
@@ -42,6 +44,7 @@ def test_iqa_lifecycle_dag_has_seven_tasks() -> None:
     assert expected_tasks <= task_ids, f"Missing tasks: {expected_tasks - task_ids}"
 
 
+@pytest.mark.unit
 def test_iqa_lifecycle_dag_source_declares_seven_tasks() -> None:
     """Test that DAG source declares all 7 tasks (code-level check)."""
     source = _read_dag_source()
@@ -51,6 +54,7 @@ def test_iqa_lifecycle_dag_source_declares_seven_tasks() -> None:
         assert f'task_id="{task_id}"' in source, f"Task {task_id} not declared in DAG source"
 
 
+@pytest.mark.unit
 def test_iqa_lifecycle_dag_source_declares_dependencies() -> None:
     """Test that DAG source declares linear dependencies (code-level check)."""
     source = _read_dag_source()
@@ -95,6 +99,7 @@ def test_iqa_lifecycle_dag_source_declares_dependencies() -> None:
     )
 
 
+@pytest.mark.docker_contract
 def test_iqa_lifecycle_dag_has_linear_dependencies() -> None:
     """Test that iqa_lifecycle DAG has linear dependencies: dataset→train→eval→gates→mlflow→promotion→reload."""
     try:
@@ -119,6 +124,7 @@ def test_iqa_lifecycle_dag_has_linear_dependencies() -> None:
         ), f"{expected_chain[i]} should have {expected_chain[i+1]} as downstream"
 
 
+@pytest.mark.docker_contract
 def test_iqa_lifecycle_dag_passes_dagbag_validation() -> None:
     """Test that iqa_lifecycle DAG passes Airflow DagBag validation."""
     try:

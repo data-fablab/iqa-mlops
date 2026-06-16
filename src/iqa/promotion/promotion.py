@@ -87,19 +87,21 @@ def transition_model_stage(
     client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
 
     try:
-        # Capture the stage before transitioning: transition_model_version_stage
-        # returns the version *after* the change, so its current_stage is the new one.
+        # Aliases replaced MLflow stages (deprecated since 2.9). A "stage" here is
+        # an alias of the same name pointing at exactly one version. Capture the
+        # alias the version held before re-aliasing, for reporting parity.
         try:
-            previous_stage = client.get_model_version(
-                registered_model_name, str(version)
-            ).current_stage
+            previous_aliases = list(
+                client.get_model_version(registered_model_name, str(version)).aliases
+            )
+            previous_stage = previous_aliases[0] if previous_aliases else None
         except Exception:
             previous_stage = None
 
-        client.transition_model_version_stage(
+        client.set_registered_model_alias(
             name=registered_model_name,
+            alias=target_stage,
             version=str(version),
-            stage=target_stage,
         )
         return {
             "success": True,
@@ -147,11 +149,14 @@ def resolve_model_artifacts(
     client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
 
     try:
-        versions = client.get_latest_versions(registered_model_name, stages=[stage])
-        if not versions:
+        # Stages are deprecated; resolve via the alias of the same name.
+        try:
+            model_version = client.get_model_version_by_alias(
+                registered_model_name, stage
+            )
+        except Exception:
             raise ValueError(f"No model version found for stage {stage}")
 
-        model_version = versions[0]
         artifact_uri = model_version.source
 
         return {

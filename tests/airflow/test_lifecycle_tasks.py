@@ -20,6 +20,10 @@ from iqa.dags.lifecycle_tasks import (
     task_train,
 )
 
+# Task callables are plain Python; they run without an Airflow runtime.
+pytestmark = pytest.mark.unit
+
+
 # Airflow context type for testing
 class AirflowContext(dict):
     """Simulates Airflow task context."""
