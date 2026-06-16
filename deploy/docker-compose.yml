@@ -67,6 +67,7 @@ services:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
     volumes:
       - ./airflow/pools.json:/opt/airflow/pools.json:ro
+      - ../airflow/dags:/opt/airflow/dags:ro
     depends_on: [postgres]
 
   airflow-webserver:
@@ -78,6 +79,8 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
     ports: ["8080:8080"]
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags:ro
     depends_on:
       postgres:
         condition: service_started
@@ -92,6 +95,8 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags:ro
     depends_on:
       postgres:
         condition: service_started
