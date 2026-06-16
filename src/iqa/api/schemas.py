@@ -173,6 +173,7 @@ class FeedbackResponse(IQABaseModel):
     display_decision_source: FeedbackSource | None = None
     train_eligibility_source: FeedbackSource = FeedbackSource.oracle_gt
     eligible_for_train: bool | None = None
+    train_block_reason: str | None = None
     conflict_logged: bool = False
     reason: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
