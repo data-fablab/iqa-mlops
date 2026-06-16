@@ -66,6 +66,8 @@ def _reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
     api.METADATA_WRITE_THROUGH.reset()
     monkeypatch.delenv("IQA_METADATA_BACKEND", raising=False)
     monkeypatch.delenv("IQA_METADATA_DB_URL", raising=False)
+    monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
+    monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
     yield
     api.PREDICTION_STORE.clear()
     api.FEEDBACK_STORE.clear()
