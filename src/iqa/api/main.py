@@ -139,6 +139,9 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             piece_event_id=request.piece_event_id,
             scenario_id=request.scenario_id,
             image_uri=request.image_uri,
+            sha256=request.sha256,
+            lot_id=request.lot_id,
+            dataset_version=request.dataset_version,
         )
     )
     _record_prediction_metrics(inference_result.to_dict(), time.perf_counter() - _started)
@@ -148,6 +151,9 @@ def predict(request: PredictRequest) -> dict[str, Any]:
     prediction = inference_result.to_dict()
     prediction["prediction_id"] = prediction_id
     prediction["image_uri"] = request.image_uri
+    prediction["sha256"] = request.sha256
+    prediction["lot_id"] = request.lot_id
+    prediction["dataset_version"] = request.dataset_version
     prediction["model_version"] = prediction.get("feature_ae_version")
     prediction["audit_logged"] = True
 
@@ -156,6 +162,9 @@ def predict(request: PredictRequest) -> dict[str, Any]:
         "piece_event_id": request.piece_event_id,
         "scenario_id": request.scenario_id,
         "image_uri": request.image_uri,
+        "sha256": request.sha256,
+        "lot_id": request.lot_id,
+        "dataset_version": request.dataset_version,
         "decision": prediction["decision"],
         "model_version": prediction["feature_ae_version"],
         "roi_model_version": prediction["roi_model_version"],
@@ -173,6 +182,9 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             "piece_event_id": request.piece_event_id,
             "scenario_id": request.scenario_id,
             "image_uri": request.image_uri,
+            "sha256": request.sha256,
+            "lot_id": request.lot_id,
+            "dataset_version": request.dataset_version,
             "decision": prediction["decision"],
             "model_version": prediction["feature_ae_version"],
             "roi_model_version": prediction["roi_model_version"],
@@ -189,6 +201,9 @@ def predict_piece_event(event_id: str, request: PieceEventPredictRequest) -> dic
             piece_event_id=event_id,
             scenario_id=request.scenario_id,
             image_uri=request.image_uri,
+            sha256=request.sha256,
+            lot_id=request.lot_id,
+            dataset_version=request.dataset_version,
         )
     )
 
@@ -337,6 +352,9 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "prediction_id": prediction_id,
                 "piece_event_id": record.get("piece_event_id"),
                 "scenario_id": record.get("scenario_id"),
+                "lot_id": record.get("lot_id"),
+                "sha256": record.get("sha256"),
+                "dataset_version": record.get("dataset_version"),
                 "decision": decision,
                 "model_version": record.get("model_version"),
                 "roi_model_version": record.get("roi_model_version"),
@@ -362,15 +380,16 @@ def list_predictions() -> list[dict[str, Any]]:
 
 @app.get("/lots/summary")
 def lots_summary() -> list[dict[str, Any]]:
-    """Per-lot (scenario_id) KPIs for Marc's supervision dashboard."""
-
+    """Per lot KPIs for Marc's supervision dashboard."""
     summary: dict[str, dict[str, Any]] = {}
     for row in _prediction_rows():
-        lot = row["scenario_id"] or "unknown"
+        lot = row.get("lot_id") or row.get("scenario_id") or "unknown"
+        scenario = row.get("scenario_id") or "unknown"
         bucket = summary.setdefault(
             lot,
             {
-                "scenario_id": lot,
+                "lot_id": lot,
+                "scenario_id": scenario,
                 "total": 0,
                 "vert": 0,
                 "orange": 0,
@@ -379,6 +398,8 @@ def lots_summary() -> list[dict[str, Any]]:
                 "divergences": 0,
             },
         )
+        if bucket.get("scenario_id") != scenario:
+            bucket["scenario_id"] = "mixed"
         bucket["total"] += 1
         decision = str(row["decision"]).lower()
         if decision in {"vert", "orange", "rouge"}:
@@ -394,9 +415,9 @@ def lots_summary() -> list[dict[str, Any]]:
         bucket["taux_orange"] = round(bucket["orange"] / total, 4)
         bucket["taux_rouge"] = round(bucket["rouge"] / total, 4)
         rows.append(bucket)
-    rows.sort(key=lambda row: row["scenario_id"])
-    return rows
 
+    rows.sort(key=lambda row: row.get("lot_id") or row.get("scenario_id") or "")
+    return rows
 
 @app.get("/metrics")
 def metrics() -> str:

@@ -16,6 +16,9 @@ class InferenceRequest:
     piece_event_id: str
     scenario_id: str
     image_uri: str
+    sha256: str | None = None
+    lot_id: str | None = None
+    dataset_version: str | None = None
 
 
 @dataclass(frozen=True)
