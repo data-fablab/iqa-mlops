@@ -11,6 +11,7 @@ dependencies = [
     "pandas>=2.2",
     "pillow>=10.0",
     "prometheus-client>=0.20",
+    "psycopg[binary]>=3.2",
     "pydantic>=2.8",
     "python-multipart>=0.0.9",
     "scikit-learn>=1.5",
@@ -32,6 +33,7 @@ iqa-predict-image = "scripts.predict_image:main"
 iqa-predict-roi = "scripts.predict_roi:main"
 iqa-generate-bootstrap-roi = "scripts.generate_bootstrap_roi:main"
 iqa-validate-ml-source = "scripts.validate_ml_source:main"
+iqa-init-metadata-db = "scripts.init_metadata_db:main"
 iqa-api = "scripts.run_api:main"
 iqa-inference = "scripts.run_inference:main"
 iqa-run-ingestion = "scripts.run_ingestion:main"
@@ -74,6 +76,7 @@ markers = [
     "slow: longer-running validation tests",
     "unit: pure unit tests, no external runtime required",
     "docker_contract: tests requiring a live Airflow runtime (Docker image); skipped locally",
+    "postgres_contract: tests requiring a live PostgreSQL metadata database",
 ]
 
 # ---------------------------------------------------------------------------
