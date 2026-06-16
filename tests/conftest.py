@@ -31,6 +31,22 @@ def synthetic_feature_ae_checkpoint(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def feature_ae_gates_config() -> dict:
+    """Canonical promotion gates config for the feature_ae base model.
+
+    Returns a fresh dict each call so tests can mutate it without leaking state.
+    """
+    return {
+        "feature_ae": {
+            "recall_defect_min": 1.0,
+            "image_ap_max_regression": 0.02,
+            "orange_rate_max": 0.10,
+            "latency_p95_ms_max": 1000,
+        }
+    }
+
+
+@pytest.fixture
 def sample_image(tmp_path: Path) -> Path:
     """Write a small RGB image to disk for single-image inference tests."""
     from PIL import Image

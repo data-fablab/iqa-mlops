@@ -20,15 +20,11 @@ from iqa.promotion.promotion import (
 class TestGateEvaluationForPromotion:
     """Test gate evaluation before promotion decision."""
 
-    def test_promotion_blocked_when_recall_gate_fails(self) -> None:
+    def test_promotion_blocked_when_recall_gate_fails(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """Promotion blocked if recall gate fails (no false negatives allowed)."""
-        gates_config = {
-            "feature_ae": {
-                "recall_defect_min": 1.0,
-                "image_ap_max_regression": 0.02,
-                "latency_p95_ms_max": 1000,
-            }
-        }
+        gates_config = feature_ae_gates_config
         candidate_metrics = {
             "recall": 0.99,  # Below required 1.0
             "ap": 0.85,
@@ -46,15 +42,11 @@ class TestGateEvaluationForPromotion:
         assert decision["blocked"] is True
         assert "recall" in decision["blocked_reasons"]
 
-    def test_gates_pass_when_all_metrics_acceptable(self) -> None:
+    def test_gates_pass_when_all_metrics_acceptable(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """Gates pass when all candidate metrics meet thresholds."""
-        gates_config = {
-            "feature_ae": {
-                "recall_defect_min": 1.0,
-                "image_ap_max_regression": 0.02,
-                "latency_p95_ms_max": 1000,
-            }
-        }
+        gates_config = feature_ae_gates_config
         candidate_metrics = {
             "recall": 1.0,  # Perfect recall
             "ap": 0.85,
@@ -72,15 +64,11 @@ class TestGateEvaluationForPromotion:
         assert decision["blocked"] is False
         assert decision["blocked_reasons"] == []
 
-    def test_promotion_blocked_when_ap_regresses_too_much(self) -> None:
+    def test_promotion_blocked_when_ap_regresses_too_much(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """Promotion blocked if AP regresses more than tolerance."""
-        gates_config = {
-            "feature_ae": {
-                "recall_defect_min": 1.0,
-                "image_ap_max_regression": 0.02,
-                "latency_p95_ms_max": 1000,
-            }
-        }
+        gates_config = feature_ae_gates_config
         candidate_metrics = {
             "recall": 1.0,
             "ap": 0.90,
@@ -100,16 +88,11 @@ class TestGateEvaluationForPromotion:
         assert decision["blocked"] is True
         assert "ap_regression" in decision["blocked_reasons"]
 
-    def test_promotion_blocked_when_orange_rate_exceeds_threshold(self) -> None:
+    def test_promotion_blocked_when_orange_rate_exceeds_threshold(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """Promotion blocked if orange rate exceeds maximum."""
-        gates_config = {
-            "feature_ae": {
-                "recall_defect_min": 1.0,
-                "orange_rate_max": 0.10,
-                "image_ap_max_regression": 0.02,
-                "latency_p95_ms_max": 1000,
-            }
-        }
+        gates_config = feature_ae_gates_config
         candidate_metrics = {
             "recall": 1.0,
             "ap": 0.85,
@@ -126,15 +109,11 @@ class TestGateEvaluationForPromotion:
         assert decision["passed"] is False
         assert "orange_rate" in decision["blocked_reasons"]
 
-    def test_promotion_blocked_when_latency_exceeds_threshold(self) -> None:
+    def test_promotion_blocked_when_latency_exceeds_threshold(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """Promotion blocked if latency exceeds maximum."""
-        gates_config = {
-            "feature_ae": {
-                "recall_defect_min": 1.0,
-                "image_ap_max_regression": 0.02,
-                "latency_p95_ms_max": 1000,
-            }
-        }
+        gates_config = feature_ae_gates_config
         candidate_metrics = {
             "recall": 1.0,
             "ap": 0.85,
@@ -151,15 +130,11 @@ class TestGateEvaluationForPromotion:
         assert decision["passed"] is False
         assert "latency" in decision["blocked_reasons"]
 
-    def test_gates_work_for_different_scenarios(self) -> None:
+    def test_gates_work_for_different_scenarios(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """Gate evaluation works for different registered model scenarios."""
-        gates_config = {
-            "feature_ae": {
-                "recall_defect_min": 1.0,
-                "image_ap_max_regression": 0.02,
-                "latency_p95_ms_max": 1000,
-            }
-        }
+        gates_config = feature_ae_gates_config
         candidate_metrics = {
             "recall": 1.0,
             "ap": 0.85,
