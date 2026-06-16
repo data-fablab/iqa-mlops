@@ -19,6 +19,16 @@ IQA est un MVP MLOps pour le controle visuel de pieces `Casting`.
 | Acceder au serveur | [acces-ssh-equipe-iqa.md](acces-ssh-equipe-iqa.md) |
 | Securite et gouvernance | [security/](security/) et [governance/](governance/) |
 
+
+## Phase 2 API Security And Governance
+
+| Besoin | Document |
+| --- | --- |
+| Comprendre les contrats API Phase 2 | [api_contracts.md](api_contracts.md) |
+| Comprendre les regles de feedback et d'eligibilite train | [feedback_rules.md](feedback_rules.md) |
+| Comprendre la gouvernance securite IA | [ai_security_governance.md](ai_security_governance.md) |
+| Comprendre la chaine d'audit et de tracabilite | [audit_trail.md](audit_trail.md) |
+
 ## Vocabulaire Minimal
 
 Le dataset Casting sert d'historique rejoue (`historical_replay`). La production
