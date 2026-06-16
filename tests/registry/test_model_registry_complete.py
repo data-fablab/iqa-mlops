@@ -5,7 +5,7 @@ Tests for:
 - Edge cases (unknown states, missing scenario_id)
 
 The inference request/result contract tests live in
-tests/test_inference_contracts.py.
+tests/inference/test_inference_contracts.py.
 """
 
 from __future__ import annotations

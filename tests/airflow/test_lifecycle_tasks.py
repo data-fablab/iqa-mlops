@@ -6,6 +6,7 @@ Each task is independently testable and returns context for downstream tasks.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -49,7 +50,9 @@ class TestDatasetTask:
             }
         }
 
+        roi_lookup = SimpleNamespace(status={"img_1": "ok"})
         with patch("iqa.dags.lifecycle_tasks.iter_manifest_image_samples", return_value=[]), \
+             patch("iqa.dags.lifecycle_tasks.load_roi_mask_lookup", return_value=roi_lookup), \
              patch("iqa.dags.lifecycle_tasks.build_candidate_dataset") as mock_build:
             from iqa.datasets.candidate_builder import CandidateDataset
             mock_build.return_value = CandidateDataset(
@@ -61,7 +64,36 @@ class TestDatasetTask:
             assert result["manifest_path"] == str(out_manifest)
             assert result["dataset_version"] == "v001"
             assert result["sample_count"] == 42
+            assert result["roi_status_count"] == 1
             mock_build.assert_called_once()
+            assert mock_build.call_args.kwargs["roi_status"] == {"img_1": "ok"}
+
+    def test_dataset_task_warns_without_roi_predictions(self, tmp_path: Path) -> None:
+        """Dataset task keeps MVP behavior but reports when ROI status is absent."""
+        manifest = tmp_path / "source.csv"
+        manifest.write_text("image_id,relative_path,source_class,label,is_defective,split_set,event_id,scenario_id,dataset_version\n")
+        out_manifest = tmp_path / "candidate.csv"
+        context = {
+            "params": {
+                "manifest_path": str(manifest),
+                "image_root": str(tmp_path),
+                "output_manifest": str(out_manifest),
+            }
+        }
+
+        with patch("iqa.dags.lifecycle_tasks.iter_manifest_image_samples", return_value=[]), \
+             patch("iqa.dags.lifecycle_tasks.load_roi_mask_lookup") as mock_roi_lookup, \
+             patch("iqa.dags.lifecycle_tasks.build_candidate_dataset") as mock_build:
+            from iqa.datasets.candidate_builder import CandidateDataset
+
+            mock_roi_lookup.return_value = SimpleNamespace(status={})
+            mock_build.return_value = CandidateDataset(
+                version="v001", sample_count=0, filtered_count=0, output_manifest=out_manifest
+            )
+
+            result = task_dataset(**context)
+
+            assert "warning" in result
 
 
 class TestTrainTask:
@@ -93,6 +125,10 @@ class TestTrainTask:
             task_train(**context)
 
             mock_ti.xcom_pull.assert_called_once_with(task_ids="dataset")
+            config = mock_train.call_args.args[0]
+            assert config.roi_model_version == "roi_segmenter_v001_fixed"
+            assert config.feature_ae_version == "rd_feature_ae_gated_v001_bootstrap"
+            assert config.dataset_version == "v001"
 
     def test_train_task_uses_mlflow_logging_and_returns_run_id(self, tmp_path: Path) -> None:
         """Train task calls train_feature_ae_with_mlflow_logging and returns run_id."""
@@ -168,7 +204,10 @@ class TestGatesTask:
         mock_ti.xcom_pull.return_value = {
             "recall": 0.5, "ap": 0.87, "orange_rate": 0.05, "latency_ms": 800.0
         }
-        context = {"ti": mock_ti}
+        context = {
+            "ti": mock_ti,
+            "params": {"gates_config_path": "configs/promotion_gates.yaml"},
+        }
 
         with patch("iqa.dags.lifecycle_tasks.evaluate_promotion_gates") as mock_gates:
             mock_gates.return_value = {
@@ -184,6 +223,7 @@ class TestGatesTask:
             # recall from XCom was passed to the gate, not a default
             call_kwargs = mock_gates.call_args[1]
             assert call_kwargs["candidate_recall"] == 0.5
+            assert "gates_config" in call_kwargs
 
     def test_gates_task_passes_when_all_gates_pass(self) -> None:
         """Gates task succeeds if all gates pass."""
@@ -198,7 +238,10 @@ class TestGatesTask:
                 "rollback_signal": False,
             }
 
-            result = task_gates(ti=mock_ti)
+            result = task_gates(
+                ti=mock_ti,
+                params={"gates_config_path": "configs/promotion_gates.yaml"},
+            )
 
             assert result["all_passed"] is True
 
@@ -276,6 +319,31 @@ class TestPromotionTask:
             call_kwargs = mock_promote.call_args[1]
             assert call_kwargs["registered_model_name"] == "feature_ae__production_replay_natural"
             assert call_kwargs["version"] == "3"
+            assert call_kwargs["target_stage"] == "test"
+            assert result["success"] is True
+
+    def test_promotion_task_saves_previous_prod_for_prod_target(self) -> None:
+        """Production promotion preserves the current prod alias before transition."""
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.side_effect = lambda task_ids: {
+            "mlflow": {"registered_model_name": "feature_ae__production_replay_natural", "version": "3"},
+            "eval": {"recall": 1.0, "ap": 0.87, "orange_rate": 0.05, "latency_ms": 800.0},
+        }[task_ids]
+
+        with patch("iqa.dags.lifecycle_tasks.save_previous_prod_before_promotion") as mock_save, \
+             patch("iqa.dags.lifecycle_tasks.promote_model_with_gates") as mock_promote:
+            mock_save.return_value = {"success": True, "previous_prod_version": "2"}
+            mock_promote.return_value = {
+                "success": True,
+                "gates_passed": True,
+                "transition": {"success": True},
+                "artifacts": {"artifact_uri": "s3://iqa-models/..."},
+            }
+
+            result = task_promotion(ti=mock_ti, params={"target_stage": "prod"})
+
+            mock_save.assert_called_once_with("feature_ae__production_replay_natural")
+            assert mock_promote.call_args.kwargs["target_stage"] == "prod"
             assert result["success"] is True
 
     def test_promotion_task_blocks_when_gates_fail(self) -> None:
@@ -302,7 +370,7 @@ class TestReloadTask:
 
     def test_reload_task_reads_scenario_id_from_params(self) -> None:
         """Reload task reads scenario_id from context['params'], not flat kwargs."""
-        context = {"params": {"scenario_id": "drift_domain_extension"}}
+        context = {"params": {"scenario_id": "drift_domain_extension", "target_stage": "prod"}}
 
         with patch("iqa.dags.lifecycle_tasks.ProdModelLoader") as mock_loader_class:
             mock_loader = MagicMock()
@@ -318,3 +386,12 @@ class TestReloadTask:
             mock_loader_class.assert_called_once_with("drift_domain_extension")
             assert result["version"] == "2"
             assert "artifact_uri" in result
+
+    def test_reload_task_skips_non_prod_target(self) -> None:
+        """Staging/test DAG runs do not reload the current prod model."""
+        with patch("iqa.dags.lifecycle_tasks.ProdModelLoader") as mock_loader_class:
+            result = task_reload(params={"target_stage": "test"})
+
+            mock_loader_class.assert_not_called()
+            assert result["status"] == "skipped"
+            assert result["target_stage"] == "test"

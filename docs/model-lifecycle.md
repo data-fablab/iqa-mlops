@@ -1,249 +1,91 @@
-# Cycle de vie du modèle Feature-AE
+# Cycle de vie du modele Feature-AE
 
-## Vue d'ensemble
+## Statut
 
-```
-dataset (build_candidate_dataset)
-    ↓
-train (train_feature_ae)
-    ↓
-eval (evaluate_feature_ae_checkpoint)
-    ↓
-gates (evaluate_promotion_gates)
-    ↓
-mlflow (register_run_to_model)
-    ↓
-promotion (promote_model_with_gates)
-    ↓
-reload (reload_model_in_inference_service)
+Le DAG `iqa_lifecycle` est un workflow Phase 1 de staging/test controle. Il est
+importable dans Airflow Docker et execute des taches coherentes, mais il ne doit
+pas etre presente comme une promotion production automatique.
+
+Par defaut :
+
+```text
+dataset -> train -> eval -> gates -> mlflow -> alias test -> reload skipped
 ```
 
-## Étapes du cycle de vie
+En mode production explicite :
 
-### 1. Dataset (`task_dataset`)
-
-**Responsabilité :** Construire un dataset candidat pour l'entraînement.
-
-**Entrées :**
-- Scenario ID (détermine le plan de replay : `casting_flux_replay_plan_natural.csv` ou `casting_flux_replay_plan_drift.csv`)
-- Validation set figé (`validation_set_v001`) — exclu du dataset candidat (ADR 0001)
-
-**Sorties :**
-```python
-{
-    "path": "/path/to/candidate_dataset.parquet",
-    "count": 1000,  # nombre de pieces
-    "scenario_id": "production_replay_natural"
-}
+```text
+dataset -> train -> eval -> gates -> mlflow -> save previous prod -> alias prod -> reload prod
 ```
 
-**Implémentation :** `src/iqa/datasets/candidate_builder.py` → `build_candidate_dataset()`
+Le mode production necessite `target_stage="prod"` dans les parametres Airflow.
 
----
+## Taches
 
-### 2. Entraînement (`task_train`)
+### `task_dataset`
 
-**Responsabilité :** Entraîner le modèle Feature-AE sur le dataset candidat.
+Construit le dataset candidat depuis le manifest et l'image root. Si
+`roi_predictions_dirs` est fourni, les statuts ROI sont charges via
+`load_roi_mask_lookup(...)` puis transmis a `build_candidate_dataset(...)`.
 
-**Entrées :**
-- Dataset candidat (path, count)
+Sans index ROI, la tache conserve le comportement MVP et retourne un warning
+explicite indiquant que le filtrage ROI n'a pas ete applique.
 
-**Sorties :**
-```python
-{
-    "run_id": "abc123def456",
-    "checkpoint": "/path/to/checkpoint.pt",
-    "trained_on_count": 1000
-}
-```
+### `task_train`
 
-**Logging MLflow :**
-- Params: model architecture, learning rate, epochs
-- Metrics: train loss, val loss
-- Artifacts: checkpoint, hyperparams
+Lance l'entrainement Feature-AE avec les metadonnees attendues :
 
-**Implémentation :** `src/iqa/training/feature_ae.py` → `train_feature_ae()`
+- `candidate_version`
+- `dataset_version`
+- `roi_model_version` (`roi_segmenter_v001_fixed` par defaut)
+- `feature_ae_version` (`rd_feature_ae_gated_v001_bootstrap` par defaut)
 
----
+Le training loggue le checkpoint sous l'artefact MLflow `model/` et retourne le
+`run_id`.
 
-### 3. Évaluation (`task_eval`)
+### `task_eval`
 
-**Responsabilité :** Évaluer le modèle entraîné sur le validation set figé.
+Evalue le checkpoint candidat et retourne les metriques disponibles pour les
+gates : recall, AP, orange rate et latence. Les metriques de type
+`defect_coverage` complet et `roi_fail_rate` complet restent des cibles si elles
+ne sont pas calculees dans cette tache.
 
-**Entrées :**
-- Checkpoint (du training)
-- Validation set v001 (figé, ADR 0001)
+### `task_gates`
 
-**Sorties :**
-```python
-{
-    "recall": 1.0,
-    "ap": 0.87,
-    "latency_ms": 850,
-    "orange_rate": 0.08,
-}
-```
+Charge `configs/promotion_gates.yaml` puis appelle
+`evaluate_promotion_gates(...)`. Le gate `ap_regression` ne peut etre evalue que
+si `prod_ap` est disponible.
 
-**Notes :**
-- Les metrics sont calculées UNIQUEMENT sur `validation_set_v001`
-- Évalue la couverture de défauts par `source_class` (gate `defect_coverage >= 0.95`)
+### `task_mlflow`
 
-**Implémentation :** `src/iqa/training/feature_ae_evaluation.py` → `evaluate_feature_ae_checkpoint()`
+Enregistre le run comme version du registered model `feature_ae__{scenario_id}`.
+La version est creee depuis l'artefact checkpoint du run, puis l'alias
+`candidate` est positionne.
 
----
+### `task_promotion`
 
-### 4. Gates de promotion (`task_gates`)
+Par defaut, promeut le candidat vers l'alias `test`.
 
-**Responsabilité :** Vérifier que le candidat passe tous les gates avant enregistrement.
+Si `target_stage="prod"`, la tache sauvegarde d'abord l'ancien alias `prod`, puis
+promeut le candidat vers `prod`.
 
-**Entrées :**
-- Metrics du candidat (recall, AP, latency, orange_rate)
-- Config gates (`configs/promotion_gates.yaml`)
+### `task_reload`
 
-**Sorties :**
-```python
-{
-    "all_passed": True,
-    "gates": {
-        "recall": {"passed": True, "value": 1.0},
-        "ap_regression": {"passed": True, "value": 0.02},
-        ...
-    },
-    "rollback_signal": False
-}
-```
+Recharge uniquement le modele `prod`. Pour le mode par defaut `test`, la tache
+retourne un statut `skipped` avec une raison explicite.
 
-**Comportement :**
-- Si un gate échoue → `Exception` et blocage du pipeline
-- Voir `docs/gates.md` pour les seuils détaillés
+## Parametres Airflow importants
 
-**Implémentation :** `src/iqa/promotion/__init__.py` → `evaluate_promotion_gates()`
-
----
-
-### 5. Enregistrement MLflow (`task_mlflow`)
-
-**Responsabilité :** Enregistrer le run entraîné dans MLflow Registry comme `candidate`.
-
-**Entrées :**
-- run_id (du training)
-- scenario_id (détermine le registered model : `feature_ae__production_replay_natural`, etc.)
-
-**Sorties :**
-```python
-{
-    "registered_model_name": "feature_ae__production_replay_natural",
-    "version": "3",
-    "stage": "candidate"
-}
-```
-
-**Logique :**
-1. Récupère le run MLflow via `run_id`
-2. Crée ou récupère le registered model `feature_ae__{scenario_id}`
-3. Crée une nouvelle version avec les artefacts du run
-4. Assigne la version au stage `candidate`
-
-**Implémentation :** `src/iqa/registry/mlflow_registry.py` → `register_run_to_model()`
-
----
-
-### 6. Promotion (`task_promotion`)
-
-**Responsabilité :** Transitionner le candidat du stage `candidate` → `test` (ou `prod` selon config).
-
-**Entrées :**
-- registered_model_name
-- version
-- metrics du candidat
-
-**Sorties :**
-```python
-{
-    "success": True,
-    "transition": {"success": True, "from": "candidate", "to": "test"},
-    "artifacts": {"artifact_uri": "s3://iqa-models/..."}
-}
-```
-
-**Logique :**
-1. Re-valide les gates (double-check)
-2. Transitionne MLflow Registry : `stage: candidate → test`
-3. Enregistre la transition dans PostgreSQL (metadata store)
-
-**Implémentation :** `src/iqa/promotion/__init__.py` → `promote_model_with_gates()`
-
----
-
-### 7. Reload en inférence (`task_reload`)
-
-**Responsabilité :** Charger le nouveau modèle dans le service d'inférence.
-
-**Entrées :**
-- scenario_id (détermine le registered model à charger)
-- Target stage (par défaut : `prod`)
-
-**Sorties :**
-```python
-{
-    "version": "3",
-    "artifact_uri": "s3://iqa-models/feature_ae__production_replay_natural/3/model",
-    "registered_model_name": "feature_ae__production_replay_natural"
-}
-```
-
-**Logique :**
-1. Query MLflow Registry : `registered_model_name` + stage `prod`
-2. Récupère l'`artifact_uri` (MinIO S3)
-3. Charge le modèle dans le service d'inférence via `/admin/reload-model`
-
-**Implémentation :** `src/iqa/inference/model_loader.py` → `ProdModelLoader`
-
----
-
-## Paramétrage par scénario
-
-### Régimes de replay (`regime`)
-
-Le DAG accepte un paramètre `regime` pour rejouer le cycle selon le scénario :
-
-| Regime | scenario_id | Plan de replay | Cas d'usage |
-|--------|-------------|---|---|
-| `natural` | `production_replay_natural` | `casting_flux_replay_plan_natural.csv` | Nominal, validation quotidienne |
-| `drift` | `drift_domain_extension` | `casting_flux_replay_plan_drift.csv` | Détection drift, stress-test |
-
-**Exemple Airflow :**
-```bash
-airflow dags trigger iqa_lifecycle \
-  --conf '{"regime": "drift", "scenario_id": "drift_domain_extension"}'
-```
-
----
-
-## Archivage et rollback
-
-Voir `docs/rollback.md` pour :
-- Transition des versions vers `archived`
-- Rollback à une version antérieure
-- Gestion des artefacts MinIO lors du rollback
-
----
-
-## Dépendances externes
-
-| Système | Rôle | Implémentation |
-|---------|------|---|
-| **Airflow** | Orchestration, DAG, scheduling | `airflow/dags/iqa_lifecycle.py` |
-| **MLflow** | Registry (source de vérité), tracking des runs | `src/iqa/registry/mlflow_registry.py` |
-| **MinIO** | Stockage des artefacts (S3 compatible) | Buckets: `mlflow-artifacts`, `iqa-models` |
-| **PostgreSQL** | Metadata store (transitions, gates, audits) | Configured in `configs/` |
-| **Inference Service** | Loading et serving du modèle | `/admin/reload-model` endpoint |
-
----
+| Parametre | Defaut | Role |
+|---|---|---|
+| `scenario_id` | `production_replay_natural` | Registered model cible |
+| `target_stage` | `test` | Alias MLflow cible |
+| `roi_predictions_dirs` | vide | Index de predictions ROI a appliquer au dataset |
+| `gates_config_path` | `configs/promotion_gates.yaml` | Config des gates |
 
 ## Invariants
 
-1. **Validation set figé** — `validation_set_v001` est exclu de tous les replays (ADR 0001)
-2. **Disjonction données** — Aucun chevauchement entre validation, replay, et bootstrap (test automatique)
-3. **MLflow source de vérité** — Aucune décision de promotion ne repose sur MinIO (ADR 0006)
-4. **Atomicité promotion** — Les transitions MLflow et metadata store PostgreSQL doivent être synchrones
+- La validation set reste exclue des datasets candidats.
+- MLflow Registry reste la source de verite pour les aliases modele.
+- MinIO stocke les artefacts mais ne decide pas du modele actif.
+- Le reload production n'est autorise que pour `target_stage="prod"`.

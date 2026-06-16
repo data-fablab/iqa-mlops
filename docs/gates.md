@@ -1,138 +1,76 @@
 # Gates de promotion IQA
 
-## Décisions figées
+## Statut
 
-### ROI segmenter — figé à v001
+Les gates sont centralises dans `configs/promotion_gates.yaml` et evalues par
+`evaluate_promotion_gates(...)`. Le DAG `iqa_lifecycle` charge cette config dans
+`task_gates()` et `task_promotion()`.
 
-**Décision (IQA1_KEN02) :** Le modèle de segmentation ROI est figé à la version `roi_segmenter_v001_fixed`. Aucun entraînement ni remplacement ne peut avoir lieu sans une nouvelle décision explicite.
+Il faut distinguer :
 
-**Raison :** La ROI est considérée stable et suffisamment précise pour le périmètre actuel. Le figer évite une dérive de la segmentation qui invaliderait les évaluations des autres composants.
+- les gates actuellement alimentes par les metriques du DAG ;
+- les gates cibles dont le calcul complet reste a brancher.
 
-**Config :** `configs/promotion_gates.yaml` → section `roi`
+## Gates alimentes dans le DAG
 
----
+### Recall defaut
 
-### `defect_coverage` par `source_class` — gate de recevabilité
-
-**Décision (IQA1_KEN02) :** La couverture de défauts (`defect_coverage`) par `source_class` est un **gate de recevabilité**. Un dataset ne peut pas passer en évaluation ou en promotion si la couverture est insuffisante.
-
-**Seuil :** `0.95` (au moins 95 % des classes de défauts représentées par `source_class`)
-
-**Implémentation (IQA2_KEN05) :** calcul du `defect_coverage` par `source_class`, blocage si `< 0.95`.
-
-**Config :** `configs/promotion_gates.yaml` → section `defect_coverage.min_coverage`
-
----
-
-## Autres gates de promotion
-
-### Recall et couverture défauts
-
-**Gate : `recall_defect_min: 1.0`**
-
-- **Définition** : Taux de rappel sur les défauts détectés = TP / (TP + FN)
-- **Seuil** : Aucun faux négatif toléré (recall = 100%)
-- **Raison** : Manquer un défaut a un coût opérationnel élevé (produit défectueux vendu)
-- **Mesure** : Calculée sur `validation_set_v001` par `source_class`
+`recall_defect_min` verifie que le rappel candidat atteint le seuil attendu.
 
 ### Orange rate
 
-**Gate : `orange_rate_max: 0.05`** (défaut : 5%)
+`orange_rate_max` limite la part d'images en decision incertaine.
 
-- **Définition** : Proportion d'images classées comme "orange" (doute, uncertain) par le classifier
-- **Formule** : `orange_count / total_predictions`
-- **Seuil** : ≤ 5% des prédictions
-- **Raison** : Un taux d'orange élevé indique une mauvaise confiance du modèle
-- **Actions Orange** : Ces images requièrent une review humaine (coût augmenté)
-- **Mesure** : Calculée en inférence sur `validation_set_v001`
+### Latence
 
-**Configuration :**
-```yaml
-feature_ae:
-  orange_rate_max: 0.05  # Naturel
-  orange_rate_max: 0.12  # Drift (plus relâché)
-```
+`latency_p95_ms_max` limite la latence p95 du candidat.
 
-### Latency
+### Regression AP
 
-**Gate : `latency_p95_ms_max: 1000`** (milliseconds)
+`image_ap_max_regression` compare l'AP candidat a l'AP production. Ce gate ne
+peut etre evalue que si `prod_ap` est disponible dans les metriques d'evaluation.
+Sans `prod_ap`, il doit rester non bloquant ou explicitement signale comme non
+evaluable selon la logique de `evaluate_promotion_gates(...)`.
 
-- **Définition** : Percentile 95 du temps de prédiction end-to-end
-- **Inclut** :
-  - Image loading + preprocessing
-  - Model inference
-  - Post-processing + heatmap generation
-  - Network latency (si service distant)
+## Gates cibles ou partiellement branches
 
-- **Seuil** : ≤ 1000 ms (1 seconde)
-- **Raison** : Temps d'attente utilisateur acceptable en production
-- **Mesure** : Collectée via timing logs pendant `evaluate_feature_ae_checkpoint()`
+### Couverture defauts
 
-**Configuration :**
-```yaml
-feature_ae:
-  latency_p95_ms_max: 1000      # Naturel
-  latency_p95_ms_max: 1200      # Drift (plus tolérant)
-```
-
-### AP (Average Precision) et régression
-
-**Gate : `image_ap_max_regression: 0.02`**
-
-- **Définition** : Régression d'AP (Average Precision) vs version en prod
-- **Formule** : `ap_candidate - ap_prod` ≤ 0.02
-- **Raison** : Prévenir les dégradations imperceptibles mais cumulées
-- **Mesure** : Comparaison vs métriques stockées de la dernière version `prod` en MLflow
+`defect_coverage` est une regle de recevabilite cible : un dataset candidat ne
+devrait pas passer si certaines classes de defauts sont insuffisamment couvertes.
+La logique helper existe, mais le DAG ne doit pas annoncer ce gate comme complet
+tant que la metrique n'est pas produite par `task_dataset()` ou `task_eval()`.
 
 ### ROI failure rate
 
-**Gate : `roi_fail_rate_max: 0.10`**
+`roi_fail_rate_max` est une cible liee au segmenter ROI fige
+`roi_segmenter_v001_fixed`. La branche charge les statuts ROI dans
+`task_dataset()` quand `roi_predictions_dirs` est fourni, mais le taux d'echec
+ROI complet doit etre calcule et transmis aux gates avant d'etre considere comme
+pleinement branche.
 
-- **Définition** : Proportion d'images où la segmentation ROI (Region of Interest) a échoué
-- **Seuil** : ≤ 10%
-- **Raison** : Le ROI segmenter est figé (ADR); une dégradation indique un décalage caméra ou un problème optique
-- **Mesure** : Lors de l'inférence, comptabiliser les images où ROI segmentation = null ou roi_area < threshold
+## Configuration
 
----
-
-## Configuration complète
-
-### Fichier : `configs/promotion_gates.yaml`
+Fichier : `configs/promotion_gates.yaml`
 
 ```yaml
-promotion_gates:
-  feature_ae:
-    # Naturel
-    recall_defect_min: 1.0
-    false_negative_total_max: 0
-    image_ap_max_regression: 0.02
-    roi_fail_rate_max: 0.10
-    latency_p95_ms_max: 1000
-    orange_rate_max: 0.05
+feature_ae:
+  recall_defect_min: 1.0
+  false_negative_total_max: 0
+  image_ap_max_regression: 0.02
+  roi_fail_rate_max: 0.10
+  latency_p95_ms_max: 1000
 
-    defect_coverage:
-      min_coverage: 0.95  # Au moins 95 % des source_classes représentées
+defect_coverage:
+  min_coverage: 0.95
 
-  feature_ae_drift:
-    # Drift (régime moins strict)
-    recall_defect_min: 0.98
-    false_negative_total_max: 5
-    image_ap_max_regression: 0.10
-    roi_fail_rate_max: 0.15
-    latency_p95_ms_max: 1200
-    orange_rate_max: 0.12
-
-    defect_coverage:
-      min_coverage: 0.90  # 90 % des source_classes
-
-  roi:
-    version_locked: "roi_segmenter_v001_fixed"  # Figé (ADR IQA1_KEN02)
+roi:
+  model_version: roi_segmenter_v001_fixed
+  frozen: true
 ```
 
-### Implémentation
+## Implementation
 
-Voir `src/iqa/promotion/` :
-- `evaluate_promotion_gates()` → évalue tous les gates
-- `promote_model_with_gates()` → lance la promotion après validation
-
-Implémentation complète des gates : **IQA2_KEN08**.
+- `src/iqa/promotion/gates.py` : evaluation unitaire des gates.
+- `src/iqa/promotion/promotion.py` : promotion apres gates et alias MLflow.
+- `src/iqa/dags/lifecycle_tasks.py` : orchestration Airflow Phase 1.

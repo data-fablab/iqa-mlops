@@ -330,7 +330,7 @@ def log_transition(transition_event):
 ## FAQ
 
 **Q: Comment savoir quelle version est actuellement en prod ?**
-A: Query MLflow : `get_latest_versions(model_name, stages=["prod"])`
+A: Query MLflow : `get_model_version_by_alias(model_name, "prod")`
 
 **Q: Que se passe-t-il si un artifact MinIO disparaît ?**
 A: Impossible de loader cette version. Rollback sera bloqué. Audit logs indiqueront la corruption.

@@ -1,8 +1,8 @@
 """Integration tests for the promotion/rollback cycle (IQA2_KEN16).
 
 This module covers ONLY the end-to-end cycle wiring. The per-gate blocking rules
-and promote_model_with_gates live in tests/test_promotion_workflow.py; the rollback
-mechanics (alias persistence, transitions) live in tests/test_rollback_workflow.py.
+and promote_model_with_gates live in tests/promotion/test_promotion_workflow.py; the rollback
+mechanics (alias persistence, transitions) live in tests/promotion/test_rollback_workflow.py.
 """
 
 from __future__ import annotations

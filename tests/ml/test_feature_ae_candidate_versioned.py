@@ -2,7 +2,7 @@
 
 Scope: metadata/versioning only (git commit, training config, smoke training).
 The public FeatureAECandidate contract (interface, save/load, predict, eval) is
-covered in tests/test_feature_ae_candidate.py.
+covered in tests/ml/test_feature_ae_candidate.py.
 """
 
 from __future__ import annotations

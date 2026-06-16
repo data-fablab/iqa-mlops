@@ -1,7 +1,7 @@
 """Tests for decision metrics (recall, orange_rate, latency) used by the recall gate.
 
 These cover the metric computation only. The recall gate behaviour itself is
-tested in tests/test_promotion_gates.py (TestRecallGate).
+tested in tests/promotion/test_promotion_gates.py (TestRecallGate).
 """
 
 from __future__ import annotations
