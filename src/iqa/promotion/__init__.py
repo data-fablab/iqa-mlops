@@ -7,6 +7,7 @@ from iqa.promotion.defect_coverage import (
     compute_defect_coverage,
     compute_defect_coverage_from_manifest,
 )
+from iqa.promotion.exceptions import PromotionBlockedError
 from iqa.promotion.gates import (
     evaluate_ap_regression_gate,
     evaluate_latency_gate,
@@ -27,6 +28,7 @@ from iqa.promotion.rollback import (
 )
 
 __all__ = [
+    "PromotionBlockedError",
     "compute_defect_coverage",
     "check_defect_coverage_gate",
     "compute_defect_coverage_from_manifest",

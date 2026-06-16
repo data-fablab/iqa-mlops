@@ -20,6 +20,7 @@ from iqa.dags.lifecycle_tasks import (
     task_reload,
     task_train,
 )
+from iqa.promotion import PromotionBlockedError
 
 # Task callables are plain Python; they run without an Airflow runtime.
 pytestmark = pytest.mark.unit
@@ -216,7 +217,7 @@ class TestGatesTask:
                 "rollback_signal": True,
             }
 
-            with pytest.raises(Exception, match="Gates failed"):
+            with pytest.raises(PromotionBlockedError, match="Gates failed"):
                 task_gates(**context)
 
             mock_ti.xcom_pull.assert_called_once_with(task_ids="eval")
@@ -361,7 +362,7 @@ class TestPromotionTask:
                 "blocked_reasons": ["recall"],
             }
 
-            with pytest.raises(Exception, match="Promotion blocked"):
+            with pytest.raises(PromotionBlockedError, match="Promotion blocked"):
                 task_promotion(ti=mock_ti)
 
 

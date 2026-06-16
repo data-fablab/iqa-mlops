@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from iqa.registry.client import get_mlflow_client
+
 
 def save_previous_prod_before_promotion(
     registered_model_name: str,
@@ -24,15 +26,9 @@ def save_previous_prod_before_promotion(
         - previous_prod_version: str (the prod version that was saved)
         - registered_model_name: str
     """
-    try:
-        import mlflow
-    except ImportError:
-        raise ImportError("MLflow is required for save_previous_prod_before_promotion")
-
-    if tracking_uri:
-        mlflow.set_tracking_uri(tracking_uri)
-
-    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    client = get_mlflow_client(
+        tracking_uri, required_for="save_previous_prod_before_promotion"
+    )
 
     try:
         # Stages are deprecated; the current prod model is whatever the "prod"
@@ -82,15 +78,7 @@ def get_previous_prod(
         - version: str (the previous_prod version)
         - registered_model_name: str
     """
-    try:
-        import mlflow
-    except ImportError:
-        raise ImportError("MLflow is required for get_previous_prod")
-
-    if tracking_uri:
-        mlflow.set_tracking_uri(tracking_uri)
-
-    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    client = get_mlflow_client(tracking_uri, required_for="get_previous_prod")
 
     try:
         # Get the alias "previous_prod" if it exists
@@ -126,15 +114,7 @@ def rollback_model(
         - previous_prod_version: str (restored to prod)
         - faulty_version_archived: str
     """
-    try:
-        import mlflow
-    except ImportError:
-        raise ImportError("MLflow is required for rollback_model")
-
-    if tracking_uri:
-        mlflow.set_tracking_uri(tracking_uri)
-
-    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    client = get_mlflow_client(tracking_uri, required_for="rollback_model")
 
     try:
         # Get the previous_prod version

@@ -15,6 +15,7 @@ import yaml
 from iqa.datasets import build_candidate_dataset, iter_manifest_image_samples
 from iqa.inference.model_loader import ProdModelLoader
 from iqa.promotion import (
+    PromotionBlockedError,
     evaluate_promotion_gates,
     promote_model_with_gates,
     save_previous_prod_before_promotion,
@@ -188,7 +189,7 @@ def task_gates(**context: Any) -> dict[str, Any]:
     )
 
     if not gates_result["all_passed"]:
-        raise Exception(
+        raise PromotionBlockedError(
             f"Gates failed: {gates_result['gates']}. Promotion blocked."
         )
 
@@ -258,7 +259,9 @@ def task_promotion(**context: Any) -> dict[str, Any]:
     if target_stage == "prod":
         previous_prod = save_previous_prod_before_promotion(registered_model_name_str)
         if not previous_prod["success"]:
-            raise Exception(f"Could not save previous prod before promotion: {previous_prod.get('error')}")
+            raise PromotionBlockedError(
+                f"Could not save previous prod before promotion: {previous_prod.get('error')}"
+            )
 
     result = promote_model_with_gates(
         registered_model_name=registered_model_name_str,
@@ -270,7 +273,7 @@ def task_promotion(**context: Any) -> dict[str, Any]:
     )
 
     if not result["success"]:
-        raise Exception(
+        raise PromotionBlockedError(
             f"Promotion blocked: {result.get('blocked_reasons', 'unknown reason')}"
         )
 

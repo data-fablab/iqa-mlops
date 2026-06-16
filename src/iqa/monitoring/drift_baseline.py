@@ -48,6 +48,20 @@ class DriftBaselineRegistry:
         """Initialize registry."""
         self._baselines: dict[str, DriftBaseline] = {}
 
+    @staticmethod
+    def _create_baseline(
+        scenario_type: str,
+        version: str,
+        teacher_drift_threshold: float,
+        reconstruction_threshold: float,
+    ) -> DriftBaseline:
+        return DriftBaseline(
+            version=version,
+            scenario_type=scenario_type,
+            teacher_drift_threshold=teacher_drift_threshold,
+            reconstruction_threshold=reconstruction_threshold,
+        )
+
     def create_production_baseline(
         self,
         version: str,
@@ -64,11 +78,8 @@ class DriftBaselineRegistry:
         Returns:
             DriftBaseline instance
         """
-        return DriftBaseline(
-            version=version,
-            scenario_type="production",
-            teacher_drift_threshold=teacher_drift_threshold,
-            reconstruction_threshold=reconstruction_threshold,
+        return self._create_baseline(
+            "production", version, teacher_drift_threshold, reconstruction_threshold
         )
 
     def create_extension_baseline(
@@ -87,11 +98,8 @@ class DriftBaselineRegistry:
         Returns:
             DriftBaseline instance
         """
-        return DriftBaseline(
-            version=version,
-            scenario_type="extension",
-            teacher_drift_threshold=teacher_drift_threshold,
-            reconstruction_threshold=reconstruction_threshold,
+        return self._create_baseline(
+            "extension", version, teacher_drift_threshold, reconstruction_threshold
         )
 
     def register(self, baseline: DriftBaseline) -> None:

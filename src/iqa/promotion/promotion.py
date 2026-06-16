@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from iqa.promotion.gates import evaluate_promotion_gates
+from iqa.registry.client import get_mlflow_client
 
 
 def evaluate_gates_for_promotion(
@@ -76,15 +77,7 @@ def transition_model_stage(
         - new_stage: str
         - previous_stage: str (if known)
     """
-    try:
-        import mlflow
-    except ImportError:
-        raise ImportError("MLflow is required for transition_model_stage")
-
-    if tracking_uri:
-        mlflow.set_tracking_uri(tracking_uri)
-
-    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    client = get_mlflow_client(tracking_uri, required_for="transition_model_stage")
 
     try:
         # Aliases replaced MLflow stages (deprecated since 2.9). A "stage" here is
@@ -138,15 +131,7 @@ def resolve_model_artifacts(
         - stage: str
         - registered_model_name: str
     """
-    try:
-        import mlflow
-    except ImportError:
-        raise ImportError("MLflow is required for resolve_model_artifacts")
-
-    if tracking_uri:
-        mlflow.set_tracking_uri(tracking_uri)
-
-    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    client = get_mlflow_client(tracking_uri, required_for="resolve_model_artifacts")
 
     try:
         # Stages are deprecated; resolve via the alias of the same name.

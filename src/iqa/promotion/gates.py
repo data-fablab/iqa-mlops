@@ -128,27 +128,28 @@ def evaluate_promotion_gates(
     if gates_config is None:
         gates_config = {}
 
+    feature_ae = gates_config.get("feature_ae", {})
     results = {}
 
     # Evaluate recall gate
-    recall_threshold = gates_config.get("feature_ae", {}).get("recall_defect_min", 1.0)
+    recall_threshold = feature_ae.get("recall_defect_min", 1.0)
     results["recall"] = evaluate_recall_gate(candidate_recall, threshold=recall_threshold)
 
     # Evaluate AP regression gate (only if prod_ap provided)
     if prod_ap is not None:
-        max_regression = gates_config.get("feature_ae", {}).get("image_ap_max_regression", 0.02)
+        max_regression = feature_ae.get("image_ap_max_regression", 0.02)
         results["ap_regression"] = evaluate_ap_regression_gate(
             candidate_ap, prod_ap, max_regression=max_regression
         )
 
     # Evaluate orange rate gate
-    orange_rate_threshold = gates_config.get("feature_ae", {}).get("orange_rate_max", 1.0)
+    orange_rate_threshold = feature_ae.get("orange_rate_max", 1.0)
     results["orange_rate"] = evaluate_orange_rate_gate(
         candidate_orange_rate, orange_rate_threshold
     )
 
     # Evaluate latency gate
-    latency_threshold = gates_config.get("feature_ae", {}).get("latency_p95_ms_max", 1000.0)
+    latency_threshold = feature_ae.get("latency_p95_ms_max", 1000.0)
     results["latency"] = evaluate_latency_gate(candidate_latency_ms, latency_threshold)
 
     # Determine overall result
