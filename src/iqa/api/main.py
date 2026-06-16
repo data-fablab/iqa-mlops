@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,17 @@ AI_SECURITY_METRICS: dict[str, int] = {
     "unsafe_train_blocked_total": 0,
     "invalid_feedback_total": 0,
     "reload_refused_total": 0,
+}
+
+# Decision/latency/ROI metrics fed by the /predict path and exposed on /metrics
+# for the Grafana IQA overview dashboard (Vert/Orange/Rouge, latency, ROI fail).
+PREDICTION_METRICS: dict[str, float] = {
+    "decision_vert_total": 0,
+    "decision_orange_total": 0,
+    "decision_rouge_total": 0,
+    "roi_fail_total": 0,
+    "predict_latency_seconds_sum": 0.0,
+    "predict_latency_seconds_count": 0,
 }
 
 
@@ -90,6 +102,17 @@ def _inc_security_metric(name: str) -> None:
     AI_SECURITY_METRICS[name] = AI_SECURITY_METRICS.get(name, 0) + 1
 
 
+def _record_prediction_metrics(prediction: dict[str, Any], elapsed_seconds: float) -> None:
+    decision = str(prediction.get("decision", "")).lower()
+    key = f"decision_{decision}_total"
+    if key in PREDICTION_METRICS:
+        PREDICTION_METRICS[key] += 1
+    if str(prediction.get("roi_status", "")).lower() == "fail":
+        PREDICTION_METRICS["roi_fail_total"] += 1
+    PREDICTION_METRICS["predict_latency_seconds_sum"] += elapsed_seconds
+    PREDICTION_METRICS["predict_latency_seconds_count"] += 1
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "iqa-api"}
@@ -110,6 +133,7 @@ def replay_scenarios() -> list[dict[str, str | bool]]:
 
 @app.post("/predict")
 def predict(request: PredictRequest) -> dict[str, Any]:
+    _started = time.perf_counter()
     inference_result = placeholder_inference(
         InferenceRequest(
             piece_event_id=request.piece_event_id,
@@ -117,6 +141,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             image_uri=request.image_uri,
         )
     )
+    _record_prediction_metrics(inference_result.to_dict(), time.perf_counter() - _started)
 
     prediction_id = f"pred_{uuid4().hex}"
     created_at = datetime.now(timezone.utc).isoformat()
@@ -303,8 +328,33 @@ def metrics() -> str:
         "# HELP iqa_reload_refused_total IQA admin reload refusals",
         "# TYPE iqa_reload_refused_total counter",
         f"iqa_reload_refused_total {AI_SECURITY_METRICS['reload_refused_total']}",
+        "# HELP iqa_prediction_total IQA predictions by decision (Vert/Orange/Rouge)",
+        "# TYPE iqa_prediction_total counter",
+        f'iqa_prediction_total{{decision="Vert"}} {int(PREDICTION_METRICS["decision_vert_total"])}',
+        f'iqa_prediction_total{{decision="Orange"}} {int(PREDICTION_METRICS["decision_orange_total"])}',
+        f'iqa_prediction_total{{decision="Rouge"}} {int(PREDICTION_METRICS["decision_rouge_total"])}',
+        "# HELP iqa_roi_fail_total IQA ROI segmentation failures observed at predict time",
+        "# TYPE iqa_roi_fail_total counter",
+        f"iqa_roi_fail_total {int(PREDICTION_METRICS['roi_fail_total'])}",
+        "# HELP iqa_predict_latency_seconds IQA predict latency (sum/count for rate-based average)",
+        "# TYPE iqa_predict_latency_seconds summary",
+        f"iqa_predict_latency_seconds_sum {PREDICTION_METRICS['predict_latency_seconds_sum']}",
+        f"iqa_predict_latency_seconds_count {int(PREDICTION_METRICS['predict_latency_seconds_count'])}",
+        "# HELP iqa_active_model_info Active IQA models served by the API (labels carry versions)",
+        "# TYPE iqa_active_model_info gauge",
+        (
+            "iqa_active_model_info{"
+            f'feature_ae_version="{_active_model_version(FEATURE_AE_MANIFEST)}",'
+            f'roi_model_version="{_active_model_version(ROI_MANIFEST)}"'
+            "} 1"
+        ),
     ]
     return "\n".join(lines) + "\n"
+
+
+def _active_model_version(manifest_path: Path) -> str:
+    manifest = _read_manifest(manifest_path)
+    return str(manifest.get("model_version") or manifest.get("version") or "unknown")
 
 
 def _append_admin_reload_log(

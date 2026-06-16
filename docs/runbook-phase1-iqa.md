@@ -82,10 +82,14 @@ curl http://localhost:8000/health
 docker compose up -d prometheus grafana reverse-proxy
 ```
 
-- Prometheus scrape `iqa-api:8000/metrics` et `iqa-inference:8100/metrics`
-  (config `deploy/prometheus/prometheus.yml`).
+- Prometheus scrape `iqa-api:8000/metrics`, `iqa-inference:8100/metrics`,
+  Airflow (via `statsd-exporter:9102`), MinIO et lui-meme (config
+  `deploy/prometheus/prometheus.yml`). Cibles : `http://localhost:9090/targets`.
 - Grafana est accessible derriere `reverse-proxy` (`/grafana/`), provisioning
-  dans `deploy/grafana/provisioning/`.
+  dans `deploy/grafana/provisioning/`. Le dashboard `IQA - Vue d'ensemble`
+  (dossier IQA) est charge automatiquement : distribution Vert/Orange/Rouge,
+  latence predict, erreurs, ROI fail, incidents IA, modele actif et
+  disponibilite/verrou GPU.
 
 ## 7. Airflow (LocalExecutor, pool GPU)
 
@@ -108,6 +112,18 @@ docker compose --env-file ../.env up -d airflow-webserver airflow-scheduler
 - Les DAGs Phase 1 sont importables et exposent les bonnes frontieres batch ;
   certaines commandes appelees restent des squelettes avec statut `planned`.
 - Ne pas commiter le mot de passe Airflow ; il reste un secret d'exploitation.
+
+### Verrou GPU (pas de train pendant la demo)
+
+Le serveur n'a qu'un GPU (RTX 3060). Au-dela du pool Airflow, un verrou fichier
+partage (`IQA_GPU_LOCK_PATH`, volume `gpu_lock`) serialise inference et
+entrainement sur l'hote :
+
+- Avant la demo, mettre `IQA_GPU_DEMO_HOLD=1` dans `.env` : `iqa-inference`
+  prend le verrou au demarrage et le garde pendant toute la demo.
+- Un `iqa-trainer` lance pendant ce temps est refuse immediatement (sortie 75 ;
+  utiliser `--wait-for-gpu` pour attendre la liberation, `--no-gpu-lock` pour un
+  dry-run CPU). Etat visible via `iqa_inference_gpu_lock_held` (dashboard).
 
 Sur serveur RTX 3060, les tests d'inference/training GPU utilisent `cu128` :
 

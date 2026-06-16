@@ -14,7 +14,12 @@ services:
       context: ..
     command: uv run --extra cpu iqa-inference
     env_file: ../.env
+    environment:
+      IQA_GPU_LOCK_PATH: /var/run/iqa-gpu/gpu.lock
+      IQA_GPU_DEMO_HOLD: ${IQA_GPU_DEMO_HOLD:-0}
     ports: ["8100:8100"]
+    volumes:
+      - gpu_lock:/var/run/iqa-gpu
 
   iqa-streamlit:
     image: python:3.12-slim
@@ -47,7 +52,11 @@ services:
       context: ..
     command: uv run --extra cpu iqa-run-lifecycle
     env_file: ../.env
+    environment:
+      IQA_GPU_LOCK_PATH: /var/run/iqa-gpu/gpu.lock
     profiles: ["batch"]
+    volumes:
+      - gpu_lock:/var/run/iqa-gpu
 
   iqa-monitoring:
     build:
@@ -77,6 +86,10 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
+      AIRFLOW__METRICS__STATSD_ON: "true"
+      AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+      AIRFLOW__METRICS__STATSD_PORT: "9125"
+      AIRFLOW__METRICS__STATSD_PREFIX: airflow
     ports: ["8080:8080"]
     depends_on:
       postgres:
@@ -92,11 +105,20 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
+      AIRFLOW__METRICS__STATSD_ON: "true"
+      AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+      AIRFLOW__METRICS__STATSD_PORT: "9125"
+      AIRFLOW__METRICS__STATSD_PREFIX: airflow
     depends_on:
       postgres:
         condition: service_started
       airflow-init:
         condition: service_completed_successfully
+
+  statsd-exporter:
+    image: prom/statsd-exporter:latest
+    command: ["--statsd.listen-udp=:9125", "--web.listen-address=:9102"]
+    expose: ["9102", "9125"]
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
@@ -109,6 +131,8 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     env_file: ../.env
+    environment:
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     ports: ["9000:9000", "9001:9001"]
     volumes:
       - minio_data:/data
@@ -138,6 +162,7 @@ services:
     ports: ["9090:9090"]
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on: [statsd-exporter]
 
   grafana:
     image: grafana/grafana:latest
@@ -156,3 +181,4 @@ services:
 volumes:
   minio_data:
   postgres_data:
+  gpu_lock:

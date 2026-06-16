@@ -1,0 +1,15 @@
+apiVersion: 1
+
+providers:
+  - name: IQA
+    orgId: 1
+    folder: IQA
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    options:
+      # Dashboard JSON lives in a subfolder so Grafana never tries to load this
+      # provider YAML as a dashboard.
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false
