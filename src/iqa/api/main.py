@@ -7,6 +7,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from iqa.api.schemas import (
 
 from iqa.feedback import OracleFeedbackRequest, oracle_gt_verdict
 from iqa.inference.contracts import InferenceRequest, placeholder_inference
+from iqa.metadata.repository import MEMORY_BACKEND, MetadataRepository, create_metadata_repository, metadata_backend
 from iqa.registry import ModelRegistryRef, registered_model_name
 from iqa.replay import list_replay_scenarios
 
@@ -63,6 +65,30 @@ OPTIONAL_METADATA_TRACEABILITY_FIELDS = (
     "validation_id",
     "scenario_version",
 )
+
+
+class MetadataWriteThrough:
+    """Optional PostgreSQL journal for API metadata writes."""
+
+    def __init__(self) -> None:
+        self._backend: str | None = None
+        self._repository: MetadataRepository | None = None
+
+    def reset(self) -> None:
+        self._backend = None
+        self._repository = None
+
+    def repository(self) -> MetadataRepository | None:
+        backend = metadata_backend()
+        if backend == MEMORY_BACKEND:
+            return None
+        if self._backend != backend or self._repository is None:
+            self._repository = create_metadata_repository()
+            self._backend = backend
+        return self._repository
+
+
+METADATA_WRITE_THROUGH = MetadataWriteThrough()
 
 
 # Legacy inline Pydantic schemas kept temporarily for review traceability.
@@ -108,6 +134,16 @@ def _require_token(env_name: str, provided_token: str | None) -> None:
 
 def _inc_security_metric(name: str) -> None:
     AI_SECURITY_METRICS[name] = AI_SECURITY_METRICS.get(name, 0) + 1
+
+
+def _persist_metadata(operation: str, writer: Callable[[MetadataRepository], None]) -> None:
+    try:
+        repository = METADATA_WRITE_THROUGH.repository()
+        if repository is None:
+            return
+        writer(repository)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"PostgreSQL metadata write failed during {operation}.") from exc
 
 
 def _record_prediction_metrics(prediction: dict[str, Any], elapsed_seconds: float) -> None:
@@ -170,7 +206,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
         prediction[field] = None
     prediction["audit_logged"] = True
 
-    PREDICTION_STORE[prediction_id] = {
+    prediction_record = {
         "prediction_id": prediction_id,
         "piece_event_id": request.piece_event_id,
         "scenario_id": request.scenario_id,
@@ -185,6 +221,11 @@ def predict(request: PredictRequest) -> dict[str, Any]:
         "created_at": created_at,
         "feedback_closed": False,
     }
+    _persist_metadata(
+        "predict",
+        lambda repository: repository.save_prediction(prediction_id, prediction_record),
+    )
+    PREDICTION_STORE[prediction_id] = prediction_record
 
     return {
         "service": "iqa-api",
@@ -260,7 +301,7 @@ def feedback(
 
     if request.feedback_source == "human_sophie":
         _inc_security_metric("unsafe_train_blocked_total")
-        DISPLAY_FEEDBACK_STORE[request.prediction_id] = {
+        display_feedback_record = {
             "prediction_id": request.prediction_id,
             "piece_event_id": request.piece_event_id,
             "scenario_id": request.scenario_id,
@@ -271,6 +312,11 @@ def feedback(
             "feedback_closed": False,
             "reason": "human_sophie is accepted for display only; oracle_gt remains sovereign for train eligibility.",
         }
+        _persist_metadata(
+            "human_sophie feedback",
+            lambda repository: repository.save_display_feedback(request.prediction_id, display_feedback_record),
+        )
+        DISPLAY_FEEDBACK_STORE[request.prediction_id] = display_feedback_record
 
         return {
             "accepted": True,
@@ -297,15 +343,14 @@ def feedback(
     )
 
     closed_at = datetime.now(timezone.utc).isoformat()
-    prediction["feedback_closed"] = True
-    prediction["feedback_closed_at"] = closed_at
+    updated_prediction = {**prediction, "feedback_closed": True, "feedback_closed_at": closed_at}
 
     verdict_dict = verdict.to_dict()
     eligible_for_train = not request.gt_mask_has_defect
     if not eligible_for_train:
         _inc_security_metric("unsafe_train_blocked_total")
 
-    FEEDBACK_STORE[request.prediction_id] = {
+    feedback_record = {
         "prediction_id": request.prediction_id,
         "piece_event_id": request.piece_event_id,
         "scenario_id": request.scenario_id,
@@ -319,6 +364,15 @@ def feedback(
         "train_eligibility_source": "oracle_gt",
         "eligible_for_train": eligible_for_train,
     }
+    _persist_metadata(
+        "oracle_gt feedback",
+        lambda repository: (
+            repository.save_feedback(request.prediction_id, feedback_record),
+            repository.mark_feedback_closed(request.prediction_id, closed_at),
+        ),
+    )
+    prediction.update(updated_prediction)
+    FEEDBACK_STORE[request.prediction_id] = feedback_record
 
     display_decision_source = (
         "human_sophie"
@@ -507,6 +561,10 @@ def _append_admin_reload_log(
         "source_of_truth": "mlflow_registry",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    _persist_metadata(
+        "admin reload",
+        lambda repository: repository.save_admin_reload_event(audit_event),
+    )
     ADMIN_RELOAD_LOG.append(audit_event)
     return audit_event
 
@@ -589,6 +647,7 @@ __all__ = [
     "ReloadModelRequest",
     "ADMIN_RELOAD_LOG",
     "AI_SECURITY_METRICS",
+    "METADATA_WRITE_THROUGH",
     "app",
     "feedback",
     "health",
