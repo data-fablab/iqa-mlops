@@ -31,6 +31,16 @@ def synthetic_feature_ae_checkpoint(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def sample_image(tmp_path: Path) -> Path:
+    """Write a small RGB image to disk for single-image inference tests."""
+    from PIL import Image
+
+    image_path = tmp_path / "sample.jpg"
+    Image.new("RGB", (32, 32), color=(128, 96, 64)).save(image_path)
+    return image_path
+
+
+@pytest.fixture
 def synthetic_validation_manifest(tmp_path: Path) -> Path:
     """Create a minimal validation_set_v001 manifest CSV."""
     manifest_path = tmp_path / "validation_manifest.csv"

@@ -4,40 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from factories import make_sample as _sample
+
 from iqa.datasets import (
     VALIDATION_SET_ID,
-    CastingImageSample,
     build_candidate_dataset,
     filter_candidate_samples,
     write_candidate_manifest,
 )
-
-
-def _sample(
-    image_id: str = "img_001",
-    event_id: str = "piece_event_001",
-    label: str = "good",
-    is_defective: bool = False,
-    split_set: str = "train",
-    source_class: str = "class_A",
-    relative_path: str = "path/to/img.jpg",
-    scenario_id: str = "scenario_1",
-    dataset_version: str = "v001",
-    gt_mask_path: str = "",
-) -> CastingImageSample:
-    """Create a test sample with default values."""
-    return CastingImageSample(
-        image_id=image_id,
-        event_id=event_id,
-        label=label,
-        is_defective=is_defective,
-        split_set=split_set,
-        source_class=source_class,
-        relative_path=relative_path,
-        scenario_id=scenario_id,
-        dataset_version=dataset_version,
-        gt_mask_path=gt_mask_path,
-    )
 
 
 class TestFilterCandidateSamples:
