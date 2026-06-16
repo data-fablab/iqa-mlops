@@ -10,9 +10,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 # from pydantic import BaseModel, Field
 from iqa.api.schemas import (
+    ApiErrorResponse,
     FeedbackRequest,
     PieceEventPredictRequest,
     PredictRequest,
@@ -92,10 +95,105 @@ def _read_manifest(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _api_error_detail(
+    *,
+    status_code: int,
+    error_code: str,
+    message: str,
+    reason: str | None = None,
+    incident_type: str | None = None,
+    audit_logged: bool = False,
+    reload_event_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return ApiErrorResponse(
+        status_code=status_code,
+        error_code=error_code,
+        message=message,
+        reason=reason,
+        incident_type=incident_type,
+        audit_logged=audit_logged,
+        reload_event_id=reload_event_id,
+        details=details or {},
+    ).model_dump(mode="json", exclude_none=True)
+
+
+def _raise_api_error(
+    *,
+    status_code: int,
+    error_code: str,
+    message: str,
+    reason: str | None = None,
+    incident_type: str | None = None,
+    audit_logged: bool = False,
+    reload_event_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    raise HTTPException(
+        status_code=status_code,
+        detail=_api_error_detail(
+            status_code=status_code,
+            error_code=error_code,
+            message=message,
+            reason=reason,
+            incident_type=incident_type,
+            audit_logged=audit_logged,
+            reload_event_id=reload_event_id,
+            details=details,
+        ),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_error_handler(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    errors = json.loads(json.dumps(exc.errors(), default=str))
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": _api_error_detail(
+                status_code=422,
+                error_code="validation_error",
+                message="Request validation failed.",
+                reason="Pydantic request validation failed.",
+                incident_type="invalid_prediction_request",
+                details={"path": str(request.url.path), "errors": errors},
+            )
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(
+    request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": _api_error_detail(
+                status_code=500,
+                error_code="internal_server_error",
+                message="Internal server error.",
+                reason="Unhandled server exception.",
+                details={"path": str(request.url.path)},
+            )
+        },
+    )
+
+
 def _require_token(env_name: str, provided_token: str | None) -> None:
     expected = os.getenv(env_name)
     if expected and provided_token != expected:
-        raise HTTPException(status_code=401, detail=f"Missing or invalid {env_name}.")
+        _raise_api_error(
+            status_code=401,
+            error_code="invalid_token",
+            message=f"Missing or invalid {env_name}.",
+            reason=f"Missing or invalid {env_name}.",
+            incident_type="invalid_prediction_request",
+        )
 
 
 def _inc_security_metric(name: str) -> None:
@@ -222,22 +320,46 @@ def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any
     if prediction is None:
         _inc_security_metric("ai_security_incident_total")
         _inc_security_metric("invalid_feedback_total")
-        raise HTTPException(status_code=404, detail="Unknown prediction_id.")
+        _raise_api_error(
+            status_code=404,
+            error_code="prediction_not_found",
+            message="Unknown prediction_id.",
+            reason="Unknown prediction_id.",
+            incident_type="invalid_prediction_request",
+        )
 
     if prediction["piece_event_id"] != request.piece_event_id:
         _inc_security_metric("feedback_conflict_total")
         _inc_security_metric("ai_security_incident_total")
-        raise HTTPException(status_code=409, detail="prediction_id does not match piece_event_id.")
+        _raise_api_error(
+            status_code=409,
+            error_code="feedback_piece_event_mismatch",
+            message="prediction_id does not match piece_event_id.",
+            reason="prediction_id does not match piece_event_id.",
+            incident_type="feedback_conflict",
+        )
 
     if prediction["scenario_id"] != request.scenario_id:
         _inc_security_metric("feedback_conflict_total")
         _inc_security_metric("ai_security_incident_total")
-        raise HTTPException(status_code=409, detail="prediction_id does not match scenario_id.")
+        _raise_api_error(
+            status_code=409,
+            error_code="feedback_scenario_mismatch",
+            message="prediction_id does not match scenario_id.",
+            reason="prediction_id does not match scenario_id.",
+            incident_type="feedback_conflict",
+        )
 
     if prediction.get("feedback_closed") is True:
         _inc_security_metric("invalid_feedback_total")
         _inc_security_metric("ai_security_incident_total")
-        raise HTTPException(status_code=409, detail="Prediction already has a closed feedback.")
+        _raise_api_error(
+            status_code=409,
+            error_code="feedback_already_closed",
+            message="Prediction already has a closed feedback.",
+            reason="Prediction already has a closed feedback.",
+            incident_type="invalid_prediction_request",
+        )
 
     return prediction
 
@@ -365,7 +487,13 @@ def feedback(
     if request.feedback_source != "oracle_gt":
         _inc_security_metric("invalid_feedback_total")
         _inc_security_metric("ai_security_incident_total")
-        raise HTTPException(status_code=400, detail="Unknown feedback_source.")
+        _raise_api_error(
+            status_code=400,
+            error_code="unknown_feedback_source",
+            message="Unknown feedback_source.",
+            reason="Unknown feedback_source.",
+            incident_type="invalid_prediction_request",
+        )
 
     verdict = oracle_gt_verdict(
         OracleFeedbackRequest(
@@ -728,13 +856,14 @@ def reload_model(
         )
         _inc_security_metric("reload_refused_total")
         _inc_security_metric("ai_security_incident_total")
-        raise HTTPException(
+        _raise_api_error(
             status_code=503,
-            detail={
-                "reason": "IQA_ADMIN_TOKEN is not configured.",
-                "audit_logged": True,
-                "reload_event_id": audit_event["reload_event_id"],
-            },
+            error_code="admin_token_not_configured",
+            message="IQA_ADMIN_TOKEN is not configured.",
+            reason="IQA_ADMIN_TOKEN is not configured.",
+            incident_type="reload_refused",
+            audit_logged=True,
+            reload_event_id=audit_event["reload_event_id"],
         )
 
     if x_iqa_admin_token != expected_token:
@@ -747,13 +876,14 @@ def reload_model(
         )
         _inc_security_metric("reload_refused_total")
         _inc_security_metric("ai_security_incident_total")
-        raise HTTPException(
+        _raise_api_error(
             status_code=401,
-            detail={
-                "reason": "Missing or invalid IQA_ADMIN_TOKEN.",
-                "audit_logged": True,
-                "reload_event_id": audit_event["reload_event_id"],
-            },
+            error_code="invalid_admin_token",
+            message="Missing or invalid IQA_ADMIN_TOKEN.",
+            reason="Missing or invalid IQA_ADMIN_TOKEN.",
+            incident_type="reload_refused",
+            audit_logged=True,
+            reload_event_id=audit_event["reload_event_id"],
         )
 
     model_name = registered_model_name(request.scenario_id)

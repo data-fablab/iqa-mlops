@@ -195,6 +195,18 @@ class Incident(IQABaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+
+class ApiErrorResponse(IQABaseModel):
+    error_code: str
+    message: str
+    status_code: int
+    reason: str | None = None
+    incident_type: IncidentType | None = None
+    audit_logged: bool = False
+    reload_event_id: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class ModelVersion(IQABaseModel):
     model_version: str
     model_stage: ModelStage
@@ -371,6 +383,7 @@ PredictionRequest = PredictRequest
 
 __all__ = [
     "DEFAULT_SCENARIO_ID",
+    "ApiErrorResponse",
     "PredictionHistoryRow",
     "PredictionAuditTrail",
     "ModelRegistryRefResponse",

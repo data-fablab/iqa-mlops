@@ -57,7 +57,7 @@ def test_feedback_poisoning_blocks_unknown_prediction_id() -> None:
         )
 
     assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "Unknown prediction_id."
+    assert exc_info.value.detail["message"] == "Unknown prediction_id."
     body = metrics()
     assert "iqa_invalid_feedback_total 1" in body
     assert "iqa_ai_security_incident_total 1" in body
@@ -77,7 +77,7 @@ def test_feedback_poisoning_blocks_piece_event_mismatch() -> None:
         )
 
     assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == "prediction_id does not match piece_event_id."
+    assert exc_info.value.detail["message"] == "prediction_id does not match piece_event_id."
     body = metrics()
     assert "iqa_feedback_conflict_total 1" in body
     assert "iqa_ai_security_incident_total 1" in body
@@ -97,7 +97,7 @@ def test_feedback_poisoning_blocks_scenario_mismatch() -> None:
         )
 
     assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == "prediction_id does not match scenario_id."
+    assert exc_info.value.detail["message"] == "prediction_id does not match scenario_id."
     body = metrics()
     assert "iqa_feedback_conflict_total 1" in body
     assert "iqa_ai_security_incident_total 1" in body
@@ -129,7 +129,7 @@ def test_feedback_poisoning_blocks_replay_after_closed_feedback() -> None:
         )
 
     assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == "Prediction already has a closed feedback."
+    assert exc_info.value.detail["message"] == "Prediction already has a closed feedback."
     body = metrics()
     assert "iqa_invalid_feedback_total 1" in body
     assert "iqa_ai_security_incident_total 1" in body
