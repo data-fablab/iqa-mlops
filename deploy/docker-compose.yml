@@ -30,7 +30,7 @@ services:
       IQA_API_URL: http://iqa-api:8000
     ports: ["8501:8501"]
     volumes:
-      - ./streamlit/app.py:/app/app.py:ro
+      - ./streamlit:/app:ro
     depends_on: [iqa-api]
 
   iqa-ingestion:

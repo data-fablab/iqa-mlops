@@ -307,6 +307,97 @@ def feedback(
     }
 
 
+def _oracle_divergence(decision: str, verdict: str | None) -> str | None:
+    """Classify model decision (V/O/R) against the oracle verdict.
+
+    Returns ``None`` when no oracle feedback is closed yet. Otherwise one of:
+    ``concordant``, ``faux_negatif`` (Vert mais defective = echappement),
+    ``faux_positif`` (Rouge mais conforme = faux rejet), ``orange_a_revoir``.
+    """
+
+    if verdict is None:
+        return None
+    if decision == "Orange":
+        return "orange_a_revoir"
+    if decision == "Vert":
+        return "faux_negatif" if verdict == "defective" else "concordant"
+    if decision == "Rouge":
+        return "faux_positif" if verdict == "conforme" else "concordant"
+    return None
+
+
+def _prediction_rows() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for prediction_id, record in PREDICTION_STORE.items():
+        feedback = FEEDBACK_STORE.get(prediction_id)
+        verdict = (feedback or {}).get("verdict", {}).get("verdict") if feedback else None
+        decision = record.get("decision", "")
+        rows.append(
+            {
+                "prediction_id": prediction_id,
+                "piece_event_id": record.get("piece_event_id"),
+                "scenario_id": record.get("scenario_id"),
+                "decision": decision,
+                "model_version": record.get("model_version"),
+                "roi_model_version": record.get("roi_model_version"),
+                "created_at": record.get("created_at"),
+                "feedback_closed": record.get("feedback_closed", False),
+                "oracle_verdict": verdict,
+                "divergence": _oracle_divergence(decision, verdict),
+            }
+        )
+    rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    return rows
+
+
+@app.get("/predictions")
+def list_predictions() -> list[dict[str, Any]]:
+    """Read-only prediction history with oracle verdict and divergence flag.
+
+    Backs Sophie's review view (lecture seule, divergence oracle).
+    """
+
+    return _prediction_rows()
+
+
+@app.get("/lots/summary")
+def lots_summary() -> list[dict[str, Any]]:
+    """Per-lot (scenario_id) KPIs for Marc's supervision dashboard."""
+
+    summary: dict[str, dict[str, Any]] = {}
+    for row in _prediction_rows():
+        lot = row["scenario_id"] or "unknown"
+        bucket = summary.setdefault(
+            lot,
+            {
+                "scenario_id": lot,
+                "total": 0,
+                "vert": 0,
+                "orange": 0,
+                "rouge": 0,
+                "feedback_closed": 0,
+                "divergences": 0,
+            },
+        )
+        bucket["total"] += 1
+        decision = str(row["decision"]).lower()
+        if decision in {"vert", "orange", "rouge"}:
+            bucket[decision] += 1
+        if row["feedback_closed"]:
+            bucket["feedback_closed"] += 1
+        if row["divergence"] in {"faux_negatif", "faux_positif"}:
+            bucket["divergences"] += 1
+
+    rows: list[dict[str, Any]] = []
+    for bucket in summary.values():
+        total = bucket["total"] or 1
+        bucket["taux_orange"] = round(bucket["orange"] / total, 4)
+        bucket["taux_rouge"] = round(bucket["rouge"] / total, 4)
+        rows.append(bucket)
+    rows.sort(key=lambda row: row["scenario_id"])
+    return rows
+
+
 @app.get("/metrics")
 def metrics() -> str:
     lines = [
