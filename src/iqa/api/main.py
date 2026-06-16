@@ -15,6 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 # from pydantic import BaseModel, Field
 from iqa.api.schemas import (
+    Incident,
     ApiErrorResponse,
     FeedbackRequest,
     PieceEventPredictRequest,
@@ -39,6 +40,7 @@ PREDICTION_STORE: dict[str, dict[str, Any]] = {}
 FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
 DISPLAY_FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
 ADMIN_RELOAD_LOG: list[dict[str, Any]] = []
+INCIDENT_STORE: list[dict[str, Any]] = []
 
 AI_SECURITY_METRICS: dict[str, int] = {
     "feedback_conflict_total": 0,
@@ -196,6 +198,56 @@ def _require_token(env_name: str, provided_token: str | None) -> None:
         )
 
 
+def _create_incident(
+    *,
+    incident_type: str,
+    severity: str,
+    message: str,
+    piece_event_id: str | None = None,
+    prediction_id: str | None = None,
+    scenario_id: str | None = None,
+    model_version: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    incident = Incident(
+        incident_id=f"inc_{uuid4().hex}",
+        incident_type=incident_type,
+        severity=severity,
+        piece_event_id=piece_event_id,
+        prediction_id=prediction_id,
+        scenario_id=scenario_id,
+        model_version=model_version,
+        message=message,
+        metadata=metadata or {},
+    ).model_dump(mode="json")
+    INCIDENT_STORE.append(incident)
+    return incident
+
+
+def record_dataset_blocked_incident(
+    *,
+    scenario_id: str,
+    dataset_version: str,
+    filtered_count: int,
+    sample_count: int,
+    reason: str = "Candidate dataset blocked by safety filtering.",
+    model_version: str | None = None,
+) -> dict[str, Any]:
+    return _create_incident(
+        incident_type="unsafe_train_candidate_blocked",
+        severity="medium",
+        message=reason,
+        scenario_id=scenario_id,
+        model_version=model_version,
+        metadata={
+            "dataset_version": dataset_version,
+            "filtered_count": filtered_count,
+            "sample_count": sample_count,
+            "reason": reason,
+        },
+    )
+
+
 def _inc_security_metric(name: str) -> None:
     AI_SECURITY_METRICS[name] = AI_SECURITY_METRICS.get(name, 0) + 1
 
@@ -331,6 +383,19 @@ def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any
     if prediction["piece_event_id"] != request.piece_event_id:
         _inc_security_metric("feedback_conflict_total")
         _inc_security_metric("ai_security_incident_total")
+        _create_incident(
+            incident_type="feedback_conflict",
+            severity="medium",
+            message="prediction_id does not match piece_event_id.",
+            piece_event_id=request.piece_event_id,
+            prediction_id=request.prediction_id,
+            scenario_id=request.scenario_id,
+            model_version=prediction.get("model_version"),
+            metadata={
+                "expected_piece_event_id": prediction["piece_event_id"],
+                "received_piece_event_id": request.piece_event_id,
+            },
+        )
         _raise_api_error(
             status_code=409,
             error_code="feedback_piece_event_mismatch",
@@ -342,6 +407,19 @@ def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any
     if prediction["scenario_id"] != request.scenario_id:
         _inc_security_metric("feedback_conflict_total")
         _inc_security_metric("ai_security_incident_total")
+        _create_incident(
+            incident_type="feedback_conflict",
+            severity="medium",
+            message="prediction_id does not match scenario_id.",
+            piece_event_id=request.piece_event_id,
+            prediction_id=request.prediction_id,
+            scenario_id=request.scenario_id,
+            model_version=prediction.get("model_version"),
+            metadata={
+                "expected_scenario_id": prediction["scenario_id"],
+                "received_scenario_id": request.scenario_id,
+            },
+        )
         _raise_api_error(
             status_code=409,
             error_code="feedback_scenario_mismatch",
@@ -532,6 +610,40 @@ def feedback(
         "train_block_reason": train_block_reason,
         "conflict_logged": conflict_logged,
     }
+
+    divergence = _oracle_divergence(prediction.get("decision", ""), verdict_dict.get("verdict"))
+
+    if divergence == "faux_negatif":
+        _create_incident(
+            incident_type="false_negative",
+            severity="high",
+            message="False negative detected by oracle_gt.",
+            piece_event_id=request.piece_event_id,
+            prediction_id=request.prediction_id,
+            scenario_id=request.scenario_id,
+            model_version=prediction.get("model_version"),
+            metadata={
+                "divergence": divergence,
+                "decision": prediction.get("decision"),
+                "oracle_verdict": verdict_dict.get("verdict"),
+                "train_block_reason": train_block_reason,
+            },
+        )
+
+    if train_block_reason == "roi_fail":
+        _create_incident(
+            incident_type="roi_fail",
+            severity="high",
+            message="ROI fail blocks train eligibility.",
+            piece_event_id=request.piece_event_id,
+            prediction_id=request.prediction_id,
+            scenario_id=request.scenario_id,
+            model_version=prediction.get("model_version"),
+            metadata={
+                "feedback_status": getattr(request.feedback_status, "value", request.feedback_status),
+                "train_block_reason": train_block_reason,
+            },
+        )
 
     display_decision_source = (
         "human_sophie"
@@ -762,6 +874,21 @@ def _filtered_metrics_lines() -> list[str]:
 
     return lines
 
+
+@app.get("/incidents")
+def list_incidents(
+    incident_type: str | None = None,
+    scenario_id: str | None = None,
+) -> list[dict[str, Any]]:
+    rows = list(INCIDENT_STORE)
+    if incident_type is not None:
+        rows = [row for row in rows if row.get("incident_type") == incident_type]
+    if scenario_id is not None:
+        rows = [row for row in rows if row.get("scenario_id") == scenario_id]
+    rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    return rows
+
+
 @app.get("/metrics")
 def metrics() -> str:
     lines = [
@@ -856,6 +983,17 @@ def reload_model(
         )
         _inc_security_metric("reload_refused_total")
         _inc_security_metric("ai_security_incident_total")
+        _create_incident(
+            incident_type="reload_refused",
+            severity="high",
+            message="IQA_ADMIN_TOKEN is not configured.",
+            scenario_id=request.scenario_id,
+            metadata={
+                "reload_event_id": audit_event["reload_event_id"],
+                "stage": getattr(request.stage, "value", request.stage),
+                "reason": "IQA_ADMIN_TOKEN is not configured.",
+            },
+        )
         _raise_api_error(
             status_code=503,
             error_code="admin_token_not_configured",
@@ -876,6 +1014,17 @@ def reload_model(
         )
         _inc_security_metric("reload_refused_total")
         _inc_security_metric("ai_security_incident_total")
+        _create_incident(
+            incident_type="reload_refused",
+            severity="medium",
+            message="Missing or invalid IQA_ADMIN_TOKEN.",
+            scenario_id=request.scenario_id,
+            metadata={
+                "reload_event_id": audit_event["reload_event_id"],
+                "stage": getattr(request.stage, "value", request.stage),
+                "reason": "Missing or invalid IQA_ADMIN_TOKEN.",
+            },
+        )
         _raise_api_error(
             status_code=401,
             error_code="invalid_admin_token",
@@ -918,6 +1067,9 @@ __all__ = [
     "PredictRequest",
     "ReloadModelRequest",
     "ADMIN_RELOAD_LOG",
+    "record_dataset_blocked_incident",
+    "list_incidents",
+    "INCIDENT_STORE",
     "AI_SECURITY_METRICS",
     "app",
     "feedback",
