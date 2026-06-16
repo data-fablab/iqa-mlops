@@ -42,6 +42,14 @@ def save_previous_prod_before_promotion(
         prod_version = versions[0]
         previous_prod_version = str(prod_version.version)
 
+        # Persist the alias so rollback can find this version later.
+        # Without this, get_previous_prod() would never resolve "previous_prod".
+        client.set_registered_model_alias(
+            name=registered_model_name,
+            alias="previous_prod",
+            version=previous_prod_version,
+        )
+
         return {
             "success": True,
             "previous_prod_version": previous_prod_version,
