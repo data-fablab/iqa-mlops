@@ -201,6 +201,36 @@ class TestRegistryEdgeCases:
         assert all(isinstance(s, str) for s in scenarios)
 
 
+class TestRegistryStageRetrieval:
+    """Test get_model stage resolution (merged from registry skeleton contract)."""
+
+    def test_get_model_returns_prod_by_default(self) -> None:
+        """get_model returns the prod stage when no stage is requested."""
+        registry = MLflowRegistry()
+        model = registry.get_model("feature_ae__production_replay_natural")
+        assert model is not None
+        assert model.stage == "prod"
+        assert model.scenario_id == "production_replay_natural"
+        assert model.registered_model_name == "feature_ae__production_replay_natural"
+
+    @pytest.mark.parametrize("stage", ["candidate", "test", "prod", "archived"])
+    def test_get_model_returns_requested_stage(self, stage: str) -> None:
+        """get_model returns the explicitly requested lifecycle stage."""
+        registry = MLflowRegistry()
+        model = registry.get_model(
+            "feature_ae__production_replay_natural", stage=stage
+        )
+        assert model is not None
+        assert model.stage == stage
+
+    def test_list_scenarios_includes_known_registered_models(self) -> None:
+        """list_scenarios exposes the registered model names."""
+        registry = MLflowRegistry()
+        scenarios = registry.list_scenarios()
+        assert "feature_ae__production_replay_natural" in scenarios
+        assert "roi__surface_defects" in scenarios
+
+
 class TestRegistryScenarioPartitioning:
     """Test registry partitioning by scenario_id."""
 

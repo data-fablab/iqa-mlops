@@ -43,6 +43,12 @@ class TestSavePreviousProd:
             "feature_ae__production_replay_natural",
             stages=["prod"],
         )
+        # The "previous_prod" alias MUST be persisted so rollback can find it.
+        mock_client.set_registered_model_alias.assert_called_once_with(
+            name="feature_ae__production_replay_natural",
+            alias="previous_prod",
+            version="5",
+        )
 
     @patch("mlflow.tracking.MlflowClient")
     @patch("mlflow.set_tracking_uri")
