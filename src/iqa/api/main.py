@@ -56,6 +56,14 @@ PREDICTION_METRICS: dict[str, float] = {
     "predict_latency_seconds_count": 0,
 }
 
+OPTIONAL_METADATA_TRACEABILITY_FIELDS = (
+    "raw_dataset_id",
+    "manifest_id",
+    "replay_id",
+    "validation_id",
+    "scenario_version",
+)
+
 
 # Legacy inline Pydantic schemas kept temporarily for review traceability.
 # They were moved to src/iqa/api/schemas.py to centralize API contracts.
@@ -158,6 +166,8 @@ def predict(request: PredictRequest) -> dict[str, Any]:
     prediction["lot_id"] = request.lot_id
     prediction["dataset_version"] = request.dataset_version
     prediction["model_version"] = prediction.get("feature_ae_version")
+    for field in OPTIONAL_METADATA_TRACEABILITY_FIELDS:
+        prediction[field] = None
     prediction["audit_logged"] = True
 
     PREDICTION_STORE[prediction_id] = {
@@ -168,6 +178,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
         "sha256": request.sha256,
         "lot_id": request.lot_id,
         "dataset_version": request.dataset_version,
+        **{field: None for field in OPTIONAL_METADATA_TRACEABILITY_FIELDS},
         "decision": prediction["decision"],
         "model_version": prediction["feature_ae_version"],
         "roi_model_version": prediction["roi_model_version"],
@@ -188,6 +199,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             "sha256": request.sha256,
             "lot_id": request.lot_id,
             "dataset_version": request.dataset_version,
+            **{field: None for field in OPTIONAL_METADATA_TRACEABILITY_FIELDS},
             "decision": prediction["decision"],
             "model_version": prediction["feature_ae_version"],
             "roi_model_version": prediction["roi_model_version"],
@@ -358,6 +370,7 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "lot_id": record.get("lot_id"),
                 "sha256": record.get("sha256"),
                 "dataset_version": record.get("dataset_version"),
+                **{field: record.get(field) for field in OPTIONAL_METADATA_TRACEABILITY_FIELDS},
                 "decision": decision,
                 "model_version": record.get("model_version"),
                 "roi_model_version": record.get("roi_model_version"),

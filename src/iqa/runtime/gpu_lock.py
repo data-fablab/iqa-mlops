@@ -15,19 +15,53 @@ Docker volume mounted at ``IQA_GPU_LOCK_PATH``.
 from __future__ import annotations
 
 import errno
-import fcntl
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None
+    import msvcrt
+else:  # pragma: no cover - exercised on POSIX
+    msvcrt = None
+
 
 DEFAULT_GPU_LOCK_PATH = "/tmp/iqa-gpu.lock"
 GPU_LOCK_PATH_ENV = "IQA_GPU_LOCK_PATH"
+WINDOWS_LOCK_OFFSET = 1_048_576
 
 
 class GpuBusyError(RuntimeError):
     """Raised when the GPU lock is already held by another process."""
+
+
+def _lock_file(fd: int, *, blocking: bool) -> None:
+    if fcntl is not None:
+        flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+        fcntl.flock(fd, flags)
+        return
+
+    assert msvcrt is not None
+    os.lseek(fd, WINDOWS_LOCK_OFFSET, os.SEEK_SET)
+    mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+    msvcrt.locking(fd, mode, 1)
+
+
+def _unlock_file(fd: int) -> None:
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return
+
+    assert msvcrt is not None
+    os.lseek(fd, WINDOWS_LOCK_OFFSET, os.SEEK_SET)
+    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
+def _owner_sidecar(path: Path) -> Path:
+    return path.with_name(f"{path.name}.owner")
 
 
 def gpu_lock_path() -> Path:
@@ -43,6 +77,11 @@ def read_gpu_lock_holder(path: Path | None = None) -> str:
     try:
         return target.read_text(encoding="utf-8").strip()
     except OSError:
+        if msvcrt is not None:
+            try:
+                return _owner_sidecar(target).read_text(encoding="utf-8").strip()
+            except OSError:
+                return ""
         return ""
 
 
@@ -63,10 +102,11 @@ def gpu_lock(*, owner: str, blocking: bool = False) -> Iterator[Path]:
     path = gpu_lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-    flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+    locked = False
     try:
         try:
-            fcntl.flock(fd, flags)
+            _lock_file(fd, blocking=blocking)
+            locked = True
         except OSError as exc:
             if exc.errno in (errno.EACCES, errno.EAGAIN):
                 holder = read_gpu_lock_holder(path) or "another process"
@@ -75,12 +115,16 @@ def gpu_lock(*, owner: str, blocking: bool = False) -> Iterator[Path]:
                 ) from exc
             raise
         os.ftruncate(fd, 0)
-        os.write(fd, f"{owner} pid={os.getpid()}\n".encode())
+        owner_record = f"{owner} pid={os.getpid()}\n"
+        os.write(fd, owner_record.encode())
         os.fsync(fd)
+        if msvcrt is not None:
+            _owner_sidecar(path).write_text(owner_record, encoding="utf-8")
         yield path
     finally:
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if locked:
+                _unlock_file(fd)
         finally:
             os.close(fd)
 

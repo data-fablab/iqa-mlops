@@ -91,7 +91,12 @@ class PieceEvent(IQABaseModel):
     lot_id: str | None = None
     source_class: str | None = None
     group_key: str | None = None
+    raw_dataset_id: str | None = None
+    manifest_id: str | None = None
     dataset_version: str | None = None
+    replay_id: str | None = None
+    validation_id: str | None = None
+    scenario_version: str | None = None
     is_defective_gt: bool | None = None
     views: list[PieceView] = Field(default_factory=list)
 
@@ -132,7 +137,12 @@ class PredictionResponse(IQABaseModel):
     piece_event_id: str
     scenario_id: str
     lot_id: str | None = None
+    raw_dataset_id: str | None = None
+    manifest_id: str | None = None
     dataset_version: str | None = None
+    replay_id: str | None = None
+    validation_id: str | None = None
+    scenario_version: str | None = None
     model_version: str | None = None
     roi_model_version: str | None = None
     roi_status: str | None = None
@@ -196,7 +206,12 @@ class ModelVersion(IQABaseModel):
     model_stage: ModelStage
     registered_model_name: str
     scenario_id: str
+    raw_dataset_id: str | None = None
+    manifest_id: str | None = None
     dataset_version: str | None = None
+    replay_id: str | None = None
+    validation_id: str | None = None
+    scenario_version: str | None = None
     roi_model_version: str | None = None
     artifact_uri: str | None = None
     source_of_truth: str = "mlflow_registry"
@@ -210,7 +225,12 @@ class Scenario(IQABaseModel):
     description: str | None = None
     active: bool = True
     registered_model_name: str | None = None
+    raw_dataset_id: str | None = None
+    manifest_id: str | None = None
     dataset_version: str | None = None
+    replay_id: str | None = None
+    validation_id: str | None = None
+    scenario_version: str | None = None
 
 
 class ReloadModelRequest(IQABaseModel):
