@@ -6,18 +6,18 @@
 
 Documenter le système dans `docs/` :
 
-- `model_lifecycle.md`
+- `model-lifecycle.md`
 - `gates.md`
 - `mlflow_registry.md`
-- `drift_regimes.md`
+- `drift-regimes.md`
 - `rollback.md`
 
 ## Acceptance criteria
 
-- [ ] `model_lifecycle.md` (dataset → reload)
+- [ ] `model-lifecycle.md` (dataset → reload)
 - [ ] `gates.md` (recall, AP, Orange rate, latency, defect_coverage)
 - [ ] `mlflow_registry.md` (états, scenario_id, source de vérité)
-- [ ] `drift_regimes.md` (naturel / drift, baseline)
+- [ ] `drift-regimes.md` (naturel / drift, baseline)
 - [ ] `rollback.md` (transition, previous_prod)
 - [ ] Docs cohérentes avec le code et les ADR
 

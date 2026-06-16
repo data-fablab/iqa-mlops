@@ -6,6 +6,8 @@ Pipeline stages:
 
 from __future__ import annotations
 
+from datetime import datetime
+
 try:
     from airflow import DAG
     from airflow.operators.python import PythonOperator
@@ -24,13 +26,16 @@ try:
         task_train,
     )
 except ImportError:  # pragma: no cover
-    task_dataset = None
-    task_train = None
-    task_eval = None
-    task_gates = None
-    task_mlflow = None
-    task_promotion = None
-    task_reload = None
+    def _placeholder_task(**_context):
+        return {"status": "placeholder", "reason": "iqa package not available in airflow image"}
+
+    task_dataset = _placeholder_task
+    task_train = _placeholder_task
+    task_eval = _placeholder_task
+    task_gates = _placeholder_task
+    task_mlflow = _placeholder_task
+    task_promotion = _placeholder_task
+    task_reload = _placeholder_task
 
 
 GPU_POOL = "iqa_gpu"
@@ -56,6 +61,7 @@ if (
         dag_id="iqa_lifecycle",
         schedule=None,
         catchup=False,
+        start_date=datetime(2026, 1, 1),
         tags=["iqa", "lifecycle"],
         params={
             "regime": "natural",
