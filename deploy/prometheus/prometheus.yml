@@ -2,6 +2,12 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
+  # Prometheus self-monitoring.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # IQA application services (text exposition on /metrics).
   - job_name: iqa-api
     metrics_path: /metrics
     static_configs:
@@ -11,3 +17,16 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["iqa-inference:8100"]
+
+  # Airflow has no native Prometheus endpoint; it emits StatsD, which the
+  # statsd-exporter sidecar converts to Prometheus metrics on :9102.
+  - job_name: airflow
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["statsd-exporter:9102"]
+
+  # MinIO cluster metrics (requires MINIO_PROMETHEUS_AUTH_TYPE=public).
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ["minio:9000"]
