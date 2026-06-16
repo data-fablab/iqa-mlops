@@ -118,7 +118,7 @@ class TestLatencyGate:
 class TestPromotionGatesIntegration:
     """Integration tests for combined gate evaluation."""
 
-    def test_all_gates_pass(self) -> None:
+    def test_all_gates_pass(self, feature_ae_gates_config: dict) -> None:
         """All gates pass => no rollback signal."""
         result = evaluate_promotion_gates(
             candidate_recall=1.0,
@@ -126,20 +126,15 @@ class TestPromotionGatesIntegration:
             candidate_orange_rate=0.08,
             candidate_latency_ms=900.0,
             prod_ap=0.95,
-            gates_config={
-                "feature_ae": {
-                    "recall_defect_min": 1.0,
-                    "image_ap_max_regression": 0.02,
-                    "orange_rate_max": 0.10,
-                    "latency_p95_ms_max": 1000.0,
-                }
-            },
+            gates_config=feature_ae_gates_config,
         )
         assert result["all_passed"] is True
         assert result["rollback_signal"] is False
         assert len(result["gates"]) == 4
 
-    def test_recall_gate_fails_triggers_rollback(self) -> None:
+    def test_recall_gate_fails_triggers_rollback(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """Recall gate failure triggers rollback."""
         result = evaluate_promotion_gates(
             candidate_recall=0.98,  # Below threshold
@@ -147,20 +142,15 @@ class TestPromotionGatesIntegration:
             candidate_orange_rate=0.08,
             candidate_latency_ms=900.0,
             prod_ap=0.95,
-            gates_config={
-                "feature_ae": {
-                    "recall_defect_min": 1.0,
-                    "image_ap_max_regression": 0.02,
-                    "orange_rate_max": 0.10,
-                    "latency_p95_ms_max": 1000.0,
-                }
-            },
+            gates_config=feature_ae_gates_config,
         )
         assert result["all_passed"] is False
         assert result["rollback_signal"] is True
         assert result["gates"]["recall"]["passed"] is False
 
-    def test_ap_regression_exceeds_triggers_rollback(self) -> None:
+    def test_ap_regression_exceeds_triggers_rollback(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """AP regression exceeding max triggers rollback."""
         result = evaluate_promotion_gates(
             candidate_recall=1.0,
@@ -168,20 +158,15 @@ class TestPromotionGatesIntegration:
             candidate_orange_rate=0.08,
             candidate_latency_ms=900.0,
             prod_ap=0.95,
-            gates_config={
-                "feature_ae": {
-                    "recall_defect_min": 1.0,
-                    "image_ap_max_regression": 0.02,  # Exceeds this
-                    "orange_rate_max": 0.10,
-                    "latency_p95_ms_max": 1000.0,
-                }
-            },
+            gates_config=feature_ae_gates_config,  # candidate AP regresses past 0.02
         )
         assert result["all_passed"] is False
         assert result["rollback_signal"] is True
         assert result["gates"]["ap_regression"]["passed"] is False
 
-    def test_latency_exceeds_triggers_rollback(self) -> None:
+    def test_latency_exceeds_triggers_rollback(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """Latency exceeding max triggers rollback."""
         result = evaluate_promotion_gates(
             candidate_recall=1.0,
@@ -189,14 +174,7 @@ class TestPromotionGatesIntegration:
             candidate_orange_rate=0.08,
             candidate_latency_ms=1100.0,  # Exceeds threshold
             prod_ap=0.95,
-            gates_config={
-                "feature_ae": {
-                    "recall_defect_min": 1.0,
-                    "image_ap_max_regression": 0.02,
-                    "orange_rate_max": 0.10,
-                    "latency_p95_ms_max": 1000.0,
-                }
-            },
+            gates_config=feature_ae_gates_config,
         )
         assert result["all_passed"] is False
         assert result["rollback_signal"] is True

@@ -18,16 +18,6 @@ from iqa.datasets import (
 from iqa.promotion.gates import evaluate_promotion_gates
 
 
-_FEATURE_AE_GATES = {
-    "feature_ae": {
-        "recall_defect_min": 1.0,
-        "image_ap_max_regression": 0.02,
-        "orange_rate_max": 0.10,
-        "latency_p95_ms_max": 1000.0,
-    }
-}
-
-
 class TestTrainingManifestSecurityInvariants:
     """The built candidate manifest must never leak unsafe training samples."""
 
@@ -107,7 +97,9 @@ class TestTrainingManifestSecurityInvariants:
 class TestUnsafePromotionIsBlocked:
     """An unsafe candidate must be blocked and raise the rollback signal."""
 
-    def test_unsafe_candidate_blocks_and_signals_rollback(self) -> None:
+    def test_unsafe_candidate_blocks_and_signals_rollback(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """A candidate failing one or more gates blocks promotion and signals rollback."""
         result = evaluate_promotion_gates(
             candidate_recall=0.95,  # below threshold
@@ -115,12 +107,14 @@ class TestUnsafePromotionIsBlocked:
             candidate_orange_rate=0.15,  # too high
             candidate_latency_ms=1100.0,  # too slow
             prod_ap=0.95,
-            gates_config=_FEATURE_AE_GATES,
+            gates_config=feature_ae_gates_config,
         )
         assert result["all_passed"] is False
         assert result["rollback_signal"] is True
 
-    def test_safe_candidate_passes_all_gates(self) -> None:
+    def test_safe_candidate_passes_all_gates(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """A fully compliant candidate passes and does not signal rollback."""
         result = evaluate_promotion_gates(
             candidate_recall=1.0,
@@ -128,7 +122,7 @@ class TestUnsafePromotionIsBlocked:
             candidate_orange_rate=0.08,
             candidate_latency_ms=900.0,
             prod_ap=0.95,
-            gates_config=_FEATURE_AE_GATES,
+            gates_config=feature_ae_gates_config,
         )
         assert result["all_passed"] is True
         assert result["rollback_signal"] is False
