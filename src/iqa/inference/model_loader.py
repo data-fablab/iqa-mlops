@@ -102,16 +102,18 @@ class ProdModelLoader:
         Returns:
             Version string (MLflow run_id)
         """
-        # Handle MLflow local path format: .../mlruns/{exp_id}/{run_id}/artifacts
-        if "mlruns" in artifact_uri:
-            parts = artifact_uri.split("mlruns/")
+        # Handle MLflow local path format on Linux and Windows:
+        # .../mlruns/{exp_id}/{run_id}/artifacts
+        normalized_uri = artifact_uri.replace("\\", "/")
+        if "mlruns" in normalized_uri:
+            parts = normalized_uri.split("mlruns/", 1)
             if len(parts) > 1:
                 remainder = parts[1].split("/")
                 if len(remainder) >= 2:
                     return remainder[1]
 
-        if "runs/" in artifact_uri:
-            parts = artifact_uri.split("runs/")
+        if "runs/" in normalized_uri:
+            parts = normalized_uri.split("runs/", 1)
             if len(parts) > 1:
                 run_id = parts[1].split("/")[0]
                 return run_id

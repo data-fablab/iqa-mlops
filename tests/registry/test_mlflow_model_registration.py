@@ -32,6 +32,7 @@ class TestRegisterRunToModel:
                     pytorch_model=torch.nn.Linear(1, 1),
                     artifact_path="model",
                     input_example=torch.randn(1, 1),
+                    pip_requirements=[],
                 )
                 run_id = run.info.run_id
 
@@ -66,6 +67,7 @@ class TestRegisterRunToModel:
                     pytorch_model=torch.nn.Linear(1, 1),
                     artifact_path="model",
                     input_example=torch.randn(1, 1),
+                    pip_requirements=[],
                 )
                 run_id = run.info.run_id
 
@@ -97,6 +99,7 @@ class TestRegisterRunToModel:
                     pytorch_model=torch.nn.Linear(1, 1),
                     artifact_path="model",
                     input_example=torch.randn(1, 1),
+                    pip_requirements=[],
                 )
                 run_id_1 = run.info.run_id
 
@@ -113,6 +116,7 @@ class TestRegisterRunToModel:
                     pytorch_model=torch.nn.Linear(1, 1),
                     artifact_path="model",
                     input_example=torch.randn(1, 1),
+                    pip_requirements=[],
                 )
                 run_id_2 = run.info.run_id
 
@@ -147,6 +151,7 @@ class TestRegisterRunToModel:
                         pytorch_model=torch.nn.Linear(1, 1),
                         artifact_path="model",
                         input_example=torch.randn(1, 1),
+                        pip_requirements=[],
                     )
                     run_id = run.info.run_id
 
