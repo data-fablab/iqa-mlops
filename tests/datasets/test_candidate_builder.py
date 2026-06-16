@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from factories import make_sample as _sample
 
 from iqa.datasets import (
@@ -17,93 +18,64 @@ from iqa.datasets import (
 class TestFilterCandidateSamples:
     """Test filtering logic for candidate dataset safety rules."""
 
-    def test_filter_good_only_accepts_good_label(self) -> None:
-        """Filter accepts samples with 'good' label."""
-        sample = _sample(label="good")
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 1
+    @pytest.mark.parametrize(
+        "sample_kwargs, expected",
+        [
+            ({"label": "good"}, 1),
+            ({"label": "normal"}, 1),
+            ({"label": "conforme"}, 1),
+            ({"label": "defect"}, 0),
+            ({"label": "bad"}, 0),
+            ({"is_defective": False}, 1),
+            ({"is_defective": True}, 0),
+            ({"split_set": "validation_set_v001"}, 0),
+            ({"split_set": "train"}, 1),
+        ],
+        ids=[
+            "label-good",
+            "label-normal",
+            "label-conforme",
+            "label-defect",
+            "label-bad",
+            "not-defective",
+            "is-defective",
+            "validation-split",
+            "train-split",
+        ],
+    )
+    def test_filter_single_safety_rule(
+        self, sample_kwargs: dict, expected: int
+    ) -> None:
+        """Each safety rule accepts good/non-defective/non-validation samples only."""
+        filtered = filter_candidate_samples([_sample(**sample_kwargs)])
+        assert len(filtered) == expected
 
-    def test_filter_good_only_accepts_normal_label(self) -> None:
-        """Filter accepts samples with 'normal' label."""
-        sample = _sample(label="normal")
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 1
-
-    def test_filter_good_only_accepts_conforme_label(self) -> None:
-        """Filter accepts samples with 'conforme' label."""
-        sample = _sample(label="conforme")
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 1
-
-    def test_filter_good_only_rejects_defect_label(self) -> None:
-        """Filter rejects samples with defect labels."""
-        sample = _sample(label="defect")
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 0
-
-    def test_filter_good_only_rejects_bad_label(self) -> None:
-        """Filter rejects samples with 'bad' label."""
-        sample = _sample(label="bad")
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 0
-
-    def test_filter_no_defects_accepts_non_defective(self) -> None:
-        """Filter accepts samples with is_defective=False."""
-        sample = _sample(is_defective=False)
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 1
-
-    def test_filter_no_defects_rejects_defective(self) -> None:
-        """Filter rejects samples with is_defective=True."""
-        sample = _sample(is_defective=True)
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 0
-
-    def test_filter_excludes_validation_set(self) -> None:
-        """Filter rejects samples from validation_set."""
-        sample = _sample(split_set="validation_set_v001")
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 0
-
-    def test_filter_accepts_other_splits(self) -> None:
-        """Filter accepts samples from non-validation splits."""
-        sample = _sample(split_set="train")
-        filtered = filter_candidate_samples([sample])
-        assert len(filtered) == 1
-
-    def test_filter_roi_ok_accepts_when_no_roi_status(self) -> None:
-        """Filter accepts samples when no ROI status provided."""
-        sample = _sample()
-        filtered = filter_candidate_samples([sample], roi_status=None)
-        assert len(filtered) == 1
-
-    def test_filter_roi_ok_accepts_when_status_ok(self) -> None:
-        """Filter accepts samples with roi_status='ok'."""
+    @pytest.mark.parametrize(
+        "roi_status, expected",
+        [
+            (None, 1),
+            ({"img_001": "ok"}, 1),
+            ({"img_002": "ok"}, 1),
+            ({"img_001": "OK"}, 1),
+            ({"img_001": "failed"}, 0),
+            ({"img_001": "warning"}, 0),
+            ({"img_001": "fail"}, 0),
+        ],
+        ids=[
+            "no-status",
+            "status-ok",
+            "key-absent",
+            "ok-case-insensitive",
+            "failed",
+            "warning",
+            "fail",
+        ],
+    )
+    def test_filter_roi_status(self, roi_status: dict | None, expected: int) -> None:
+        """ROI gate accepts only 'ok' (case-insensitive) or absent status."""
         sample = _sample(image_id="img_001")
-        roi_status = {"img_001": "ok"}
         filtered = filter_candidate_samples([sample], roi_status=roi_status)
-        assert len(filtered) == 1
-
-    def test_filter_roi_ok_accepts_when_status_not_provided(self) -> None:
-        """Filter accepts samples when ROI status key not in dict."""
-        sample = _sample(image_id="img_001")
-        roi_status = {"img_002": "ok"}
-        filtered = filter_candidate_samples([sample], roi_status=roi_status)
-        assert len(filtered) == 1
-
-    def test_filter_roi_ok_rejects_when_status_not_ok(self) -> None:
-        """Filter rejects samples with roi_status != 'ok'."""
-        sample = _sample(image_id="img_001")
-        roi_status = {"img_001": "failed"}
-        filtered = filter_candidate_samples([sample], roi_status=roi_status)
-        assert len(filtered) == 0
-
-    def test_filter_roi_ok_case_insensitive(self) -> None:
-        """Filter is case-insensitive for ROI status."""
-        sample = _sample(image_id="img_001")
-        roi_status = {"img_001": "OK"}
-        filtered = filter_candidate_samples([sample], roi_status=roi_status)
-        assert len(filtered) == 1
+        assert len(filtered) == expected
 
     def test_filter_roi_ok_by_relative_path(self) -> None:
         """Filter matches ROI status by relative_path when image_id not found."""
@@ -111,20 +83,6 @@ class TestFilterCandidateSamples:
         roi_status = {"path/to/img.jpg": "ok"}
         filtered = filter_candidate_samples([sample], roi_status=roi_status)
         assert len(filtered) == 1
-
-    def test_filter_roi_rejects_warning(self) -> None:
-        """Filter rejects samples with roi_status='warning'."""
-        sample = _sample(image_id="img_001")
-        roi_status = {"img_001": "warning"}
-        filtered = filter_candidate_samples([sample], roi_status=roi_status)
-        assert len(filtered) == 0
-
-    def test_filter_roi_rejects_fail(self) -> None:
-        """Filter rejects samples with roi_status='fail'."""
-        sample = _sample(image_id="img_001")
-        roi_status = {"img_001": "fail"}
-        filtered = filter_candidate_samples([sample], roi_status=roi_status)
-        assert len(filtered) == 0
 
     def test_filter_combines_all_rules(self) -> None:
         """Filter combines all safety rules in sequence."""

@@ -44,10 +44,12 @@ class TestPromotionRollbackCycle:
         """Full cycle: save current prod, promote, then rollback to the saved version."""
         mock_client = mock_mlflow_client
 
-        # Phase 1: save current prod (v4) before promoting v5.
-        mock_prod_version = MagicMock()
-        mock_prod_version.version = "4"
-        mock_client.get_latest_versions.return_value = [mock_prod_version]
+        # Phase 1: save current prod (v4) before promoting v5. Both the "prod"
+        # lookup (save) and the "previous_prod" lookup (rollback) resolve through
+        # the alias API, and both point at v4 here.
+        mock_v4 = MagicMock()
+        mock_v4.version = "4"
+        mock_client.get_model_version_by_alias.return_value = mock_v4
 
         save_result = save_previous_prod_before_promotion(
             registered_model_name="feature_ae__production_replay_natural"
@@ -56,9 +58,6 @@ class TestPromotionRollbackCycle:
         assert save_result["previous_prod_version"] == "4"
 
         # Phase 2: v5 promoted then found faulty -> rollback restores v4, archives v5.
-        mock_prev_version = MagicMock()
-        mock_prev_version.version = "4"
-        mock_client.get_model_version_by_alias.return_value = mock_prev_version
 
         rollback_result = rollback_model(
             registered_model_name="feature_ae__production_replay_natural",

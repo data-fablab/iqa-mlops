@@ -35,11 +35,15 @@ def save_previous_prod_before_promotion(
     client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
 
     try:
-        versions = client.get_latest_versions(registered_model_name, stages=["prod"])
-        if not versions:
+        # Stages are deprecated; the current prod model is whatever the "prod"
+        # alias points at.
+        try:
+            prod_version = client.get_model_version_by_alias(
+                registered_model_name, "prod"
+            )
+        except Exception:
             raise ValueError(f"No prod model found for {registered_model_name}")
 
-        prod_version = versions[0]
         previous_prod_version = str(prod_version.version)
 
         # Persist the alias so rollback can find this version later.
@@ -137,18 +141,19 @@ def rollback_model(
         previous_prod_info = get_previous_prod(registered_model_name, tracking_uri)
         previous_prod_version = previous_prod_info["version"]
 
-        # Transition previous_prod back to prod
-        client.transition_model_version_stage(
+        # Stages are deprecated; "stages" are now aliases of the same name.
+        # Restore previous_prod by repointing the "prod" alias at it.
+        client.set_registered_model_alias(
             name=registered_model_name,
+            alias="prod",
             version=previous_prod_version,
-            stage="prod",
         )
 
-        # Archive the faulty version
-        client.transition_model_version_stage(
+        # Archive the faulty version by marking it with the "archived" alias.
+        client.set_registered_model_alias(
             name=registered_model_name,
+            alias="archived",
             version=str(faulty_version),
-            stage="archived",
         )
 
         return {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
 from iqa.monitoring.drift_baseline import (
     DriftBaseline,
@@ -12,6 +13,28 @@ from iqa.monitoring.drift_baseline import (
     DriftQualifier,
 )
 from iqa.monitoring.lifecycle import LifecycleSignal, should_trigger_lifecycle
+
+
+@pytest.fixture
+def production_baseline() -> DriftBaseline:
+    """Production baseline: tight thresholds (early warning)."""
+    return DriftBaseline(
+        version="v1",
+        scenario_type="production",
+        teacher_drift_threshold=0.25,
+        reconstruction_threshold=0.90,
+    )
+
+
+@pytest.fixture
+def extension_baseline() -> DriftBaseline:
+    """Domain-extension baseline: looser thresholds (larger drift planned)."""
+    return DriftBaseline(
+        version="v1",
+        scenario_type="extension",
+        teacher_drift_threshold=0.50,
+        reconstruction_threshold=1.20,
+    )
 
 
 class TestDriftBaselineBasic:
@@ -42,53 +65,32 @@ class TestDriftBaselineBasic:
 
         assert baseline.scenario_type == "extension"
 
-    def test_drift_below_threshold_is_expected(self) -> None:
-        """Test that drift below threshold is expected for scenario."""
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
+    @pytest.mark.parametrize(
+        "teacher_drift, anomaly_metric, expected",
+        [
+            (0.15, 0.80, True),   # both below threshold
+            (0.30, 0.80, False),  # teacher drift above
+            (0.20, 0.95, False),  # anomaly metric above
+            (0.30, 0.95, False),  # both above
+        ],
+        ids=["both-below", "teacher-above", "anomaly-above", "both-above"],
+    )
+    def test_drift_expected_only_when_both_metrics_below(
+        self,
+        production_baseline: DriftBaseline,
+        teacher_drift: float,
+        anomaly_metric: float,
+        expected: bool,
+    ) -> None:
+        """Drift is expected only when BOTH metrics stay below their thresholds."""
+        result = production_baseline.is_expected_drift(
+            teacher_drift=teacher_drift, anomaly_metric=anomaly_metric
         )
+        assert bool(result) is expected
 
-        # Drift below threshold = expected
-        assert baseline.is_expected_drift(teacher_drift=0.15, anomaly_metric=0.80)
-
-    def test_drift_above_threshold_is_unexpected(self) -> None:
-        """Test that drift above threshold is unexpected."""
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
-        )
-
-        # Drift above threshold = unexpected
-        assert not baseline.is_expected_drift(teacher_drift=0.30, anomaly_metric=0.80)
-
-    def test_both_metrics_must_be_below_threshold(self) -> None:
-        """Test that both metrics must be below threshold."""
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
-        )
-
-        # One above, one below = unexpected
-        assert not baseline.is_expected_drift(teacher_drift=0.20, anomaly_metric=0.95)
-        assert not baseline.is_expected_drift(teacher_drift=0.30, anomaly_metric=0.80)
-
-    def test_baseline_to_dict(self) -> None:
+    def test_baseline_to_dict(self, production_baseline: DriftBaseline) -> None:
         """Test baseline serialization."""
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
-        )
-
-        data = baseline.to_dict()
+        data = production_baseline.to_dict()
         assert data["version"] == "v1"
         assert data["scenario_type"] == "production"
         assert data["teacher_drift_threshold"] == 0.25
@@ -149,60 +151,51 @@ class TestDriftBaselineRegistry:
 class TestDriftQualification:
     """Integration: qualify actual drift as expected/unexpected."""
 
-    def test_production_drift_qualification(self) -> None:
-        """Test qualifying drift in production scenario."""
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
+    @pytest.mark.parametrize(
+        "baseline_fixture, teacher_drift, anomaly_metric, expected",
+        [
+            ("production_baseline", 0.15, 0.75, True),   # normal production
+            ("production_baseline", 0.35, 0.75, False),  # production issue
+            ("extension_baseline", 0.40, 1.10, True),    # planned extension
+            ("extension_baseline", 0.60, 1.10, False),   # beyond extension
+        ],
+        ids=[
+            "production-normal",
+            "production-issue",
+            "extension-planned",
+            "extension-beyond",
+        ],
+    )
+    def test_drift_qualification_per_scenario(
+        self,
+        request: pytest.FixtureRequest,
+        baseline_fixture: str,
+        teacher_drift: float,
+        anomaly_metric: float,
+        expected: bool,
+    ) -> None:
+        """Production (tight) and extension (loose) baselines qualify drift differently."""
+        baseline: DriftBaseline = request.getfixturevalue(baseline_fixture)
+        result = baseline.is_expected_drift(
+            teacher_drift=teacher_drift, anomaly_metric=anomaly_metric
         )
-
-        # Normal production: small drift expected
-        assert baseline.is_expected_drift(teacher_drift=0.15, anomaly_metric=0.75)
-
-        # Production issue: large drift unexpected
-        assert not baseline.is_expected_drift(teacher_drift=0.35, anomaly_metric=0.75)
-
-    def test_extension_drift_qualification(self) -> None:
-        """Test qualifying drift in extension scenario."""
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="extension",
-            teacher_drift_threshold=0.50,
-            reconstruction_threshold=1.20,
-        )
-
-        # Planned extension: larger drift expected
-        assert baseline.is_expected_drift(teacher_drift=0.40, anomaly_metric=1.10)
-
-        # Beyond planned extension: unexpected
-        assert not baseline.is_expected_drift(teacher_drift=0.60, anomaly_metric=1.10)
+        assert bool(result) is expected
 
 
 class TestDriftQualificationWithMonitoring:
     """Integration: use baseline to qualify drift in monitoring context."""
 
-    def test_qualify_drift_from_scenario_id(self, tmp_path: Path) -> None:
+    def test_qualify_drift_from_scenario_id(
+        self,
+        tmp_path: Path,
+        production_baseline: DriftBaseline,
+        extension_baseline: DriftBaseline,
+    ) -> None:
         """Test qualifying drift using scenario_id mapping."""
         # Create baselines
         storage = DriftBaselineStorage(bucket="iqa-baselines", artifact_root=tmp_path)
-
-        baseline_prod = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
-        )
-        storage.save_baseline(baseline_prod)
-
-        baseline_ext = DriftBaseline(
-            version="v1",
-            scenario_type="extension",
-            teacher_drift_threshold=0.50,
-            reconstruction_threshold=1.20,
-        )
-        storage.save_baseline(baseline_ext)
+        storage.save_baseline(production_baseline)
+        storage.save_baseline(extension_baseline)
 
         # Use qualifier
         qualifier = DriftQualifier(storage)
@@ -223,17 +216,12 @@ class TestDriftQualificationWithMonitoring:
         )
         assert is_expected
 
-    def test_detect_unexpected_drift_in_production(self, tmp_path: Path) -> None:
+    def test_detect_unexpected_drift_in_production(
+        self, tmp_path: Path, production_baseline: DriftBaseline
+    ) -> None:
         """Test detecting unexpected drift as signal for lifecycle."""
         storage = DriftBaselineStorage(bucket="iqa-baselines", artifact_root=tmp_path)
-
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
-        )
-        storage.save_baseline(baseline)
+        storage.save_baseline(production_baseline)
 
         qualifier = DriftQualifier(storage)
 
@@ -249,37 +237,27 @@ class TestDriftQualificationWithMonitoring:
 class TestDriftBaselineMinIOStorage:
     """Store and load baselines as versioned artifacts in MinIO."""
 
-    def test_save_baseline_to_minio(self, tmp_path: Path) -> None:
+    def test_save_baseline_to_minio(
+        self, tmp_path: Path, production_baseline: DriftBaseline
+    ) -> None:
         """Test saving baseline to MinIO artifact."""
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
-        )
-
         storage = DriftBaselineStorage(bucket="iqa-baselines", artifact_root=tmp_path)
 
         # Save baseline
-        artifact_path = storage.save_baseline(baseline)
+        artifact_path = storage.save_baseline(production_baseline)
 
         assert artifact_path.exists()
         assert "v1" in artifact_path.name
         assert "production" in artifact_path.name
 
-    def test_load_baseline_from_minio(self, tmp_path: Path) -> None:
+    def test_load_baseline_from_minio(
+        self, tmp_path: Path, production_baseline: DriftBaseline
+    ) -> None:
         """Test loading baseline from MinIO artifact."""
-        baseline = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
-        )
-
         storage = DriftBaselineStorage(bucket="iqa-baselines", artifact_root=tmp_path)
 
         # Save then load
-        storage.save_baseline(baseline)
+        storage.save_baseline(production_baseline)
         loaded = storage.load_baseline("production", version="v1")
 
         assert loaded.scenario_type == "production"
@@ -308,7 +286,9 @@ class TestDriftBaselineMinIOStorage:
 class TestIntegrationWithLifecycle:
     """Integration with monitoring lifecycle."""
 
-    def test_drift_baseline_informs_lifecycle_decision(self, tmp_path: Path) -> None:
+    def test_drift_baseline_informs_lifecycle_decision(
+        self, tmp_path: Path, production_baseline: DriftBaseline
+    ) -> None:
         """Test that drift qualification informs lifecycle trigger.
 
         Scenario: Production scenario detects unexpected drift.
@@ -317,13 +297,7 @@ class TestIntegrationWithLifecycle:
         storage = DriftBaselineStorage(bucket="iqa-baselines", artifact_root=tmp_path)
 
         # Production baseline: tight thresholds (early warning)
-        baseline_prod = DriftBaseline(
-            version="v1",
-            scenario_type="production",
-            teacher_drift_threshold=0.25,
-            reconstruction_threshold=0.90,
-        )
-        storage.save_baseline(baseline_prod)
+        storage.save_baseline(production_baseline)
 
         qualifier = DriftQualifier(storage)
 

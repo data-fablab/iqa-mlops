@@ -25,7 +25,7 @@ class TestSavePreviousProd:
         """save_previous_prod_before_promotion saves current prod version to MLflow."""
         mock_prod_version = MagicMock()
         mock_prod_version.version = "5"
-        mock_mlflow_client.get_latest_versions.return_value = [mock_prod_version]
+        mock_mlflow_client.get_model_version_by_alias.return_value = mock_prod_version
 
         result = save_previous_prod_before_promotion(
             registered_model_name="feature_ae__production_replay_natural"
@@ -34,9 +34,9 @@ class TestSavePreviousProd:
         assert result["success"] is True
         assert result["previous_prod_version"] == "5"
         assert result["registered_model_name"] == "feature_ae__production_replay_natural"
-        mock_mlflow_client.get_latest_versions.assert_called_once_with(
+        mock_mlflow_client.get_model_version_by_alias.assert_called_once_with(
             "feature_ae__production_replay_natural",
-            stages=["prod"],
+            "prod",
         )
         # The "previous_prod" alias MUST be persisted so rollback can find it.
         mock_mlflow_client.set_registered_model_alias.assert_called_once_with(
@@ -49,7 +49,7 @@ class TestSavePreviousProd:
         self, mock_mlflow_client: MagicMock
     ) -> None:
         """save_previous_prod raises error if no prod version exists."""
-        mock_mlflow_client.get_latest_versions.return_value = []
+        mock_mlflow_client.get_model_version_by_alias.side_effect = Exception("Not found")
 
         result = save_previous_prod_before_promotion(
             registered_model_name="feature_ae__production_replay_natural"
@@ -112,15 +112,15 @@ class TestRollbackModel:
         assert result["previous_prod_version"] == "4"
         assert result["faulty_version_archived"] == "6"
 
-        # Verify transitions were called
-        calls = mock_mlflow_client.transition_model_version_stage.call_args_list
+        # Verify alias re-pointing was called
+        calls = mock_mlflow_client.set_registered_model_alias.call_args_list
         assert len(calls) == 2
         # First call: restore previous_prod to prod
         assert calls[0][1]["version"] == "4"
-        assert calls[0][1]["stage"] == "prod"
+        assert calls[0][1]["alias"] == "prod"
         # Second call: archive faulty
         assert calls[1][1]["version"] == "6"
-        assert calls[1][1]["stage"] == "archived"
+        assert calls[1][1]["alias"] == "archived"
 
     @patch("iqa.promotion.rollback.get_previous_prod")
     def test_rollback_raises_when_no_previous_prod(
@@ -168,7 +168,7 @@ class TestRollbackIntegration:
         # Step 1: Save current prod (version 5)
         mock_prod_version = MagicMock()
         mock_prod_version.version = "5"
-        mock_mlflow_client.get_latest_versions.return_value = [mock_prod_version]
+        mock_mlflow_client.get_model_version_by_alias.return_value = mock_prod_version
 
         save_result = save_previous_prod_before_promotion(
             registered_model_name="feature_ae__production_replay_natural"
