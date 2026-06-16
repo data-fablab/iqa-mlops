@@ -262,6 +262,55 @@ def _train_eligibility_from_feedback(request: FeedbackRequest) -> tuple[bool, st
     return True, None
 
 
+def _prediction_trace_context(prediction: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "lot_id": prediction.get("lot_id"),
+        "sha256": prediction.get("sha256"),
+        "dataset_version": prediction.get("dataset_version"),
+        "model_version": prediction.get("model_version"),
+        "roi_model_version": prediction.get("roi_model_version"),
+        "decision": prediction.get("decision"),
+    }
+
+
+def _prediction_audit_trail(
+    *,
+    prediction_id: str,
+    record: dict[str, Any],
+    feedback: dict[str, Any] | None,
+    display_feedback: dict[str, Any] | None,
+    decision: str,
+    verdict: str | None,
+    divergence: str | None,
+) -> dict[str, Any]:
+    feedback_trace = feedback or display_feedback or {}
+    return {
+        "prediction": {
+            "prediction_id": prediction_id,
+            "piece_event_id": record.get("piece_event_id"),
+            "scenario_id": record.get("scenario_id"),
+            "lot_id": record.get("lot_id"),
+            "sha256": record.get("sha256"),
+            "dataset_version": record.get("dataset_version"),
+            "model_version": record.get("model_version"),
+            "roi_model_version": record.get("roi_model_version"),
+            "decision": decision,
+        },
+        "feedback": {
+            "feedback_source": feedback_trace.get("feedback_source"),
+            "display_feedback_source": (display_feedback or {}).get("feedback_source"),
+            "display_feedback_status": (display_feedback or {}).get("feedback_status"),
+            "oracle_verdict": verdict,
+            "divergence": divergence,
+            "train_eligibility_source": feedback_trace.get("train_eligibility_source"),
+            "eligible_for_train": feedback_trace.get("eligible_for_train"),
+            "train_block_reason": feedback_trace.get("train_block_reason"),
+            "feedback_closed": record.get("feedback_closed", False),
+            "conflict_logged": feedback_trace.get("conflict_logged", False),
+        },
+    }
+
+
 @app.post("/feedback")
 def feedback(
     request: FeedbackRequest,
@@ -279,6 +328,7 @@ def feedback(
             "prediction_id": request.prediction_id,
             "piece_event_id": request.piece_event_id,
             "scenario_id": request.scenario_id,
+            **_prediction_trace_context(prediction),
             "feedback_source": "human_sophie",
             "feedback_status": feedback_status,
             "comment": request.comment,
@@ -334,6 +384,7 @@ def feedback(
         "prediction_id": request.prediction_id,
         "piece_event_id": request.piece_event_id,
         "scenario_id": request.scenario_id,
+        **_prediction_trace_context(prediction),
         "feedback_source": "oracle_gt",
         "feedback_closed": True,
         "closed_at": closed_at,
@@ -393,6 +444,16 @@ def _prediction_rows() -> list[dict[str, Any]]:
         feedback_trace = feedback or display_feedback or {}
         verdict = (feedback or {}).get("verdict", {}).get("verdict") if feedback else None
         decision = record.get("decision", "")
+        divergence = _oracle_divergence(decision, verdict)
+        audit_trail = _prediction_audit_trail(
+            prediction_id=prediction_id,
+            record=record,
+            feedback=feedback,
+            display_feedback=display_feedback,
+            decision=decision,
+            verdict=verdict,
+            divergence=divergence,
+        )
         rows.append(
             {
                 "prediction_id": prediction_id,
@@ -415,7 +476,8 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "train_block_reason": feedback_trace.get("train_block_reason"),
                 "conflict_logged": feedback_trace.get("conflict_logged", False),
                 "oracle_verdict": verdict,
-                "divergence": _oracle_divergence(decision, verdict),
+                "divergence": divergence,
+                "audit_trail": audit_trail,
             }
         )
     rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
