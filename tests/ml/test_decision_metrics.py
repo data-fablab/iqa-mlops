@@ -1,8 +1,11 @@
-"""Tests for decision metrics (recall, orange_rate, latency) used by the recall gate."""
+"""Tests for decision metrics (recall, orange_rate, latency) used by the recall gate.
+
+These cover the metric computation only. The recall gate behaviour itself is
+tested in tests/test_promotion_gates.py (TestRecallGate).
+"""
 
 from __future__ import annotations
 
-from iqa.promotion.gates import evaluate_recall_gate
 from iqa.training.feature_ae_evaluation import compute_decision_metrics
 
 
@@ -33,27 +36,6 @@ class TestComputeDecisionMetrics:
 
         assert metrics["recall"] == 1.0
         assert metrics["false_negatives"] == 0
-
-    def test_false_negative_blocks_recall_gate(self) -> None:
-        """A missed defect drops recall below 1.0 and blocks promotion."""
-        labels = [True, True]
-        scores = [0.09, 0.001]  # second defect missed
-
-        metrics = compute_decision_metrics(
-            labels, scores, threshold_orange=0.02, threshold_red=0.05
-        )
-        gate = evaluate_recall_gate(metrics["recall"], threshold=1.0)
-
-        assert gate["passed"] is False
-
-    def test_full_recall_passes_recall_gate(self) -> None:
-        """All defects caught -> recall gate passes."""
-        metrics = compute_decision_metrics(
-            [True, True], [0.09, 0.03], threshold_orange=0.02, threshold_red=0.05
-        )
-        gate = evaluate_recall_gate(metrics["recall"], threshold=1.0)
-
-        assert gate["passed"] is True
 
     def test_orange_rate_counts_only_scores_between_thresholds(self) -> None:
         """Orange rate is the fraction of images scored in [orange, red)."""

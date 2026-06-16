@@ -1,4 +1,9 @@
-"""Tests for versioned Feature AE candidate training with traceability."""
+"""Tests for versioned Feature AE candidate training with traceability.
+
+Scope: metadata/versioning only (git commit, training config, smoke training).
+The public FeatureAECandidate contract (interface, save/load, predict, eval) is
+covered in tests/test_feature_ae_candidate.py.
+"""
 
 from __future__ import annotations
 
@@ -148,7 +153,7 @@ class TestFeatureAECandidateVersionedMetadata:
 class TestFeatureAECandidateTrain:
     """Test FeatureAECandidate.train() with versioning."""
 
-    @mock.patch("iqa.models.feature_ae_candidate.train_feature_ae")
+    @mock.patch("iqa.training.feature_ae.train_feature_ae")
     def test_train_saves_metadata_alongside_checkpoint(self, mock_train: mock.MagicMock, tmp_path: Path) -> None:
         """FeatureAECandidate.train() saves metadata alongside checkpoint."""
         checkpoint = tmp_path / "candidate_v2.pt"
@@ -181,7 +186,7 @@ class TestFeatureAECandidateTrain:
         assert metadata["dataset_version"] == "dataset_v001"
         assert "git_commit" in metadata
 
-    @mock.patch("iqa.models.feature_ae_candidate.train_feature_ae")
+    @mock.patch("iqa.training.feature_ae.train_feature_ae")
     def test_train_metadata_includes_all_config_params(self, mock_train: mock.MagicMock, tmp_path: Path) -> None:
         """Train metadata captures key configuration parameters."""
         checkpoint = tmp_path / "candidate_v3.pt"
