@@ -90,7 +90,35 @@ Verifie de bout en bout : un appel `/predict` incremente bien
   des panneaux/metriques.
 - `.env.example` : variables `IQA_GPU_LOCK_PATH` et `IQA_GPU_DEMO_HOLD`.
 
-## 6. Etat des taches Phase 2
+## 6. Streamlit - Dashboard Marc et Review Sophie
+
+L'app Streamlit passe en multipage (`deploy/streamlit/`, dossier monte en
+entier dans le service `iqa-streamlit`).
+
+Endpoints API lecture seule ajoutes (`src/iqa/api/main.py`) :
+
+- `GET /predictions` : historique enrichi du verdict oracle et d'un flag
+  `divergence` (`concordant`, `faux_negatif`, `faux_positif`,
+  `orange_a_revoir`, ou `null` sans feedback).
+- `GET /lots/summary` : KPIs agreges par lot (`scenario_id`) : volumes,
+  Vert/Orange/Rouge, `taux_orange`, `taux_rouge`, feedback fermes, divergences.
+
+Pages livrees :
+
+- `deploy/streamlit/app.py` (Accueil) : predict + feedback oracle GT, alimente
+  l'historique lu par les deux vues. Helpers partages dans
+  `deploy/streamlit/iqa_client.py`.
+- `deploy/streamlit/pages/1_Dashboard_Marc.py` : supervision par lot (KPIs
+  globaux, table `/lots/summary`, distribution V/O/R) - story PRD 3 de Marc.
+- `deploy/streamlit/pages/2_Review_Sophie.py` : revue **lecture seule** via
+  `/predictions`, filtres par lot et "uniquement divergences", mise en evidence
+  des ecarts modele vs oracle. Aucune action d'ecriture (`human_sophie` futur,
+  `oracle_gt` souverain).
+
+Tests : `tests/api/test_review_dashboard.py` (routes, divergence faux_negatif,
+absence de divergence sans feedback, agregation par lot).
+
+## 7. Etat des taches Phase 2
 
 - Verrou GPU (pas de train concurrent pendant inference demo) : fait.
 - Nginx (`/IQA`, `/api`, `/mlflow`, `/minio`, `/grafana`, `/airflow`) : deja
@@ -98,8 +126,10 @@ Verifie de bout en bout : un appel `/predict` incremente bien
 - Prometheus scrape API, Airflow et services : fait.
 - Dashboard Grafana minimal (V/O/R, latence, erreurs, ROI fail, incidents IA,
   modele actif) : fait.
+- Streamlit dashboard Marc : fait.
+- Streamlit review Sophie (lecture seule, divergence oracle) : fait.
 
-## 7. Fichiers touches
+## 8. Fichiers touches
 
 Nouveaux :
 
@@ -107,9 +137,13 @@ Nouveaux :
 src/iqa/runtime/__init__.py
 src/iqa/runtime/gpu_lock.py
 tests/test_gpu_lock.py
+tests/api/test_review_dashboard.py
 deploy/grafana/provisioning/datasources/prometheus.yml
 deploy/grafana/provisioning/dashboards/dashboards.yml
 deploy/grafana/provisioning/dashboards/json/iqa-overview.json
+deploy/streamlit/iqa_client.py
+deploy/streamlit/pages/1_Dashboard_Marc.py
+deploy/streamlit/pages/2_Review_Sophie.py
 ```
 
 Modifies :
@@ -119,7 +153,8 @@ Modifies :
 deploy/docker-compose.yml
 deploy/prometheus/prometheus.yml
 deploy/grafana/provisioning/README.md
-docs/Runbook-Phase1-IQA.md
+deploy/streamlit/app.py
+docs/runbook-phase1-iqa.md
 scripts/run_lifecycle.py
 src/iqa/api/main.py
 src/iqa/inference/service.py

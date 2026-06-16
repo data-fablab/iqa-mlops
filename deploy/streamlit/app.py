@@ -1,8 +1,13 @@
-"""Sophie vitrine MVP: lots, modele actif, statut piece, lien feedback.
+"""IQA Streamlit - Accueil.
 
-Talks to the `iqa-api` FastAPI gateway. This is a Phase 1 placeholder UI:
-it wires the contracts (/model/version, /replay-scenarios, /predict,
-/feedback) without any PostgreSQL-backed history yet.
+Talks to the `iqa-api` FastAPI gateway. The two operational views are in the
+``pages/`` folder:
+
+- Dashboard Marc : supervision par lot (volumes, taux Orange, Rouges).
+- Review Sophie : revue en lecture seule des decisions vs oracle GT.
+
+This Accueil page keeps the predict + oracle GT feedback demo used to feed the
+in-memory history that both views read.
 """
 
 from __future__ import annotations
@@ -11,42 +16,33 @@ import os
 
 import requests
 import streamlit as st
+from iqa_client import API_URL, get, post
 
-API_URL = os.environ.get("IQA_API_URL", "http://localhost:8000")
-
-st.set_page_config(page_title="IQA - Vitrine Sophie", layout="wide")
-st.title("Industrial Quality Assistant - Vitrine Sophie")
+st.set_page_config(page_title="IQA - Accueil", layout="wide")
+st.title("Industrial Quality Assistant")
 st.caption(f"iqa-api: {API_URL}")
+st.markdown(
+    "Utilise le menu de gauche : **Dashboard Marc** (supervision par lot) et "
+    "**Review Sophie** (revue lecture seule, divergence oracle). Cette page sert "
+    "a generer des predictions et a fermer le feedback oracle GT."
+)
 
 if "last_prediction" not in st.session_state:
     st.session_state["last_prediction"] = None
-
-
-def _get(path: str):
-    response = requests.get(f"{API_URL}{path}", timeout=5)
-    response.raise_for_status()
-    return response.json()
-
-
-def _post(path: str, json: dict, headers: dict | None = None):
-    response = requests.post(f"{API_URL}{path}", json=json, headers=headers, timeout=10)
-    response.raise_for_status()
-    return response.json()
-
 
 col_model, col_lots = st.columns(2)
 
 with col_model:
     st.header("Modele actif")
     try:
-        st.json(_get("/model/version"))
+        st.json(get("/model/version"))
     except requests.RequestException as exc:
         st.error(f"iqa-api indisponible : {exc}")
 
 with col_lots:
     st.header("Lots (scenarios de replay)")
     try:
-        st.dataframe(_get("/replay-scenarios"))
+        st.dataframe(get("/replay-scenarios"))
     except requests.RequestException as exc:
         st.error(f"iqa-api indisponible : {exc}")
 
@@ -61,7 +57,7 @@ with st.form("predict_form"):
 
 if submitted:
     try:
-        result = _post(
+        result = post(
             f"/piece-events/{piece_event_id}/predict",
             {"scenario_id": scenario_id, "image_uri": image_uri},
         )
@@ -91,7 +87,7 @@ if fb_submitted:
     service_token = os.environ.get("IQA_SERVICE_TOKEN")
     headers = {"X-IQA-Service-Token": service_token} if service_token else None
     try:
-        result = _post(
+        result = post(
             "/feedback",
             {
                 "prediction_id": prediction_id,

@@ -133,19 +133,26 @@ docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.ym
   uv run --extra cu128 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-## 8. Streamlit (vitrine Sophie Phase 1)
+## 8. Streamlit (Accueil + Dashboard Marc + Review Sophie)
 
 ```bash
 docker compose up -d iqa-streamlit
 ```
 
-Ouvre `http://localhost:8501` : modele actif (`/model/version`), lots
-(`/replay-scenarios`), statut piece (`/piece-events/{id}/predict`) et
-formulaire feedback `oracle_gt` (`/feedback`). C'est une vitrine MVP ; aucun
-historique PostgreSQL n'est encore branche en Phase 1.
+Ouvre `http://localhost:8501`. L'app est multipage (`deploy/streamlit/`) :
 
-Le formulaire de feedback montre le parcours cible. Le workflow operationnel du
-MVP reste automatise par `oracle_gt`; `human_sophie` est futur.
+- **Accueil** : modele actif (`/model/version`), lots (`/replay-scenarios`),
+  statut piece (`/piece-events/{id}/predict`) et feedback `oracle_gt`
+  (`/feedback`). Sert a generer l'historique lu par les deux vues.
+- **Dashboard Marc** : supervision par lot via `/lots/summary` (volumes, taux
+  Orange, Rouges, divergences) + distribution Vert/Orange/Rouge.
+- **Review Sophie** : revue en **lecture seule** via `/predictions`, mettant en
+  evidence les divergences modele vs oracle GT (`faux_negatif`, `faux_positif`,
+  `orange_a_revoir`). Aucune action d'ecriture : l'oracle GT reste souverain,
+  `human_sophie` est futur.
+
+C'est une vitrine MVP : l'historique est en memoire dans l'API (pas encore de
+persistance PostgreSQL en Phase 1).
 
 ## 9. CI
 
