@@ -16,11 +16,12 @@ from iqa.models.feature_ae import (
     load_rd_feature_ae_gated,
     normalize_feature_layers,
 )
-from iqa.training.feature_ae import FeatureAETrainingConfig, train_feature_ae
-from iqa.training.feature_ae_evaluation import FeatureAEEvaluationConfig, evaluate_feature_ae_checkpoint
-
+# NOTE: iqa.training.* imports are deferred (TYPE_CHECKING + lazy in methods) to
+# break the iqa.training.feature_ae <-> iqa.models.feature_ae_candidate import cycle.
 if TYPE_CHECKING:
     from iqa.inference.feature_ae import FeatureAEPrediction
+    from iqa.training.feature_ae import FeatureAETrainingConfig
+    from iqa.training.feature_ae_evaluation import FeatureAEEvaluationConfig
 else:
     FeatureAEPrediction = None
 
@@ -73,6 +74,8 @@ class FeatureAECandidate:
             Checkpoint at config.output_checkpoint.
             Metadata with version/git commit at checkpoint_stem.metadata.json.
         """
+        from iqa.training.feature_ae import train_feature_ae
+
         results = train_feature_ae(config)
         checkpoint_path = Path(results.get("checkpoint_path", config.output_checkpoint))
 
@@ -177,6 +180,8 @@ class FeatureAECandidate:
         Returns:
             Metrics dict with AP, recall, latency, etc.
         """
+        from iqa.training.feature_ae_evaluation import evaluate_feature_ae_checkpoint
+
         metrics = evaluate_feature_ae_checkpoint(config)
         return metrics
 

@@ -11,8 +11,11 @@ import pytest
 # deferred into the fixtures that need them so test collection stays lightweight.
 
 
-ROOT = Path(__file__).resolve().parents[1]
-for path in (ROOT, ROOT / "src"):
+TESTS_DIR = Path(__file__).resolve().parent
+ROOT = TESTS_DIR.parent
+# TESTS_DIR is added so shared test helpers (e.g. `import factories`) resolve from
+# tests living in subpackages, not only from tests/ root.
+for path in (ROOT, ROOT / "src", TESTS_DIR):
     path_text = str(path)
     if path_text not in sys.path:
         sys.path.insert(0, path_text)
