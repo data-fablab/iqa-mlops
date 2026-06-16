@@ -237,6 +237,31 @@ def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any
     return prediction
 
 
+UNSAFE_TRAIN_FEEDBACK_STATUS_REASONS = {
+    "defaut_confirme": "feedback_status_defaut_confirme",
+    "faux_negatif": "feedback_status_faux_negatif",
+    "roi_warning": "roi_warning",
+    "roi_fail": "roi_fail",
+}
+
+
+def _feedback_status_value(feedback_status: Any) -> str | None:
+    if feedback_status is None:
+        return None
+    return getattr(feedback_status, "value", feedback_status)
+
+
+def _train_eligibility_from_feedback(request: FeedbackRequest) -> tuple[bool, str | None]:
+    if request.gt_mask_has_defect:
+        return False, "oracle_gt_defective"
+
+    feedback_status = _feedback_status_value(request.feedback_status)
+    if feedback_status in UNSAFE_TRAIN_FEEDBACK_STATUS_REASONS:
+        return False, UNSAFE_TRAIN_FEEDBACK_STATUS_REASONS[feedback_status]
+
+    return True, None
+
+
 @app.post("/feedback")
 def feedback(
     request: FeedbackRequest,
@@ -260,6 +285,7 @@ def feedback(
             "display_decision_source": "human_sophie",
             "train_eligibility_source": "oracle_gt",
             "eligible_for_train": False,
+            "train_block_reason": "human_sophie_display_only",
             "feedback_closed": False,
             "conflict_logged": False,
             "created_at": created_at,
@@ -273,6 +299,7 @@ def feedback(
             "display_decision_source": "human_sophie",
             "train_eligibility_source": "oracle_gt",
             "eligible_for_train": False,
+            "train_block_reason": "human_sophie_display_only",
             "conflict_logged": False,
             "created_at": created_at,
             "reason": "human_sophie is accepted for display only; oracle_gt remains sovereign for train eligibility.",
@@ -297,7 +324,7 @@ def feedback(
     prediction["feedback_closed_at"] = closed_at
 
     verdict_dict = verdict.to_dict()
-    eligible_for_train = not request.gt_mask_has_defect
+    eligible_for_train, train_block_reason = _train_eligibility_from_feedback(request)
     if not eligible_for_train:
         _inc_security_metric("unsafe_train_blocked_total")
 
@@ -316,6 +343,7 @@ def feedback(
         else "oracle_gt",
         "train_eligibility_source": "oracle_gt",
         "eligible_for_train": eligible_for_train,
+        "train_block_reason": train_block_reason,
         "conflict_logged": conflict_logged,
     }
 
@@ -332,6 +360,7 @@ def feedback(
         "display_decision_source": display_decision_source,
         "train_eligibility_source": "oracle_gt",
         "eligible_for_train": eligible_for_train,
+        "train_block_reason": train_block_reason,
         "conflict_logged": conflict_logged,
         "feedback": verdict_dict,
     }
@@ -383,6 +412,7 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "human_feedback_present": display_feedback is not None,
                 "train_eligibility_source": feedback_trace.get("train_eligibility_source"),
                 "eligible_for_train": feedback_trace.get("eligible_for_train"),
+                "train_block_reason": feedback_trace.get("train_block_reason"),
                 "conflict_logged": feedback_trace.get("conflict_logged", False),
                 "oracle_verdict": verdict,
                 "divergence": _oracle_divergence(decision, verdict),
