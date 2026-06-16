@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from factories import make_sample
 from iqa.datasets import CastingImageSample
 from iqa.promotion import (
     compute_defect_coverage,
@@ -20,10 +21,9 @@ def _sample(
     source_class: str = "class_A",
     is_defective: bool = False,
 ) -> CastingImageSample:
-    """Create a test sample."""
-    return CastingImageSample(
+    """Create a test sample keyed by source_class (defect coverage groups by class)."""
+    return make_sample(
         image_id=f"img_{source_class}",
-        relative_path="path/to/img.jpg",
         source_class=source_class,
         is_defective=is_defective,
     )
