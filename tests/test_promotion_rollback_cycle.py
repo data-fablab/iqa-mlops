@@ -20,17 +20,10 @@ from iqa.promotion.rollback import (
 class TestPromotionRollbackCycle:
     """End-to-end promotion and rollback cycle."""
 
-    def test_gate_block_prevents_promotion_so_no_rollback_needed(self) -> None:
+    def test_gate_block_prevents_promotion_so_no_rollback_needed(
+        self, feature_ae_gates_config: dict
+    ) -> None:
         """A blocked candidate never reaches prod, so no rollback is needed."""
-        gates_config = {
-            "feature_ae": {
-                "recall_defect_min": 1.0,
-                "image_ap_max_regression": 0.02,
-                "orange_rate_max": 0.10,
-                "latency_p95_ms_max": 1000,
-            }
-        }
-
         decision = evaluate_gates_for_promotion(
             registered_model_name="feature_ae__production_replay_natural",
             candidate_metrics={
@@ -39,7 +32,7 @@ class TestPromotionRollbackCycle:
                 "orange_rate": 0.05,
                 "latency_ms": 800,
             },
-            gates_config=gates_config,
+            gates_config=feature_ae_gates_config,
             prod_metrics={"ap": 0.95},
         )
 
