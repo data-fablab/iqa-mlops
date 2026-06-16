@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import pytest
 
+# Every test here resolves the live DAG object, which only exists inside the
+# Airflow runtime (Docker image). Skipped locally; selectable via `-m docker_contract`.
+pytestmark = pytest.mark.docker_contract
+
 
 def test_dag_accepts_regime_and_scenario_id_params() -> None:
     """DAG accepts regime and scenario_id params for replay."""

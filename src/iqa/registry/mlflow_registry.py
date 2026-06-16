@@ -147,7 +147,11 @@ def register_run_to_model(
     except mlflow.exceptions.MlflowException as e:
         # If model already exists, get the latest version
         if "Model with name" in str(e) and "already exists" in str(e):
-            versions = client.get_latest_versions(model_name)
+            versions = client.search_model_versions(
+                f"name='{model_name}'",
+                max_results=1,
+                order_by=["version_number DESC"],
+            )
             if versions:
                 model_version = versions[0]
         else:
@@ -158,16 +162,16 @@ def register_run_to_model(
 
     version_str = str(model_version.version)
 
-    # Transition to specified stage if needed
-    if stage and stage != "None" and stage != "None":
+    # Stages are deprecated; mark the version with an alias of the same name.
+    if stage and stage != "None":
         try:
-            client.transition_model_version_stage(
+            client.set_registered_model_alias(
                 name=model_name,
+                alias=stage,
                 version=version_str,
-                stage=stage,
             )
         except Exception:
-            # Stage transition might fail if model is already in that stage
+            # Aliasing might fail if the version is already aliased.
             pass
 
     return {

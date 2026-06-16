@@ -167,15 +167,10 @@ class TestMLflowStateTransition:
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
 
-        # get_model_version reports the stage *before* the transition.
+        # The version's existing aliases report the stage *before* the transition.
         mock_existing_version = MagicMock()
-        mock_existing_version.current_stage = "candidate"
+        mock_existing_version.aliases = ["candidate"]
         mock_client.get_model_version.return_value = mock_existing_version
-
-        # transition returns the version with its new stage.
-        mock_model_version = MagicMock()
-        mock_model_version.current_stage = "test"
-        mock_client.transition_model_version_stage.return_value = mock_model_version
 
         result = transition_model_stage(
             registered_model_name="feature_ae__production_replay_natural",
@@ -187,10 +182,10 @@ class TestMLflowStateTransition:
         assert result["new_stage"] == "test"
         assert result["previous_stage"] == "candidate"
         assert result["version"] == "1"
-        mock_client.transition_model_version_stage.assert_called_once_with(
+        mock_client.set_registered_model_alias.assert_called_once_with(
             name="feature_ae__production_replay_natural",
+            alias="test",
             version="1",
-            stage="test",
         )
 
     @patch("mlflow.tracking.MlflowClient")
@@ -201,7 +196,7 @@ class TestMLflowStateTransition:
         """Handle transition failure gracefully."""
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
-        mock_client.transition_model_version_stage.side_effect = Exception("MLflow error")
+        mock_client.set_registered_model_alias.side_effect = Exception("MLflow error")
 
         result = transition_model_stage(
             registered_model_name="feature_ae__production_replay_natural",
@@ -228,7 +223,7 @@ class TestArtifactResolution:
         mock_model_version = MagicMock()
         mock_model_version.version = "1"
         mock_model_version.source = "s3://iqa-models/feature_ae__production_replay_natural/1/model"
-        mock_client.get_latest_versions.return_value = [mock_model_version]
+        mock_client.get_model_version_by_alias.return_value = mock_model_version
 
         result = resolve_model_artifacts(
             registered_model_name="feature_ae__production_replay_natural",
@@ -248,7 +243,7 @@ class TestArtifactResolution:
         """Raise error if no model version found in stage."""
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
-        mock_client.get_latest_versions.return_value = []
+        mock_client.get_model_version_by_alias.side_effect = Exception("Not found")
 
         with pytest.raises(ValueError, match="No model version found"):
             resolve_model_artifacts(
@@ -268,7 +263,7 @@ class TestArtifactResolution:
         mock_model_version = MagicMock()
         mock_model_version.version = "2"
         mock_model_version.source = "s3://iqa-models/feature_ae__production_replay_natural/2/model"
-        mock_client.get_latest_versions.return_value = [mock_model_version]
+        mock_client.get_model_version_by_alias.return_value = mock_model_version
 
         result = resolve_model_artifacts(
             registered_model_name="feature_ae__production_replay_natural",
@@ -277,9 +272,9 @@ class TestArtifactResolution:
 
         assert result["stage"] == "test"
         assert result["version"] == "2"
-        mock_client.get_latest_versions.assert_called_once_with(
+        mock_client.get_model_version_by_alias.assert_called_once_with(
             "feature_ae__production_replay_natural",
-            stages=["test"],
+            "test",
         )
 
     @patch("mlflow.tracking.MlflowClient")
@@ -294,7 +289,7 @@ class TestArtifactResolution:
         mock_model_version = MagicMock()
         mock_model_version.version = "3"
         mock_model_version.source = "s3://mlflow-artifacts/feature_ae__production_replay_natural/3/model"
-        mock_client.get_latest_versions.return_value = [mock_model_version]
+        mock_client.get_model_version_by_alias.return_value = mock_model_version
 
         result = resolve_model_artifacts(
             registered_model_name="feature_ae__production_replay_natural",
@@ -329,14 +324,14 @@ feature_ae:
             mock_client_class.return_value = mock_client
 
             mock_model_version = MagicMock()
-            mock_model_version.current_stage = "candidate"
+            mock_model_version.aliases = ["candidate"]
             mock_model_version.version = "1"
             mock_model_version.source = (
                 "s3://iqa-models/feature_ae__production_replay_natural/1/model"
             )
 
-            mock_client.transition_model_version_stage.return_value = mock_model_version
-            mock_client.get_latest_versions.return_value = [mock_model_version]
+            mock_client.get_model_version.return_value = mock_model_version
+            mock_client.get_model_version_by_alias.return_value = mock_model_version
 
             result = promote_model_with_gates(
                 registered_model_name="feature_ae__production_replay_natural",
@@ -390,4 +385,4 @@ feature_ae:
             assert result["success"] is False
             assert result["gates_passed"] is False
             assert "recall" in result["blocked_reasons"]
-            mock_client.transition_model_version_stage.assert_not_called()
+            mock_client.set_registered_model_alias.assert_not_called()
