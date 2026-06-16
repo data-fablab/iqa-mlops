@@ -7,7 +7,7 @@ mechanics (alias persistence, transitions) live in tests/test_rollback_workflow.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 from iqa.promotion.promotion import evaluate_gates_for_promotion
@@ -38,14 +38,11 @@ class TestPromotionRollbackCycle:
 
         assert decision["blocked"] is True
 
-    @patch("mlflow.tracking.MlflowClient")
-    @patch("mlflow.set_tracking_uri")
     def test_save_previous_prod_then_rollback_restores_it(
-        self, mock_set_uri: MagicMock, mock_client_class: MagicMock
+        self, mock_mlflow_client: MagicMock
     ) -> None:
         """Full cycle: save current prod, promote, then rollback to the saved version."""
-        mock_client = MagicMock()
-        mock_client_class.return_value = mock_client
+        mock_client = mock_mlflow_client
 
         # Phase 1: save current prod (v4) before promoting v5.
         mock_prod_version = MagicMock()
