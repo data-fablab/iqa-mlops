@@ -243,11 +243,146 @@ class ReloadModelResponse(IQABaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class AuditTrailPredictionContext(IQABaseModel):
+    prediction_id: str
+    piece_event_id: str
+    scenario_id: str
+    lot_id: str | None = None
+    source_class: str | None = None
+    sha256: str | None = None
+    dataset_version: str | None = None
+    model_version: str | None = None
+    roi_model_version: str | None = None
+    decision: str | None = None
+
+
+class AuditTrailFeedbackContext(IQABaseModel):
+    feedback_source: str | None = None
+    display_feedback_source: str | None = None
+    display_feedback_status: str | None = None
+    oracle_verdict: str | None = None
+    divergence: str | None = None
+    train_eligibility_source: str | None = None
+    eligible_for_train: bool | None = None
+    train_block_reason: str | None = None
+    feedback_closed: bool = False
+    conflict_logged: bool = False
+
+
+class PredictionAuditTrail(IQABaseModel):
+    prediction: AuditTrailPredictionContext
+    feedback: AuditTrailFeedbackContext
+
+
+class PredictionHistoryRow(IQABaseModel):
+    prediction_id: str
+    piece_event_id: str | None = None
+    scenario_id: str | None = None
+    lot_id: str | None = None
+    source_class: str | None = None
+    sha256: str | None = None
+    dataset_version: str | None = None
+    decision: str | None = None
+    model_version: str | None = None
+    roi_model_version: str | None = None
+    created_at: str | None = None
+    feedback_closed: bool = False
+    display_decision_source: str | None = None
+    display_feedback_source: str | None = None
+    display_feedback_status: str | None = None
+    human_feedback_present: bool = False
+    train_eligibility_source: str | None = None
+    eligible_for_train: bool | None = None
+    train_block_reason: str | None = None
+    conflict_logged: bool = False
+    oracle_verdict: str | None = None
+    divergence: str | None = None
+    audit_trail: PredictionAuditTrail
+
+
+class LotSummaryRow(IQABaseModel):
+    lot_id: str
+    scenario_id: str
+    total: int
+    vert: int = 0
+    orange: int = 0
+    rouge: int = 0
+    feedback_closed: int = 0
+    divergences: int = 0
+    taux_orange: float = 0.0
+    taux_rouge: float = 0.0
+
+
+class AirflowDatasetTaskOutput(IQABaseModel):
+    manifest_path: str
+    dataset_version: str
+    sample_count: int
+    filtered_count: int = 0
+    roi_status_count: int = 0
+    warning: str | None = None
+
+
+class AirflowTrainTaskOutput(IQABaseModel):
+    run_id: str
+    checkpoint: str
+    run_dir: str
+
+
+class AirflowEvalTaskOutput(IQABaseModel):
+    recall: float = 0.0
+    ap: float = 0.0
+    orange_rate: float = 0.0
+    latency_ms: float = 0.0
+    false_negatives: int = 0
+
+
+class AirflowGatesTaskOutput(IQABaseModel):
+    passed: bool
+    reason: str | None = None
+    gate_results: dict[str, Any] = Field(default_factory=dict)
+
+
+class AirflowMLflowTaskOutput(IQABaseModel):
+    registered_model_name: str
+    version: str
+    stage: ModelStage = ModelStage.candidate
+    run_id: str | None = None
+    source_of_truth: str = "mlflow_registry"
+
+
+class AirflowPromotionTaskOutput(IQABaseModel):
+    accepted: bool
+    registered_model_name: str | None = None
+    version: str | None = None
+    stage: ModelStage | None = None
+    reason: str | None = None
+    source_of_truth: str = "mlflow_registry"
+
+
+class ModelRegistryRefResponse(IQABaseModel):
+    scenario_id: str
+    registered_model_name: str
+    stage: ModelStage = ModelStage.prod
+    source_of_truth: str = "mlflow_registry"
+
+
 PredictionRequest = PredictRequest
 
 
 __all__ = [
     "DEFAULT_SCENARIO_ID",
+    "PredictionHistoryRow",
+    "PredictionAuditTrail",
+    "ModelRegistryRefResponse",
+    "LotSummaryRow",
+    "AuditTrailPredictionContext",
+    "AuditTrailFeedbackContext",
+    "AirflowTrainTaskOutput",
+    "AirflowPromotionTaskOutput",
+    "AirflowMLflowTaskOutput",
+    "AirflowGatesTaskOutput",
+    "AirflowEvalTaskOutput",
+    "AirflowDatasetTaskOutput",
     "FeedbackRequest",
     "FeedbackResponse",
     "FeedbackSource",
