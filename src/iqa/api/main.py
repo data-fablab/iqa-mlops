@@ -248,15 +248,21 @@ def feedback(
 
     if request.feedback_source == "human_sophie":
         _inc_security_metric("unsafe_train_blocked_total")
+        created_at = datetime.now(timezone.utc).isoformat()
+        feedback_status = getattr(request.feedback_status, "value", request.feedback_status)
         DISPLAY_FEEDBACK_STORE[request.prediction_id] = {
             "prediction_id": request.prediction_id,
             "piece_event_id": request.piece_event_id,
             "scenario_id": request.scenario_id,
             "feedback_source": "human_sophie",
+            "feedback_status": feedback_status,
+            "comment": request.comment,
             "display_decision_source": "human_sophie",
             "train_eligibility_source": "oracle_gt",
             "eligible_for_train": False,
             "feedback_closed": False,
+            "conflict_logged": False,
+            "created_at": created_at,
             "reason": "human_sophie is accepted for display only; oracle_gt remains sovereign for train eligibility.",
         }
 
@@ -267,6 +273,8 @@ def feedback(
             "display_decision_source": "human_sophie",
             "train_eligibility_source": "oracle_gt",
             "eligible_for_train": False,
+            "conflict_logged": False,
+            "created_at": created_at,
             "reason": "human_sophie is accepted for display only; oracle_gt remains sovereign for train eligibility.",
         }
 
@@ -293,6 +301,8 @@ def feedback(
     if not eligible_for_train:
         _inc_security_metric("unsafe_train_blocked_total")
 
+    display_feedback = DISPLAY_FEEDBACK_STORE.get(request.prediction_id)
+    conflict_logged = display_feedback is not None
     FEEDBACK_STORE[request.prediction_id] = {
         "prediction_id": request.prediction_id,
         "piece_event_id": request.piece_event_id,
@@ -302,15 +312,16 @@ def feedback(
         "closed_at": closed_at,
         "verdict": verdict_dict,
         "display_decision_source": "human_sophie"
-        if request.prediction_id in DISPLAY_FEEDBACK_STORE
+        if display_feedback is not None
         else "oracle_gt",
         "train_eligibility_source": "oracle_gt",
         "eligible_for_train": eligible_for_train,
+        "conflict_logged": conflict_logged,
     }
 
     display_decision_source = (
         "human_sophie"
-        if request.prediction_id in DISPLAY_FEEDBACK_STORE
+        if display_feedback is not None
         else "oracle_gt"
     )
 
@@ -321,6 +332,7 @@ def feedback(
         "display_decision_source": display_decision_source,
         "train_eligibility_source": "oracle_gt",
         "eligible_for_train": eligible_for_train,
+        "conflict_logged": conflict_logged,
         "feedback": verdict_dict,
     }
 
@@ -348,6 +360,8 @@ def _prediction_rows() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for prediction_id, record in PREDICTION_STORE.items():
         feedback = FEEDBACK_STORE.get(prediction_id)
+        display_feedback = DISPLAY_FEEDBACK_STORE.get(prediction_id)
+        feedback_trace = feedback or display_feedback or {}
         verdict = (feedback or {}).get("verdict", {}).get("verdict") if feedback else None
         decision = record.get("decision", "")
         rows.append(
@@ -363,6 +377,13 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "roi_model_version": record.get("roi_model_version"),
                 "created_at": record.get("created_at"),
                 "feedback_closed": record.get("feedback_closed", False),
+                "display_decision_source": feedback_trace.get("display_decision_source"),
+                "display_feedback_source": (display_feedback or {}).get("feedback_source"),
+                "display_feedback_status": (display_feedback or {}).get("feedback_status"),
+                "human_feedback_present": display_feedback is not None,
+                "train_eligibility_source": feedback_trace.get("train_eligibility_source"),
+                "eligible_for_train": feedback_trace.get("eligible_for_train"),
+                "conflict_logged": feedback_trace.get("conflict_logged", False),
                 "oracle_verdict": verdict,
                 "divergence": _oracle_divergence(decision, verdict),
             }
