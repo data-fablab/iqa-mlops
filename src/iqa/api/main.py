@@ -119,8 +119,11 @@ def health() -> dict[str, str]:
 
 
 @app.get("/model/version")
-def model_version() -> dict[str, Any]:
+def model_version(scenario_id: str) -> dict[str, Any]:
     return {
+        "scenario_id": scenario_id,
+        "registered_model_name": registered_model_name(scenario_id),
+        "source_of_truth": "mlflow_registry",
         "roi_segmenter": _read_manifest(ROI_MANIFEST),
         "feature_ae": _read_manifest(FEATURE_AE_MANIFEST),
     }
