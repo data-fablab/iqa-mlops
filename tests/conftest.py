@@ -31,6 +31,24 @@ def synthetic_feature_ae_checkpoint(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def mock_mlflow_client():
+    """Patch MLflow client + tracking URI; yield the mocked MlflowClient instance.
+
+    Replaces the repeated `@patch("mlflow.tracking.MlflowClient")` +
+    `@patch("mlflow.set_tracking_uri")` + MagicMock wiring used across the
+    promotion/rollback tests.
+    """
+    from unittest.mock import MagicMock, patch
+
+    with patch("mlflow.set_tracking_uri"), patch(
+        "mlflow.tracking.MlflowClient"
+    ) as mock_client_class:
+        client = MagicMock()
+        mock_client_class.return_value = client
+        yield client
+
+
+@pytest.fixture
 def feature_ae_gates_config() -> dict:
     """Canonical promotion gates config for the feature_ae base model.
 
