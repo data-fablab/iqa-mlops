@@ -7,7 +7,7 @@ from iqa.models.common import architectures as common_architectures
 
 
 def test_models_root_exports_retained_runtime_domains() -> None:
-    assert iqa_models.__all__ == ["feature_ae", "segmentation"]
+    assert iqa_models.__all__ == ["feature_ae", "feature_ae_candidate", "segmentation", "wrappers", "FeatureAECandidate"]
 
 
 def test_common_architectures_exports_only_shared_runtime_blocks() -> None:

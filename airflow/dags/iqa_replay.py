@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 try:
     from airflow import DAG
     from airflow.operators.bash import BashOperator
@@ -16,6 +18,7 @@ if DAG is not None and BashOperator is not None:
         dag_id="iqa_replay",
         schedule=None,
         catchup=False,
+        start_date=datetime(2026, 1, 1),
         tags=["iqa", "replay"],
     ) as dag:
         BashOperator(task_id="run_replay", bash_command="iqa-run-replay")

@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
 
 ROOT = Path(".")
+
+
+@lru_cache(maxsize=1)
+def _docs_corpus() -> str:
+    """All Markdown docs + the root README concatenated into one searchable blob.
+
+    Term-presence contracts only care that a concept is documented *somewhere*, so
+    we scan the docs tree instead of hardcoding file paths. Renaming or moving a
+    doc no longer breaks these tests as long as the content survives.
+    """
+    sources = sorted((ROOT / "docs").rglob("*.md"))
+    sources.append(ROOT / "README.md")
+    return "\n".join(p.read_text(encoding="utf-8") for p in sources if p.is_file())
 
 
 def test_phase_1_root_files_exist() -> None:
@@ -20,12 +34,11 @@ def test_phase_1_root_files_exist() -> None:
 
 
 def test_convergence_adrs_exist() -> None:
-    for path in [
-        ROOT / "docs" / "adr" / "0005-calibration-set-etanche-et-split-piece-event.md",
-        ROOT / "docs" / "adr" / "0006-mlflow-registry-source-verite.md",
-        ROOT / "docs" / "adr" / "0007-architecture-services-avec-pyproject-racine.md",
-    ]:
-        assert path.is_file()
+    # Match by ADR number, not the descriptive slug, so renaming the slug does not
+    # break the contract that these decisions are recorded.
+    adr_dir = ROOT / "docs" / "adr"
+    for number in ("0005", "0006", "0007"):
+        assert list(adr_dir.glob(f"{number}-*.md")), f"ADR {number} is missing"
 
 
 def test_phase_1_config_files_exist() -> None:
@@ -64,14 +77,7 @@ def test_metadata_store_is_documented_as_postgresql() -> None:
 
 
 def test_architecture_documents_microservices_and_registry_truth() -> None:
-    docs = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in [
-                ROOT / "docs" / "architecture-iqa.md",
-                ROOT / "docs" / "configuration-serveur-iqa.md",
-                ROOT / "docs" / "decisions-iqa.md",
-        ]
-    )
+    docs = _docs_corpus()
 
     for service in ["iqa-api", "iqa-inference", "iqa-ingestion", "iqa-replay", "iqa-trainer", "iqa-monitoring"]:
         assert service in docs
@@ -81,35 +87,14 @@ def test_architecture_documents_microservices_and_registry_truth() -> None:
 
 
 def test_ingestion_abstraction_is_documented() -> None:
-    expected_terms = ["historical_replay", "production_ingest", "iqa-ingested-images"]
-    docs = [
-        ROOT / "README.md",
-        ROOT / "docs" / "architecture-iqa.md",
-        ROOT / "docs" / "archive" / "cadrage-projet-mlops-iqa.md",
-        ROOT / "docs" / "configuration-serveur-iqa.md",
-        ROOT / "docs" / "adr" / "0003-minio-stockage-objet-local.md",
-        ROOT / "docs" / "adr" / "0004-postgresql-comme-metadata-store.md",
-    ]
-    combined = "\n".join(path.read_text(encoding="utf-8") for path in docs)
+    docs = _docs_corpus()
 
-    for term in expected_terms:
-        assert term in combined
+    for term in ["historical_replay", "production_ingest", "iqa-ingested-images"]:
+        assert term in docs
 
 
 def test_convergence_decisions_are_documented() -> None:
-    docs = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in [
-            ROOT / "README.md",
-                ROOT / "docs" / "architecture-iqa.md",
-                ROOT / "docs" / "archive" / "cadrage-projet-mlops-iqa.md",
-                ROOT / "docs" / "prd-iqa-mvp.md",
-                ROOT / "docs" / "configuration-serveur-iqa.md",
-            ROOT / "docs" / "adr" / "0005-calibration-set-etanche-et-split-piece-event.md",
-            ROOT / "docs" / "adr" / "0006-mlflow-registry-source-verite.md",
-            ROOT / "docs" / "adr" / "0007-architecture-services-avec-pyproject-racine.md",
-        ]
-    )
+    docs = _docs_corpus()
 
     for term in [
         "calibration_set_v001",
@@ -127,12 +112,14 @@ def test_convergence_decisions_are_documented() -> None:
 
 def test_no_heavy_model_or_sqlite_artifacts_in_repo_tree() -> None:
     forbidden_suffixes = {".pt", ".pth", ".ckpt", ".onnx", ".sqlite"}
+    # Exclude: venv, cache, MLflow artifacts (temp test outputs), pytest temp files
+    excluded_dirs = {".venv", ".pytest_cache", "mlruns", "__pycache__", ".mypy_cache"}
     offenders = [
         path
         for path in ROOT.rglob("*")
         if path.is_file()
         and path.suffix.lower() in forbidden_suffixes
-        and ".venv" not in path.parts
+        and not any(excluded in path.parts for excluded in excluded_dirs)
     ]
 
     assert offenders == []

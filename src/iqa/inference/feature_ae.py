@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 
 from iqa.datasets import FEATURE_AE_CONTEXT_SIZE, FEATURE_AE_TILE_SIZE, load_image_tensor
+from iqa.inference.helpers import compute_status, measure_inference_time
 from iqa.models.feature_ae import (
     DEFAULT_FEATURE_LAYERS,
     FEATURE_AE_MODEL_TYPE,
@@ -26,17 +27,12 @@ class FeatureAEPrediction:
     status: str
     threshold_orange: float
     threshold_red: float
+    latency_ms: float
+    roi_status: str | None = None
+    heatmap_uri: str | None = None
 
-    def to_dict(self) -> dict[str, float | str]:
+    def to_dict(self) -> dict[str, float | str | None]:
         return asdict(self)
-
-
-def _status_from_score(score: float, *, threshold_orange: float, threshold_red: float) -> str:
-    if score >= threshold_red:
-        return "red"
-    if score >= threshold_orange:
-        return "orange"
-    return "green"
 
 
 def predict_feature_ae_image(
@@ -64,17 +60,23 @@ def predict_feature_ae_image(
     teacher.eval()
 
     with torch.no_grad():
-        teacher_features = teacher(image)
-        reconstructed = model(image, context_images=context_image)
-        anomaly_map = feature_anomaly_map(teacher_features, reconstructed)
+        with measure_inference_time() as timing:
+            teacher_features = teacher(image)
+            reconstructed = model(image, context_images=context_image)
+            anomaly_map = feature_anomaly_map(teacher_features, reconstructed)
+
     score = float(anomaly_map.mean().detach().cpu())
+    status = compute_status(score, threshold_orange=threshold_orange, threshold_red=threshold_red)
     return FeatureAEPrediction(
         image_path=str(image_path),
         model_type=FEATURE_AE_MODEL_TYPE,
         score=score,
-        status=_status_from_score(score, threshold_orange=threshold_orange, threshold_red=threshold_red),
+        status=status,
         threshold_orange=float(threshold_orange),
         threshold_red=float(threshold_red),
+        latency_ms=timing["elapsed_ms"],
+        roi_status=None,
+        heatmap_uri=None,
     )
 
 

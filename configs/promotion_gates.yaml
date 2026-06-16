@@ -4,3 +4,12 @@ feature_ae:
   image_ap_max_regression: 0.02
   roi_fail_rate_max: 0.10
   latency_p95_ms_max: 1000
+
+defect_coverage:
+  # Gate de recevabilite : couverture minimale de defauts par source_class (IQA1_KEN02)
+  min_coverage: 0.95
+
+roi:
+  # ROI segmenter fige : aucun entrainement ou remplacement sans nouvelle decision (IQA1_KEN02)
+  model_version: roi_segmenter_v001_fixed
+  frozen: true
