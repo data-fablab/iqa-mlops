@@ -2,8 +2,8 @@
 
 These tests assert the *security guarantees* of the training pipeline at the
 integrated level (built candidate manifest + promotion blocking). The unit-level
-filtering rules live in tests/test_candidate_builder.py and the per-gate logic in
-tests/test_promotion_gates.py -- they are intentionally NOT re-tested here.
+filtering rules live in tests/datasets/test_candidate_builder.py and the per-gate logic in
+tests/promotion/test_promotion_gates.py -- they are intentionally NOT re-tested here.
 """
 
 from __future__ import annotations

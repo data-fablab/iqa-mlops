@@ -6,10 +6,10 @@ feature_ae:
   latency_p95_ms_max: 1000
 
 defect_coverage:
-  # Gate de recevabilité : couverture minimale de défauts par source_class (IQA1_KEN02)
+  # Gate de recevabilite : couverture minimale de defauts par source_class (IQA1_KEN02)
   min_coverage: 0.95
 
 roi:
-  # ROI segmenter figé — aucun entraînement ou remplacement sans nouvelle décision (IQA1_KEN02)
+  # ROI segmenter fige : aucun entrainement ou remplacement sans nouvelle decision (IQA1_KEN02)
   model_version: roi_segmenter_v001_fixed
   frozen: true

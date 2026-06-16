@@ -137,26 +137,20 @@ def register_run_to_model(
     # Determine registered model name
     model_name = registered_model_name(scenario_id, base_name=model_name_base)
 
-    # Register the run output (model artifact) as a model version
-    model_uri = f"runs:/{run_id}/model"
+    run = client.get_run(run_id)
+    model_source = f"{run.info.artifact_uri.rstrip('/')}/model"
 
-    model_version = None
     try:
-        # Try to create registered model (will fail if already exists, which is ok)
-        model_version = mlflow.register_model(model_uri, model_name)
+        client.create_registered_model(model_name)
     except mlflow.exceptions.MlflowException as e:
-        # If model already exists, get the latest version
-        if "Model with name" in str(e) and "already exists" in str(e):
-            versions = client.search_model_versions(
-                f"name='{model_name}'",
-                max_results=1,
-                order_by=["version_number DESC"],
-            )
-            if versions:
-                model_version = versions[0]
-        else:
+        if "already exists" not in str(e):
             raise
 
+    model_version = client.create_model_version(
+        name=model_name,
+        source=model_source,
+        run_id=run_id,
+    )
     if model_version is None:
         raise RuntimeError(f"Failed to register model {model_name} from run {run_id}")
 

@@ -220,6 +220,7 @@ def train_feature_ae_with_mlflow_logging(
         if eval_best_path.exists():
             logger.log_artifacts(eval_report_path=eval_best_path)
 
+        result["run_id"] = logger._run_id or ""
         return result
     finally:
         # Always end the run

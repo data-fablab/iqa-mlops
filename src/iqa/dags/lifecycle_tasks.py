@@ -10,13 +10,17 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from iqa.datasets import build_candidate_dataset, iter_manifest_image_samples
 from iqa.inference.model_loader import ProdModelLoader
 from iqa.promotion import (
     evaluate_promotion_gates,
     promote_model_with_gates,
+    save_previous_prod_before_promotion,
 )
 from iqa.registry.mlflow_registry import register_run_to_model
+from iqa.roi import load_roi_mask_lookup
 from iqa.training import evaluate_feature_ae_checkpoint
 from iqa.training.feature_ae import FeatureAETrainingConfig
 from iqa.training.feature_ae_evaluation import FeatureAEEvaluationConfig
@@ -30,6 +34,21 @@ def _get_git_commit() -> str:
         ).decode().strip()
     except Exception:
         return "unknown"
+
+
+def _path_tuple(value: Any) -> tuple[Path, ...]:
+    if value is None or value == "":
+        return ()
+    if isinstance(value, (str, Path)):
+        return (Path(value),)
+    return tuple(Path(item) for item in value)
+
+
+def _load_gates_config(path: str | Path | None = None) -> dict[str, Any]:
+    config_path = Path(path or "configs/promotion_gates.yaml")
+    if not config_path.exists():
+        return {}
+    return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
 
 def task_dataset(**context: Any) -> dict[str, Any]:
@@ -46,19 +65,27 @@ def task_dataset(**context: Any) -> dict[str, Any]:
     image_root = Path(params["image_root"])
     output_manifest = Path(params["output_manifest"])
     candidate_version = params.get("candidate_version", "v001")
+    roi_predictions_dirs = _path_tuple(params.get("roi_predictions_dirs"))
+    roi_lookup = load_roi_mask_lookup(roi_predictions_dirs)
 
     samples = iter_manifest_image_samples(manifest_path, image_root)
     dataset = build_candidate_dataset(
         samples,
         output_manifest,
         version=candidate_version,
+        roi_status=roi_lookup.status,
     )
 
-    return {
+    result = {
         "manifest_path": str(dataset.output_manifest),
         "dataset_version": dataset.version,
         "sample_count": dataset.sample_count,
+        "filtered_count": dataset.filtered_count,
+        "roi_status_count": len(roi_lookup.status),
     }
+    if not roi_predictions_dirs:
+        result["warning"] = "roi_predictions_dirs not provided; ROI status filtering was not applied"
+    return result
 
 
 def task_train(**context: Any) -> dict[str, Any]:
@@ -82,7 +109,9 @@ def task_train(**context: Any) -> dict[str, Any]:
         output_checkpoint=Path(params["output_checkpoint"]),
         scenario_id=params.get("scenario_id", "production_replay_natural"),
         dataset_version=dataset.get("dataset_version", ""),
-        candidate_version=params.get("candidate_version", ""),
+        candidate_version=params.get("candidate_version", dataset.get("dataset_version", "")),
+        roi_model_version=params.get("roi_model_version", "roi_segmenter_v001_fixed"),
+        feature_ae_version=params.get("feature_ae_version", "rd_feature_ae_gated_v001_bootstrap"),
     )
 
     result = train_feature_ae_with_mlflow_logging(config, git_commit=_get_git_commit())
@@ -144,14 +173,18 @@ def task_gates(**context: Any) -> dict[str, Any]:
     Returns:
         Dict with gate evaluation results.
     """
+    params = context.get("params", {})
     ti = context["ti"]
     eval_output = ti.xcom_pull(task_ids="eval")
+    gates_config = _load_gates_config(params.get("gates_config_path"))
 
     gates_result = evaluate_promotion_gates(
         candidate_recall=eval_output.get("recall", 0.0),
         candidate_ap=eval_output.get("ap", 0.0),
         candidate_orange_rate=eval_output.get("orange_rate", 0.0),
         candidate_latency_ms=eval_output.get("latency_ms", 0.0),
+        prod_ap=eval_output.get("prod_ap"),
+        gates_config=gates_config,
     )
 
     if not gates_result["all_passed"]:
@@ -204,6 +237,7 @@ def task_promotion(**context: Any) -> dict[str, Any]:
     Returns:
         Dict with promotion result (success, transition, artifacts).
     """
+    params = context.get("params", {})
     ti = context["ti"]
     mlflow_output = ti.xcom_pull(task_ids="mlflow")
     eval_output = ti.xcom_pull(task_ids="eval")
@@ -220,12 +254,19 @@ def task_promotion(**context: Any) -> dict[str, Any]:
         "orange_rate": eval_output.get("orange_rate", 0.0),
         "latency_ms": eval_output.get("latency_ms", 0.0),
     }
+    target_stage = params.get("target_stage", "test")
+    if target_stage == "prod":
+        previous_prod = save_previous_prod_before_promotion(registered_model_name_str)
+        if not previous_prod["success"]:
+            raise Exception(f"Could not save previous prod before promotion: {previous_prod.get('error')}")
 
     result = promote_model_with_gates(
         registered_model_name=registered_model_name_str,
         version=version,
-        target_stage="test",
+        target_stage=target_stage,
         candidate_metrics=candidate_metrics,
+        prod_metrics={"ap": eval_output["prod_ap"]} if "prod_ap" in eval_output else None,
+        gates_config_path=params.get("gates_config_path"),
     )
 
     if not result["success"]:
@@ -246,6 +287,14 @@ def task_reload(**context: Any) -> dict[str, Any]:
         Dict with loaded model version and artifact_uri.
     """
     params = context.get("params", {})
+    target_stage = params.get("target_stage", "test")
+    if target_stage != "prod":
+        return {
+            "status": "skipped",
+            "reason": f"target_stage is {target_stage}; production reload only runs for prod promotions",
+            "target_stage": target_stage,
+        }
+
     scenario_id = params.get("scenario_id", "production_replay_natural")
 
     loader = ProdModelLoader(scenario_id)
