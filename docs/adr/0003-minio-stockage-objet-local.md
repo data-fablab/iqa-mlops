@@ -39,4 +39,4 @@ src/iqa/storage/
 - Les heatmaps sont stockees dans `s3://iqa-heatmaps`.
 - Les modeles promus et candidats archives sont stockes dans `s3://iqa-models`.
 - Les credentials MinIO restent dans `.env` et ne sont jamais commites.
-- **Important** : MinIO est un stockage passif. La decision de promotion (stage `prod`) est portee par MLflow Registry, pas par une convention S3. Voir ADR 0006 et [docs/MLflow-Registry.md](../MLflow-Registry.md).
+- **Important** : MinIO est un stockage passif. La decision de promotion (stage `prod`) est portee par MLflow Registry, pas par une convention S3. Voir ADR 0006 et [docs/mlflow-registry.md](../mlflow-registry.md).

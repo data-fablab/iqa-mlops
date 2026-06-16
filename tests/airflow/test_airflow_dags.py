@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 
-# Add airflow/dags to path for imports
-DAG_FOLDER = Path(__file__).parent.parent / "airflow" / "dags"
+# Add airflow/dags to path for imports (repo_root/airflow/dags)
+DAG_FOLDER = Path(__file__).parents[2] / "airflow" / "dags"
 sys.path.insert(0, str(DAG_FOLDER))
 
 

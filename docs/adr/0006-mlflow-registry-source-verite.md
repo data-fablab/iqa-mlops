@@ -33,4 +33,4 @@ Aucun test ni module runtime ne doit dependre d'un prefixe S3 `prod` comme sourc
 
 ## Documentation
 
-Voir [docs/MLflow-Registry.md](../MLflow-Registry.md) pour l'architecture complète, la configuration et les buckets MinIO associés.
+Voir [docs/mlflow-registry.md](../mlflow-registry.md) pour l'architecture complète, la configuration et les buckets MinIO associés.
