@@ -47,7 +47,7 @@ def test_health() -> None:
 
 
 def test_model_version_reads_manifest_skeletons() -> None:
-    response = model_version()
+    response = model_version(scenario_id="demo")
 
     assert response["roi_segmenter"]["model_type"] == "functional_unet_resnet18_det1_context2b"
     assert response["feature_ae"]["model_type"] == "reverse_distill_resnet18_dual_context_gated"

@@ -98,7 +98,7 @@ class PieceEvent(IQABaseModel):
 
 class PredictRequest(IQABaseModel):
     piece_event_id: str
-    scenario_id: str = DEFAULT_SCENARIO_ID
+    scenario_id: str
     image_uri: str = Field(..., description="S3, DVC or local URI for the primary image.")
     sha256: str | None = None
     lot_id: str | None = None
@@ -113,7 +113,7 @@ class PredictRequest(IQABaseModel):
 
 
 class PieceEventPredictRequest(IQABaseModel):
-    scenario_id: str = DEFAULT_SCENARIO_ID
+    scenario_id: str
     image_uri: str = Field(..., description="S3, DVC or local URI for the primary image.")
     sha256: str | None = None
     lot_id: str | None = None
@@ -214,7 +214,7 @@ class Scenario(IQABaseModel):
 
 
 class ReloadModelRequest(IQABaseModel):
-    scenario_id: str = DEFAULT_SCENARIO_ID
+    scenario_id: str
     stage: ModelStage = ModelStage.prod
     requested_by: str | None = None
     reason: str | None = None
