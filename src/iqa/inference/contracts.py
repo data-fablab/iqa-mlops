@@ -18,6 +18,7 @@ class InferenceRequest:
     image_uri: str
     sha256: str | None = None
     lot_id: str | None = None
+    source_class: str | None = None
     dataset_version: str | None = None
 
 

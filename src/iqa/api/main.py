@@ -144,6 +144,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             image_uri=request.image_uri,
             sha256=request.sha256,
             lot_id=request.lot_id,
+            source_class=request.source_class,
             dataset_version=request.dataset_version,
         )
     )
@@ -156,6 +157,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
     prediction["image_uri"] = request.image_uri
     prediction["sha256"] = request.sha256
     prediction["lot_id"] = request.lot_id
+    prediction["source_class"] = request.source_class
     prediction["dataset_version"] = request.dataset_version
     prediction["model_version"] = prediction.get("feature_ae_version")
     prediction["audit_logged"] = True
@@ -167,6 +169,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
         "image_uri": request.image_uri,
         "sha256": request.sha256,
         "lot_id": request.lot_id,
+        "source_class": request.source_class,
         "dataset_version": request.dataset_version,
         "decision": prediction["decision"],
         "model_version": prediction["feature_ae_version"],
@@ -187,6 +190,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             "image_uri": request.image_uri,
             "sha256": request.sha256,
             "lot_id": request.lot_id,
+            "source_class": request.source_class,
             "dataset_version": request.dataset_version,
             "decision": prediction["decision"],
             "model_version": prediction["feature_ae_version"],
@@ -206,6 +210,7 @@ def predict_piece_event(event_id: str, request: PieceEventPredictRequest) -> dic
             image_uri=request.image_uri,
             sha256=request.sha256,
             lot_id=request.lot_id,
+            source_class=request.source_class,
             dataset_version=request.dataset_version,
         )
     )
@@ -265,6 +270,7 @@ def _train_eligibility_from_feedback(request: FeedbackRequest) -> tuple[bool, st
 def _prediction_trace_context(prediction: dict[str, Any]) -> dict[str, Any]:
     return {
         "lot_id": prediction.get("lot_id"),
+        "source_class": prediction.get("source_class"),
         "sha256": prediction.get("sha256"),
         "dataset_version": prediction.get("dataset_version"),
         "model_version": prediction.get("model_version"),
@@ -290,6 +296,7 @@ def _prediction_audit_trail(
             "piece_event_id": record.get("piece_event_id"),
             "scenario_id": record.get("scenario_id"),
             "lot_id": record.get("lot_id"),
+            "source_class": record.get("source_class"),
             "sha256": record.get("sha256"),
             "dataset_version": record.get("dataset_version"),
             "model_version": record.get("model_version"),
@@ -460,6 +467,7 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "piece_event_id": record.get("piece_event_id"),
                 "scenario_id": record.get("scenario_id"),
                 "lot_id": record.get("lot_id"),
+                "source_class": record.get("source_class"),
                 "sha256": record.get("sha256"),
                 "dataset_version": record.get("dataset_version"),
                 "decision": decision,
@@ -535,6 +543,97 @@ def lots_summary() -> list[dict[str, Any]]:
     rows.sort(key=lambda row: row.get("lot_id") or row.get("scenario_id") or "")
     return rows
 
+
+
+def _metric_label_value(value: Any) -> str:
+    if value is None or value == "":
+        value = "unknown"
+    text = str(value)
+    return text.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def _metric_labels(labels: tuple[tuple[str, Any], ...]) -> str:
+    return ",".join(f'{name}="{_metric_label_value(value)}"' for name, value in labels)
+
+
+def _base_metric_labels(row: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
+    return (
+        ("scenario_id", row.get("scenario_id")),
+        ("lot_id", row.get("lot_id")),
+        ("source_class", row.get("source_class")),
+        ("model_version", row.get("model_version")),
+        ("dataset_version", row.get("dataset_version")),
+    )
+
+
+def _count_metric(
+    counters: dict[tuple[tuple[str, Any], ...], int],
+    labels: tuple[tuple[str, Any], ...],
+) -> None:
+    counters[labels] = counters.get(labels, 0) + 1
+
+
+def _append_counter_lines(
+    lines: list[str],
+    metric_name: str,
+    counters: dict[tuple[tuple[str, Any], ...], int],
+) -> None:
+    for labels, value in sorted(counters.items(), key=lambda item: str(item[0])):
+        lines.append(f"{metric_name}{{{_metric_labels(labels)}}} {value}")
+
+
+def _filtered_metrics_lines() -> list[str]:
+    prediction_counts: dict[tuple[tuple[str, Any], ...], int] = {}
+    feedback_closed_counts: dict[tuple[tuple[str, Any], ...], int] = {}
+    train_eligible_counts: dict[tuple[tuple[str, Any], ...], int] = {}
+    divergence_counts: dict[tuple[tuple[str, Any], ...], int] = {}
+
+    for row in _prediction_rows():
+        base_labels = _base_metric_labels(row)
+        _count_metric(prediction_counts, base_labels + (("decision", row.get("decision")),))
+
+        if row.get("feedback_closed"):
+            _count_metric(feedback_closed_counts, base_labels)
+
+        if row.get("eligible_for_train") is True:
+            _count_metric(train_eligible_counts, base_labels)
+
+        divergence = row.get("divergence")
+        if divergence in {"faux_negatif", "faux_positif", "orange_a_revoir"}:
+            _count_metric(divergence_counts, base_labels + (("divergence", divergence),))
+
+    lines = [
+        "# HELP iqa_prediction_filtered_total IQA predictions filtered by scenario, lot, source class, model and dataset",
+        "# TYPE iqa_prediction_filtered_total counter",
+    ]
+    _append_counter_lines(lines, "iqa_prediction_filtered_total", prediction_counts)
+
+    lines.extend(
+        [
+            "# HELP iqa_feedback_closed_filtered_total IQA closed feedback filtered by scenario, lot, source class, model and dataset",
+            "# TYPE iqa_feedback_closed_filtered_total counter",
+        ]
+    )
+    _append_counter_lines(lines, "iqa_feedback_closed_filtered_total", feedback_closed_counts)
+
+    lines.extend(
+        [
+            "# HELP iqa_train_eligible_filtered_total IQA train eligible feedback filtered by scenario, lot, source class, model and dataset",
+            "# TYPE iqa_train_eligible_filtered_total counter",
+        ]
+    )
+    _append_counter_lines(lines, "iqa_train_eligible_filtered_total", train_eligible_counts)
+
+    lines.extend(
+        [
+            "# HELP iqa_divergence_filtered_total IQA oracle divergences filtered by scenario, lot, source class, model and dataset",
+            "# TYPE iqa_divergence_filtered_total counter",
+        ]
+    )
+    _append_counter_lines(lines, "iqa_divergence_filtered_total", divergence_counts)
+
+    return lines
+
 @app.get("/metrics")
 def metrics() -> str:
     lines = [
@@ -577,6 +676,7 @@ def metrics() -> str:
             "} 1"
         ),
     ]
+    lines.extend(_filtered_metrics_lines())
     return "\n".join(lines) + "\n"
 
 

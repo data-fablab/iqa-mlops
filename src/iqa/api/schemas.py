@@ -102,6 +102,7 @@ class PredictRequest(IQABaseModel):
     image_uri: str = Field(..., description="S3, DVC or local URI for the primary image.")
     sha256: str | None = None
     lot_id: str | None = None
+    source_class: str | None = None
     dataset_version: str | None = None
 
     @field_validator("piece_event_id", "scenario_id", "image_uri")
@@ -117,6 +118,7 @@ class PieceEventPredictRequest(IQABaseModel):
     image_uri: str = Field(..., description="S3, DVC or local URI for the primary image.")
     sha256: str | None = None
     lot_id: str | None = None
+    source_class: str | None = None
     dataset_version: str | None = None
 
     @field_validator("scenario_id", "image_uri")
@@ -132,6 +134,7 @@ class PredictionResponse(IQABaseModel):
     piece_event_id: str
     scenario_id: str
     lot_id: str | None = None
+    source_class: str | None = None
     dataset_version: str | None = None
     model_version: str | None = None
     roi_model_version: str | None = None
