@@ -52,7 +52,7 @@ jobs:
 
           bag = DagBag(dag_folder="airflow/dags", include_examples=False)
           assert not bag.import_errors, bag.import_errors
-          for dag_id in ["iqa_ingestion", "iqa_replay", "iqa_lifecycle", "iqa_monitoring"]:
+          for dag_id in ["iqa_ingestion", "iqa_replay", "iqa_lifecycle", "iqa_monitoring", "iqa_dvc_reproducibility"]:
               assert dag_id in bag.dag_ids, f"missing DAG: {dag_id}"
           print("DAGs OK:", sorted(bag.dag_ids))
           PY

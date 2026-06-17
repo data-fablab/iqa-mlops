@@ -33,6 +33,9 @@ def test_dvc_versioning_doc_links_remote_and_contracts() -> None:
     assert "uv run --extra cpu --extra data dvc pull" in content
     assert "uv run --extra cpu --extra data dvc repro" in content
     assert "iqa-check-dvc-reproducibility --with-network" in content
+    assert "iqa_dvc_reproducibility" in content
+    assert '"with_network": true' in content
+    assert "DVC est un gate de reproductibilite" in content
     assert "docs/data-contracts.md" in content
 
 

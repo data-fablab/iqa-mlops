@@ -25,6 +25,33 @@ uv run --extra cpu pytest -q tests/data tests/datasets/test_candidate_builder.py
 
 Le remote par defaut reste `iqa-minio`, configure dans `.dvc/config`.
 
+## Airflow
+
+Le DAG `iqa_dvc_reproducibility` expose DVC comme gate de reproductibilite et
+de data lineage. Il appelle `iqa-check-dvc-reproducibility` sans reseau par
+defaut.
+
+Mode local ou CI Airflow :
+
+```bash
+airflow dags trigger iqa_dvc_reproducibility
+```
+
+Mode serveur avec MinIO :
+
+```bash
+airflow dags trigger iqa_dvc_reproducibility \
+  --conf '{"with_network": true}'
+```
+
+`--with-network` reste explicite : c'est uniquement dans ce mode que la commande
+verifie `dvc pull` et `dvc push` sur `data/raw/hss-iad.dvc`. Les DAGs metier
+`iqa_ingestion`, `iqa_replay`, `iqa_monitoring` et `iqa_lifecycle` ne lancent pas
+de `dvc push` directement.
+
+DVC est un gate de reproductibilite, pas un declencheur metier. Les replays et
+le lifecycle Feature-AE restent declenches par les contrats data et Airflow.
+
 ## Validation MinIO
 
 Sur le serveur, charger les variables MinIO avant la verification reseau :
