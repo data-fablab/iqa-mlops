@@ -26,6 +26,8 @@ Tranches verticales (tracer bullets). Une seule HITL (00) ; le reste est AFK.
 | 15 | Compose + DAGs referencent les images du registre par tag | AFK | 14 |
 | 16 | Sensor de declenchement evenementiel du lifecycle | AFK | 11 |
 | 17 | Overlays Compose dev / prod | AFK | 02 |
+| 18 | Persistance runtime de l'ingestion (events PG / images MinIO) | AFK | 07 |
+| 19 | Persistance runtime du dataset candidat (materialisation MinIO / PG) | AFK | 08 |
 
 ## Chemin critique
 
@@ -40,6 +42,34 @@ Les images (03/04) et la CI (14 -> 15) se parallelisent ; 00 (HITL) doit etre tr
 - Microservices/images : 01, 02, 03, 04, 17
 - Orchestration conteneurisee : 05, 06, 07, 08, 09, 10, 11, 12, 13
 - Automatisation / registre : 00, 14, 15, 16
+- Persistance runtime (data plane) : 18, 19 (et critères persistance embarqués dans 09-13)
+
+## Cadrage : conteneurisation DAG vs persistance runtime
+
+Les scripts `iqa-run-*` (ex. `scripts/run_ingestion.py`) sont aujourd'hui des
+**frontières "validated-summary"** : ils lisent une entrée et impriment un résumé
+JSON, sans écrire dans PostgreSQL/MinIO/MLflow. Deux travaux distincts sont donc en
+jeu et **ne doivent pas être confondus** :
+
+1. **Conteneurisation du DAG** (titre des issues 07-13) : remplacer les opérateurs
+   par `make_container_task`. Léger, vérifiable par DagBag + lancement conteneur.
+2. **Persistance runtime** (data plane) : implémenter l'écriture réelle dans les
+   stores. Lourd, nécessite la logique métier dans les scripts.
+
+Les issues **09, 10, 11, 13 portent déjà des critères de persistance réelle**
+(« checkpoint persisté », « modèle enregistré au Registry », « inference sert la
+nouvelle version », « métriques dans Grafana »). Leur périmètre **inclut donc
+l'implémentation runtime**, pas seulement la conversion DAG — les traiter comme
+telles (ou les redécouper en deux sous-tranches chacune, comme 07→18 et 08→19).
+
+Cas particuliers :
+- **Ingestion (07)** : conversion DAG faite, mais aucune issue ultérieure ne la
+  revisite → la persistance est isolée dans la **nouvelle issue 18**.
+- **Dataset (08)** : conversion DAG faite (lifecycle_decision + dataset en
+  conteneurs) ; la matérialisation MinIO/PG du dataset candidat est isolée dans la
+  **nouvelle issue 19** (même découpage que 07→18).
+- **Replay (12)** : critères centrés sur la sémantique des événements rejoués, pas
+  explicitement sur l'écriture en store — à clarifier au moment de la traiter.
 
 ## Contrats transverses
 

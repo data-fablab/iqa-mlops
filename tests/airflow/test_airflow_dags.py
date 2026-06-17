@@ -119,6 +119,28 @@ def test_ingestion_dag_runs_data_image_via_factory() -> None:
 
 
 @pytest.mark.unit
+def test_lifecycle_dag_containerises_decision_and_dataset_via_factory() -> None:
+    """Lifecycle DAG (issue 08) runs lifecycle_decision + dataset as containers.
+
+    The two leading stages move to the data image via the operator factory; the
+    tail (train..reload) stays on PythonOperator until issues 09-11.
+    """
+    source = _read_dag_source("iqa_lifecycle.py")
+
+    assert "make_container_task(" in source
+    # Decision + dataset call the data-image boundary scripts with templated argv.
+    assert '"iqa-run-lifecycle-decision"' in source
+    assert '"iqa-run-dataset"' in source
+    assert '"{{ params.scenario_id }}"' in source
+    assert '"{{ params.manifest }}"' in source
+    # These two tasks no longer route through the iqa lifecycle_tasks callables.
+    assert "task_lifecycle_decision" not in source
+    assert "task_dataset" not in source
+    # Tail stages still use PythonOperator for now.
+    assert "PythonOperator(" in source
+
+
+@pytest.mark.unit
 def test_boundary_dags_pass_explicit_runtime_params_to_cli() -> None:
     """Replay/monitoring boundary DAGs call CLI scripts with templated params.
 
