@@ -41,10 +41,51 @@ def test_postgres_schema_declares_expected_tables_without_sqlite() -> None:
         "feedback_events",
         "display_feedback_events",
         "admin_reload_events",
+        "lot_events",
+        "incident_events",
+        "model_version_events",
+        "scenario_version_events",
+        "lifecycle_trigger_events",
     ]:
         assert f"create table if not exists {table}" in schema
     assert "jsonb" in schema
     assert "sqlite" not in schema
+
+
+def test_memory_repository_keeps_extended_metadata_events() -> None:
+    repo = MemoryMetadataRepository()
+
+    repo.save_lot_event({"lot_id": "lot_001", "scenario_id": "production_replay_natural"})
+    repo.save_incident_event({"incident_id": "incident_001", "incident_type": "false_negative"})
+    repo.save_model_version_event(
+        {
+            "model_version_event_id": "model_event_001",
+            "model_version": "feature_ae_v002",
+            "dataset_version": "feature_ae_good_v002",
+        }
+    )
+    repo.save_scenario_version_event(
+        {
+            "scenario_version_id": "scenario_event_001",
+            "scenario_id": "production_replay_natural",
+            "scenario_version": "production_replay_natural_v001",
+        }
+    )
+    repo.save_lifecycle_trigger_event(
+        {
+            "lifecycle_trigger_event_id": "trigger_001",
+            "scenario_id": "production_replay_natural",
+            "trigger_reason": "natural_50_oracle_conformes",
+            "dataset_version": "feature_ae_good_v002",
+            "manifest_version": "feature_ae_good_v002_manifest_v001",
+        }
+    )
+
+    assert repo.list_lot_events()[0]["lot_id"] == "lot_001"
+    assert repo.list_incident_events()[0]["incident_id"] == "incident_001"
+    assert repo.list_model_version_events()[0]["dataset_version"] == "feature_ae_good_v002"
+    assert repo.list_scenario_version_events()[0]["scenario_version"] == "production_replay_natural_v001"
+    assert repo.list_lifecycle_trigger_events()[0]["trigger_reason"] == "natural_50_oracle_conformes"
 
 
 @pytest.fixture(scope="module")
@@ -197,3 +238,86 @@ def test_postgres_repository_keeps_replay_piece_and_source_identity_distinct(
     assert saved["piece_event_id"] == f"sim_event_{suffix}"
     assert saved["source_event_id"] == f"piece_event_{suffix}"
     assert saved["piece_event_id"] != saved["source_event_id"]
+
+
+@pytest.mark.postgres_contract
+def test_postgres_repository_persists_extended_metadata_events(
+    postgres_repo: PostgresMetadataRepository,
+) -> None:
+    suffix = uuid4().hex
+    trigger_event_id = f"trigger_{suffix}"
+
+    postgres_repo.save_lot_event(
+        {
+            "lot_id": f"lot_{suffix}",
+            "scenario_id": "production_replay_natural",
+            "dataset_version": "production_replay_natural_v001",
+            "source_class": "Casting_class1",
+            "status": "served",
+        }
+    )
+    postgres_repo.save_incident_event(
+        {
+            "incident_id": f"incident_{suffix}",
+            "incident_type": "false_negative",
+            "severity": "high",
+            "scenario_id": "production_replay_natural",
+            "lot_id": f"lot_{suffix}",
+            "prediction_id": f"pred_{suffix}",
+            "dataset_version": "production_replay_natural_v001",
+        }
+    )
+    postgres_repo.save_model_version_event(
+        {
+            "model_version_event_id": f"model_event_{suffix}",
+            "registered_model_name": "feature_ae__production_replay_natural",
+            "model_version": "feature_ae_v002",
+            "scenario_id": "production_replay_natural",
+            "stage": "candidate",
+            "source_of_truth": "mlflow_registry",
+            "artifact_uri": "s3://mlflow-artifacts/model",
+            "dataset_version": "feature_ae_good_v002",
+            "manifest_version": "feature_ae_good_v002_manifest_v001",
+        }
+    )
+    postgres_repo.save_scenario_version_event(
+        {
+            "scenario_version_id": f"scenario_event_{suffix}",
+            "scenario_id": "production_replay_natural",
+            "scenario_version": "production_replay_natural_v001",
+            "dataset_version": "production_replay_natural_v001",
+            "replay_id": "production_replay_natural_v001",
+            "lifecycle_status": "candidate_ready",
+        }
+    )
+    postgres_repo.save_lifecycle_trigger_event(
+        {
+            "lifecycle_trigger_event_id": trigger_event_id,
+            "scenario_id": "production_replay_natural",
+            "trigger_reason": "natural_50_oracle_conformes",
+            "trigger_lifecycle": True,
+            "dataset_version": "feature_ae_good_v002",
+            "manifest_version": "feature_ae_good_v002_manifest_v001",
+            "model_version": "feature_ae_v002",
+            "lot_id": f"lot_{suffix}",
+        }
+    )
+
+    trigger_events = {
+        event["lifecycle_trigger_event_id"]: event
+        for event in postgres_repo.list_lifecycle_trigger_events()
+    }
+    assert trigger_events[trigger_event_id]["scenario_id"] == "production_replay_natural"
+    assert trigger_events[trigger_event_id]["trigger_reason"] == "natural_50_oracle_conformes"
+    assert trigger_events[trigger_event_id]["dataset_version"] == "feature_ae_good_v002"
+    assert trigger_events[trigger_event_id]["manifest_version"] == "feature_ae_good_v002_manifest_v001"
+    assert any(event["lot_id"] == f"lot_{suffix}" for event in postgres_repo.list_lot_events())
+    assert any(event["incident_id"] == f"incident_{suffix}" for event in postgres_repo.list_incident_events())
+    assert any(
+        event["model_version_event_id"] == f"model_event_{suffix}"
+        for event in postgres_repo.list_model_version_events()
+    )
+    assert any(
+        event["scenario_version_id"] == f"scenario_event_{suffix}"
+        for event in postgres_repo.list_scenario_version_events()
+    )
