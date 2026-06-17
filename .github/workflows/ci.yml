@@ -24,3 +24,52 @@ jobs:
 
       - name: Test
         run: uv run --extra cpu pytest -q
+
+  api-and-dag-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Airflow (mlops extra) so the DAGs are importable instead of skipped.
+      - name: Sync dependencies (cpu + mlops)
+        run: uv sync --extra cpu --extra mlops
+
+      - name: API contracts
+        run: uv run --extra cpu --extra mlops pytest tests/api tests/contracts -q
+
+      # Real "zero broken DAG" check: parse the DAGs via DagBag (import_errors is
+      # populated without a metadata DB). Excludes docker_contract tests, which
+      # require a live Airflow runtime + initialized DB (run in the Docker image).
+      - name: Import Airflow DAGs (zero broken DAG)
+        run: |
+          uv run --extra cpu --extra mlops python - <<'PY'
+          from airflow.models import DagBag
+
+          bag = DagBag(dag_folder="airflow/dags", include_examples=False)
+          assert not bag.import_errors, bag.import_errors
+          for dag_id in ["iqa_ingestion", "iqa_replay", "iqa_lifecycle", "iqa_monitoring"]:
+              assert dag_id in bag.dag_ids, f"missing DAG: {dag_id}"
+          print("DAGs OK:", sorted(bag.dag_ids))
+          PY
+
+      - name: Airflow DAG unit checks
+        run: uv run --extra cpu --extra mlops pytest tests/airflow -q -m "not docker_contract"
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build application image (cpu)
+        run: docker build --build-arg IQA_UV_EXTRA=cpu -t iqa-app:ci .
+
+      - name: Validate docker-compose config
+        run: |
+          cp .env.example .env
+          docker compose -f deploy/docker-compose.yml config -q
+          rm -f .env

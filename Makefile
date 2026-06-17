@@ -1,4 +1,4 @@
-.PHONY: sync lint test replay simulate validate api
+.PHONY: sync lint test contracts dags replay simulate validate api demo smoke
 
 sync:
 	uv sync --extra cpu
@@ -8,6 +8,18 @@ lint:
 
 test:
 	uv run --extra cpu pytest -q
+
+contracts:
+	uv run --extra cpu pytest tests/api tests/contracts -q
+
+dags:
+	uv run --extra cpu --extra mlops pytest tests/airflow -q
+
+demo:
+	uv run --extra cpu iqa-demo-phase2
+
+smoke:
+	bash deploy/smoke-test.sh
 
 replay:
 	uv run --extra cpu iqa-build-flux-plan
