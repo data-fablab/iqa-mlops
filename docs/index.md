@@ -26,6 +26,7 @@ IQA est un MVP MLOps pour le controle visuel de pieces `Casting`.
 | --- | --- |
 | Comprendre les contrats API Phase 2 | [api_contracts.md](api_contracts.md) |
 | Comprendre les contrats data Phase 2 | [data-contracts.md](data-contracts.md) |
+| Comprendre le versioning DVC des manifests | [dvc-versioning.md](dvc-versioning.md) |
 | Comprendre les regles de feedback et d'eligibilite train | [feedback_rules.md](feedback_rules.md) |
 | Comprendre la gouvernance securite IA | [ai_security_governance.md](ai_security_governance.md) |
 | Comprendre la chaine d'audit et de tracabilite | [audit_trail.md](audit_trail.md) |

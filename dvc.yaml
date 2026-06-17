@@ -1,0 +1,48 @@
+stages:
+  inventory:
+    cmd: uv run --extra cpu python scripts/build_inventory.py
+    deps:
+      - scripts/build_inventory.py
+      - data/metadata/casting_piece_events.csv
+      - data/raw/hss-iad
+
+  piece_events:
+    cmd: uv run --extra cpu python scripts/finalize_data_phase1.py
+    deps:
+      - scripts/finalize_data_phase1.py
+      - src/iqa/metadata/contracts.py
+      - data/metadata/casting_piece_events.csv
+      - data/metadata/feature_ae_bootstrap_events.csv
+      - data/metadata/casting_flux_replay_plan_natural.csv
+      - data/metadata/casting_flux_replay_plan_drift.csv
+      - data/validation/validation_set_v001.csv
+      - data/metadata/calibration_set_v001.csv
+
+  replay:
+    cmd: uv run --extra cpu python scripts/build_flux_plan.py
+    deps:
+      - scripts/build_flux_plan.py
+      - data/metadata/casting_images_inventory.csv
+      - data/metadata/casting_piece_events.csv
+      - data/metadata/feature_ae_bootstrap_events.csv
+      - data/metadata/casting_flux_replay_plan_natural.csv
+      - data/metadata/casting_flux_replay_plan_drift.csv
+
+  validation:
+    cmd: uv run --extra cpu pytest -q tests/data/test_phase1_data_contract.py tests/data/test_metadata_phase2_contract.py
+    deps:
+      - tests/data/test_phase1_data_contract.py
+      - tests/data/test_metadata_phase2_contract.py
+      - data/validation/validation_set_v001.csv
+      - data/metadata/calibration_set_v001.csv
+      - data/metadata/feature_ae_bootstrap_events.csv
+      - data/metadata/casting_flux_replay_plan_natural.csv
+      - data/metadata/casting_flux_replay_plan_drift.csv
+
+  model_dataset:
+    cmd: uv run --extra cpu pytest -q tests/datasets/test_candidate_builder.py
+    deps:
+      - src/iqa/datasets/candidate_builder.py
+      - src/iqa/datasets/casting.py
+      - tests/datasets/test_candidate_builder.py
+      - data/metadata/feature_ae_bootstrap_events.csv
