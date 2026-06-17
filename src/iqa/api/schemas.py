@@ -249,6 +249,30 @@ class Scenario(IQABaseModel):
     scenario_version: str | None = None
 
 
+class ReplayRunRequest(IQABaseModel):
+    scenario_id: str
+
+    @field_validator("scenario_id")
+    @classmethod
+    def scenario_not_empty(cls, value: str) -> str:
+        if not value:
+            raise ValueError("field must not be empty")
+        return value
+
+
+class ReplayRunResponse(IQABaseModel):
+    replay_run_id: str
+    scenario_id: str
+    cursor: int = 0
+    total_events: int
+    finished: bool = False
+    created_at: str
+
+
+class ReplayNextResponse(ReplayRunResponse):
+    event: dict[str, Any] | None = None
+
+
 class ReloadModelRequest(IQABaseModel):
     scenario_id: str
     stage: ModelStage = ModelStage.prod
@@ -416,6 +440,9 @@ __all__ = [
     "ApiErrorResponse",
     "PredictionHistoryRow",
     "PredictionAuditTrail",
+    "ReplayNextResponse",
+    "ReplayRunRequest",
+    "ReplayRunResponse",
     "ModelRegistryRefResponse",
     "LotSummaryRow",
     "AuditTrailPredictionContext",
