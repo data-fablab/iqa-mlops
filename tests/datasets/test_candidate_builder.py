@@ -8,7 +8,10 @@ import pytest
 from factories import make_sample as _sample
 
 from iqa.datasets import (
+    FEATURE_AE_GOOD_V002,
+    FEATURE_AE_GOOD_V003,
     VALIDATION_SET_ID,
+    build_oracle_validated_feature_ae_dataset,
     build_candidate_dataset,
     filter_candidate_samples,
     write_candidate_manifest,
@@ -235,6 +238,52 @@ class TestBuildCandidateDataset:
         assert result.sample_count == 0
         assert result.filtered_count == 0
         assert output.exists()
+
+
+class TestBuildOracleValidatedFeatureAEDataset:
+    """Test Feature-AE v002/v003 good-only oracle GT datasets."""
+
+    def test_build_v002_keeps_only_oracle_conforme_train_eligible_samples(self, tmp_path: Path) -> None:
+        output = tmp_path / "feature_ae_good_v002.csv"
+        samples = [
+            _sample(image_id="keep", oracle_verdict="conforme", train_eligible=True),
+            _sample(image_id="defective", oracle_verdict="defective", train_eligible=False),
+            _sample(image_id="human", train_eligibility_source="human_sophie"),
+            _sample(image_id="quarantine", quarantine_reason="roi_fail"),
+            _sample(image_id="defective_flag", is_defective=True),
+        ]
+
+        result = build_oracle_validated_feature_ae_dataset(samples, output, FEATURE_AE_GOOD_V002)
+        content = output.read_text(encoding="utf-8")
+        data_lines = content.splitlines()[1:]
+
+        assert result.version == FEATURE_AE_GOOD_V002
+        assert result.sample_count == 1
+        assert result.filtered_count == 4
+        assert "keep" in content
+        assert all("defective" not in line for line in data_lines)
+        assert all("human" not in line for line in data_lines)
+        assert all("quarantine" not in line for line in data_lines)
+        assert FEATURE_AE_GOOD_V002 in content
+
+    def test_build_v003_uses_drift_dataset_version(self, tmp_path: Path) -> None:
+        output = tmp_path / "feature_ae_good_v003.csv"
+        sample = _sample(
+            image_id="drift_conforme",
+            scenario_id="drift_domain_extension",
+            dataset_version="drift_domain_extension_v001",
+            oracle_verdict="conforme",
+            train_eligible=True,
+            train_eligibility_source="oracle_gt",
+        )
+
+        result = build_oracle_validated_feature_ae_dataset([sample], output, FEATURE_AE_GOOD_V003)
+        content = output.read_text(encoding="utf-8")
+
+        assert result.version == FEATURE_AE_GOOD_V003
+        assert result.sample_count == 1
+        assert FEATURE_AE_GOOD_V003 in content
+        assert "drift_domain_extension_v001" not in content.splitlines()[1]
 
 
 class TestCandidateBuilderIntegration:

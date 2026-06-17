@@ -37,6 +37,10 @@ class CastingImageSample:
     scenario_id: str = ""
     dataset_version: str = ""
     gt_mask_path: str = ""
+    oracle_verdict: str = ""
+    train_eligible: bool = False
+    train_eligibility_source: str = ""
+    quarantine_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,10 @@ def iter_manifest_image_samples(manifest_path: str | Path) -> list[CastingImageS
                         scenario_id=row.get("scenario_id") or "",
                         dataset_version=row.get("dataset_version") or row.get("bootstrap_dataset_version") or "",
                         gt_mask_path=_resolve_indexed(gt_paths, index),
+                        oracle_verdict=row.get("oracle_verdict") or "",
+                        train_eligible=_truthy(row.get("train_eligible") or ""),
+                        train_eligibility_source=row.get("train_eligibility_source") or "",
+                        quarantine_reason=row.get("quarantine_reason") or "",
                     )
                 )
     return samples

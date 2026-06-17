@@ -2,7 +2,10 @@
 
 from iqa.datasets.candidate_builder import (
     CandidateDataset,
+    FEATURE_AE_GOOD_V002,
+    FEATURE_AE_GOOD_V003,
     build_candidate_dataset,
+    build_oracle_validated_feature_ae_dataset,
     filter_candidate_samples,
     write_candidate_manifest,
 )
@@ -31,6 +34,8 @@ __all__ = [
     "CALIBRATION_SET_ID",
     "CandidateDataset",
     "FEATURE_AE_CONTEXT_SIZE",
+    "FEATURE_AE_GOOD_V002",
+    "FEATURE_AE_GOOD_V003",
     "FEATURE_AE_EXCLUDED_TRAIN_SETS",
     "FEATURE_AE_PREPROCESSING_MODES",
     "FEATURE_AE_TILE_SIZE",
@@ -42,6 +47,7 @@ __all__ = [
     "ResizeLetterbox",
     "TiledFeatureAEDataset",
     "build_candidate_dataset",
+    "build_oracle_validated_feature_ae_dataset",
     "filter_candidate_samples",
     "is_calibration_sample",
     "iter_manifest_image_samples",

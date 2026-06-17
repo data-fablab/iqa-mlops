@@ -76,6 +76,17 @@ train_eligibility_source = oracle_gt
 `human_sophie` reste display-only dans cette phase et ne rend jamais un exemple
 eligible au train normal.
 
+Les datasets Feature-AE candidats suivent ces versions :
+
+| Version | Source |
+| --- | --- |
+| `feature_ae_good_v002` | Conformes valides issus du replay naturel. |
+| `feature_ae_good_v003` | Conformes valides issus du replay drift/domain extension. |
+
+Un sample est eligible seulement si `oracle_verdict=conforme`,
+`train_eligible=true`, `train_eligibility_source=oracle_gt`, sans quarantaine et
+sans statut ROI bloquant.
+
 ## Validation set v001
 
 `data/validation/validation_set_v001.csv` est fige au niveau `piece_event`.
