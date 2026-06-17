@@ -21,6 +21,7 @@ from iqa.api.schemas import (
     FeedbackRequest,
     PieceEventPredictRequest,
     PredictRequest,
+    ReplayRunRequest,
     ReloadModelRequest,
 )
 
@@ -29,7 +30,7 @@ from iqa.feedback import OracleFeedbackRequest, oracle_gt_verdict
 from iqa.inference.contracts import InferenceRequest, placeholder_inference
 from iqa.metadata.repository import MEMORY_BACKEND, MetadataRepository, create_metadata_repository, metadata_backend
 from iqa.registry import ModelRegistryRef, registered_model_name
-from iqa.replay import list_replay_scenarios
+from iqa.replay import ReplayRunStore, list_replay_scenarios
 
 
 BASE_DIR = Path(__file__).resolve().parents[3]
@@ -43,6 +44,7 @@ FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
 DISPLAY_FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
 ADMIN_RELOAD_LOG: list[dict[str, Any]] = []
 INCIDENT_STORE: list[dict[str, Any]] = []
+REPLAY_RUN_STORE = ReplayRunStore()
 
 AI_SECURITY_METRICS: dict[str, int] = {
     "feedback_conflict_total": 0,
@@ -334,6 +336,51 @@ def model_version(scenario_id: str) -> dict[str, Any]:
 @app.get("/replay-scenarios")
 def replay_scenarios() -> list[dict[str, str | bool]]:
     return list_replay_scenarios()
+
+
+@app.post("/replay-runs")
+def create_replay_run(request: ReplayRunRequest) -> dict[str, Any]:
+    try:
+        return REPLAY_RUN_STORE.create_run(request.scenario_id)
+    except KeyError as exc:
+        _raise_api_error(
+            status_code=404,
+            error_code="replay_scenario_not_found",
+            message="Unknown replay scenario_id.",
+            reason="Unknown replay scenario_id.",
+            details={"scenario_id": request.scenario_id},
+        )
+        raise AssertionError("unreachable") from exc
+
+
+@app.get("/replay-runs/{replay_run_id}/next")
+def next_replay_event(replay_run_id: str) -> dict[str, Any]:
+    try:
+        return REPLAY_RUN_STORE.next_event(replay_run_id)
+    except KeyError as exc:
+        _raise_api_error(
+            status_code=404,
+            error_code="replay_run_not_found",
+            message="Unknown replay_run_id.",
+            reason="Unknown replay_run_id.",
+            details={"replay_run_id": replay_run_id},
+        )
+        raise AssertionError("unreachable") from exc
+
+
+@app.post("/replay-runs/{replay_run_id}/reset")
+def reset_replay_run(replay_run_id: str) -> dict[str, Any]:
+    try:
+        return REPLAY_RUN_STORE.reset_run(replay_run_id)
+    except KeyError as exc:
+        _raise_api_error(
+            status_code=404,
+            error_code="replay_run_not_found",
+            message="Unknown replay_run_id.",
+            reason="Unknown replay_run_id.",
+            details={"replay_run_id": replay_run_id},
+        )
+        raise AssertionError("unreachable") from exc
 
 
 @app.post("/predict")
@@ -1150,7 +1197,9 @@ __all__ = [
     "PredictRequest",
     "ReloadModelRequest",
     "ADMIN_RELOAD_LOG",
+    "REPLAY_RUN_STORE",
     "record_dataset_blocked_incident",
+    "create_replay_run",
     "list_incidents",
     "INCIDENT_STORE",
     "AI_SECURITY_METRICS",
@@ -1163,5 +1212,7 @@ __all__ = [
     "predict",
     "predict_piece_event",
     "reload_model",
+    "next_replay_event",
+    "reset_replay_run",
     "replay_scenarios",
 ]

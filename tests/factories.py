@@ -21,6 +21,10 @@ def make_sample(
     scenario_id: str = "scenario_1",
     dataset_version: str = "v001",
     gt_mask_path: str = "",
+    oracle_verdict: str = "conforme",
+    train_eligible: bool = True,
+    train_eligibility_source: str = "oracle_gt",
+    quarantine_reason: str = "",
 ) -> CastingImageSample:
     """Create a CastingImageSample with safe, training-eligible defaults."""
     return CastingImageSample(
@@ -34,4 +38,8 @@ def make_sample(
         scenario_id=scenario_id,
         dataset_version=dataset_version,
         gt_mask_path=gt_mask_path,
+        oracle_verdict=oracle_verdict,
+        train_eligible=train_eligible,
+        train_eligibility_source=train_eligibility_source,
+        quarantine_reason=quarantine_reason,
     )

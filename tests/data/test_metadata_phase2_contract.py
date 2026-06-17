@@ -7,6 +7,7 @@ from iqa.metadata.contracts import MANIFEST_CONTRACTS, PHASE2_METADATA_COLUMNS
 
 
 ROOT = Path(".")
+DATA_CONTRACTS_DOC = ROOT / "docs" / "data-contracts.md"
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -59,3 +60,16 @@ def test_replay_metadata_keeps_source_identity_and_existing_runtime_values() -> 
         assert all(row["recorded_at"] for row in rows)
         assert {row["is_simulated"].lower() for row in rows} == {"true"}
         assert all(row["piece_event_id"] == row["simulated_event_id"] for row in rows)
+
+
+def test_data_contracts_document_canonical_identifiers_and_manifests() -> None:
+    content = DATA_CONTRACTS_DOC.read_text(encoding="utf-8")
+
+    for column in PHASE2_METADATA_COLUMNS:
+        assert column in content
+    for identifier in ["source_event_id", "scenario_id", "lot_id", "prediction_id", "model_version", "feedback_id"]:
+        assert identifier in content
+    for contract in MANIFEST_CONTRACTS.values():
+        assert contract.manifest_id in content
+        assert str(contract.path).replace("\\", "/") in content
+    assert "sha256 -> piece_event -> scenario -> lot -> dataset_version -> model_version -> prediction -> feedback" in content

@@ -20,6 +20,10 @@ class CandidateDataset:
     output_manifest: Path
 
 
+FEATURE_AE_GOOD_V002 = "feature_ae_good_v002"
+FEATURE_AE_GOOD_V003 = "feature_ae_good_v003"
+
+
 def _is_good_label(sample: CastingImageSample) -> bool:
     """Check if sample has a good label."""
     label = sample.label.lower()
@@ -45,6 +49,15 @@ def _not_in_validation_set(sample: CastingImageSample) -> bool:
     """Check if sample is not in validation set."""
     split = sample.split_set.lower()
     return VALIDATION_SET_ID not in split
+
+
+def _is_oracle_train_eligible(sample: CastingImageSample) -> bool:
+    return (
+        sample.oracle_verdict == "conforme"
+        and sample.train_eligible is True
+        and sample.train_eligibility_source == "oracle_gt"
+        and not sample.quarantine_reason
+    )
 
 
 def filter_candidate_samples(
@@ -105,6 +118,10 @@ def write_candidate_manifest(
         "scenario_id",
         "dataset_version",
         "gt_mask_path",
+        "oracle_verdict",
+        "train_eligible",
+        "train_eligibility_source",
+        "quarantine_reason",
     ]
 
     with output_path.open("w", newline="", encoding="utf-8") as f:
@@ -124,6 +141,10 @@ def write_candidate_manifest(
                 "scenario_id": sample.scenario_id,
                 "dataset_version": version or sample.dataset_version,
                 "gt_mask_path": sample.gt_mask_path,
+                "oracle_verdict": sample.oracle_verdict,
+                "train_eligible": str(sample.train_eligible).lower(),
+                "train_eligibility_source": sample.train_eligibility_source,
+                "quarantine_reason": sample.quarantine_reason,
             })
 
 
@@ -160,9 +181,35 @@ def build_candidate_dataset(
     )
 
 
+def build_oracle_validated_feature_ae_dataset(
+    samples: Iterable[CastingImageSample],
+    output_manifest: Path,
+    version: str,
+    *,
+    roi_status: dict[str, str] | None = None,
+) -> CandidateDataset:
+    """Build Feature-AE good-only datasets from oracle GT conforming samples."""
+
+    samples_list = list(samples)
+    base_filtered = filter_candidate_samples(samples_list, roi_status=roi_status)
+    oracle_filtered = [sample for sample in base_filtered if _is_oracle_train_eligible(sample)]
+
+    write_candidate_manifest(oracle_filtered, output_manifest, version=version)
+
+    return CandidateDataset(
+        version=version,
+        sample_count=len(oracle_filtered),
+        filtered_count=len(samples_list) - len(oracle_filtered),
+        output_manifest=output_manifest,
+    )
+
+
 __all__ = [
     "CandidateDataset",
+    "FEATURE_AE_GOOD_V002",
+    "FEATURE_AE_GOOD_V003",
     "build_candidate_dataset",
+    "build_oracle_validated_feature_ae_dataset",
     "filter_candidate_samples",
     "write_candidate_manifest",
 ]
