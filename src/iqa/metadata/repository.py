@@ -64,6 +64,36 @@ class MetadataRepository(Protocol):
     def list_admin_reload_events(self) -> list[dict[str, Any]]:
         """Return admin reload audit events."""
 
+    def save_lot_event(self, record: dict[str, Any]) -> None:
+        """Store or update a lot metadata event."""
+
+    def list_lot_events(self) -> list[dict[str, Any]]:
+        """Return lot metadata events."""
+
+    def save_incident_event(self, record: dict[str, Any]) -> None:
+        """Store or update an incident metadata event."""
+
+    def list_incident_events(self) -> list[dict[str, Any]]:
+        """Return incident metadata events."""
+
+    def save_model_version_event(self, record: dict[str, Any]) -> None:
+        """Store or update a model version metadata event."""
+
+    def list_model_version_events(self) -> list[dict[str, Any]]:
+        """Return model version metadata events."""
+
+    def save_scenario_version_event(self, record: dict[str, Any]) -> None:
+        """Store or update a scenario version metadata event."""
+
+    def list_scenario_version_events(self) -> list[dict[str, Any]]:
+        """Return scenario version metadata events."""
+
+    def save_lifecycle_trigger_event(self, record: dict[str, Any]) -> None:
+        """Store or update a lifecycle trigger metadata event."""
+
+    def list_lifecycle_trigger_events(self) -> list[dict[str, Any]]:
+        """Return lifecycle trigger metadata events."""
+
 
 class MemoryMetadataRepository:
     """In memory implementation used by the API and tests before PostgreSQL."""
@@ -74,6 +104,11 @@ class MemoryMetadataRepository:
         self._feedbacks: dict[str, dict[str, Any]] = {}
         self._display_feedbacks: dict[str, dict[str, Any]] = {}
         self._admin_reload_events: list[dict[str, Any]] = []
+        self._lot_events: dict[str, dict[str, Any]] = {}
+        self._incident_events: dict[str, dict[str, Any]] = {}
+        self._model_version_events: dict[str, dict[str, Any]] = {}
+        self._scenario_version_events: dict[str, dict[str, Any]] = {}
+        self._lifecycle_trigger_events: dict[str, dict[str, Any]] = {}
 
     def save_piece_event(self, piece_event_id: str, record: dict[str, Any]) -> None:
         self._piece_events[piece_event_id] = deepcopy(record)
@@ -125,6 +160,43 @@ class MemoryMetadataRepository:
 
     def list_admin_reload_events(self) -> list[dict[str, Any]]:
         return [deepcopy(record) for record in self._admin_reload_events]
+
+    def save_lot_event(self, record: dict[str, Any]) -> None:
+        self._lot_events[_required(record, "lot_id")] = deepcopy(record)
+
+    def list_lot_events(self) -> list[dict[str, Any]]:
+        return [deepcopy(record) for record in self._lot_events.values()]
+
+    def save_incident_event(self, record: dict[str, Any]) -> None:
+        self._incident_events[_required(record, "incident_id")] = deepcopy(record)
+
+    def list_incident_events(self) -> list[dict[str, Any]]:
+        return [deepcopy(record) for record in self._incident_events.values()]
+
+    def save_model_version_event(self, record: dict[str, Any]) -> None:
+        self._model_version_events[_required(record, "model_version_event_id")] = deepcopy(record)
+
+    def list_model_version_events(self) -> list[dict[str, Any]]:
+        return [deepcopy(record) for record in self._model_version_events.values()]
+
+    def save_scenario_version_event(self, record: dict[str, Any]) -> None:
+        self._scenario_version_events[_required(record, "scenario_version_id")] = deepcopy(record)
+
+    def list_scenario_version_events(self) -> list[dict[str, Any]]:
+        return [deepcopy(record) for record in self._scenario_version_events.values()]
+
+    def save_lifecycle_trigger_event(self, record: dict[str, Any]) -> None:
+        self._lifecycle_trigger_events[_required(record, "lifecycle_trigger_event_id")] = deepcopy(record)
+
+    def list_lifecycle_trigger_events(self) -> list[dict[str, Any]]:
+        return [deepcopy(record) for record in self._lifecycle_trigger_events.values()]
+
+
+def _required(record: dict[str, Any], field: str) -> str:
+    value = record.get(field)
+    if not value:
+        raise ValueError(f"{field} is required.")
+    return str(value)
 
 
 def metadata_db_url() -> str | None:

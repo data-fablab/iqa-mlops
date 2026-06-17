@@ -117,5 +117,13 @@ Le backend applicatif stocke les faits, statuts, timestamps, versions, URI et
 payloads JSONB. Il ne stocke pas les images, checkpoints, masques ou heatmaps
 binaires.
 
+Le socle PostgreSQL applicatif couvre aussi les evenements MLOps et gouvernance
+prepares pour les prochains lots : `lot_events`, `incident_events`,
+`model_version_events`, `scenario_version_events` et
+`lifecycle_trigger_events`. Ces tables exposent les identifiants de jointure
+stables (`scenario_id`, `lot_id`, `piece_event_id`, `prediction_id`,
+`dataset_version`, `manifest_version`, `model_version`, `trigger_reason`) tout
+en conservant le payload complet en JSONB.
+
 Les CSV restent la source operationnelle immediate jusqu'aux lots DVC/replay
 suivants, mais les noms de colonnes sont alignes avec la cible PostgreSQL.
