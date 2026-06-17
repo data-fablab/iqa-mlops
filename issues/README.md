@@ -30,6 +30,7 @@ Tranches verticales (tracer bullets). Une seule HITL (00) ; le reste est AFK.
 | 19 | Persistance runtime du dataset candidat (materialisation MinIO / PG) | AFK | 08 |
 | 20 | Runtime train/eval : entrainement reel + checkpoint/metriques MinIO | AFK | 09, 19 |
 | 21 | Runtime MLflow : enregistrement reel du run au Registry | AFK | 10, 20 |
+| 22 | Runtime promotion + reload : transition Registry reelle + reload HTTP inference | AFK | 11, 21 |
 
 ## Chemin critique
 
@@ -44,7 +45,7 @@ Les images (03/04) et la CI (14 -> 15) se parallelisent ; 00 (HITL) doit etre tr
 - Microservices/images : 01, 02, 03, 04, 17
 - Orchestration conteneurisee : 05, 06, 07, 08, 09, 10, 11, 12, 13
 - Automatisation / registre : 00, 14, 15, 16
-- Persistance runtime (data plane) : 18, 19, 20, 21 (et critères persistance embarqués dans 11-13)
+- Persistance runtime (data plane) : 18, 19, 20, 21, 22 (et critères persistance embarqués dans 12-13)
 
 ## Cadrage : conteneurisation DAG vs persistance runtime
 
@@ -58,11 +59,10 @@ jeu et **ne doivent pas être confondus** :
 2. **Persistance runtime** (data plane) : implémenter l'écriture réelle dans les
    stores. Lourd, nécessite la logique métier dans les scripts.
 
-Les issues **11, 13 portent déjà des critères de persistance réelle**
-(« inference sert la nouvelle version », « métriques dans Grafana »). Leur périmètre
-**inclut donc l'implémentation runtime**, pas seulement la conversion DAG — les
-traiter comme telles (ou les redécouper en deux sous-tranches chacune, comme
-07→18, 08→19, 09→20 et 10→21).
+L'issue **13 porte déjà des critères de persistance réelle**
+(« métriques dans Grafana »). Son périmètre **inclut donc l'implémentation
+runtime**, pas seulement la conversion DAG — la traiter comme telle (ou la
+redécouper en deux sous-tranches, comme 07→18, 08→19, 09→20, 10→21 et 11→22).
 
 Cas particuliers :
 - **Ingestion (07)** : conversion DAG faite, mais aucune issue ultérieure ne la
@@ -77,6 +77,12 @@ Cas particuliers :
   (évalue `promotion_gates.yaml`, exit non-zéro si échec) ; seul l'enregistrement
   MLflow réel (le nom isolé par scénario est déjà réel) est isolé dans la **nouvelle
   issue 21** (même découpage).
+- **Promotion/reload (11)** : conversion DAG faite (`promotion` sur image ml,
+  `reload` sur image data) → DAG `iqa_lifecycle` 100 % conteneur, ADR 0008
+  entièrement résolu. La regle `snapshot_previous_prod` (prod uniquement) et le
+  skip non-prod du reload sont **déjà réels** ; la transition réelle au Registry
+  et le reload HTTP de `iqa-inference` sont isolés dans la **nouvelle issue 22**
+  (même découpage).
 - **Replay (12)** : critères centrés sur la sémantique des événements rejoués, pas
   explicitement sur l'écriture en store — à clarifier au moment de la traiter.
 

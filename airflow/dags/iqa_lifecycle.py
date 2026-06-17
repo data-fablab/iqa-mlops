@@ -3,15 +3,15 @@
 Pipeline stages:
   lifecycle_decision → dataset → train → eval → gates → mlflow → promotion → reload
 
-Issue 08 containerises the first two stages (``lifecycle_decision`` and
-``dataset``) via the operator factory (data image), so the Airflow scheduler no
-longer imports ``iqa`` for them (ADR 0008). Runtime params (scenario_id, trigger
-thresholds, manifest) are passed as templated argv -- no shell, no quoting.
+Issue 11 completes the conversion: every stage now runs as a container via the
+operator factory, so the Airflow scheduler never imports ``iqa`` (ADR 0008 fully
+resolved -- no ``PythonOperator`` left). Runtime params (scenario_id, stages,
+manifest) are passed as templated argv -- no shell, no quoting.
 
-The tail (``train`` … ``reload``) stays on ``PythonOperator`` placeholders until
-issues 09-11 containerise it. Real dataset materialisation in MinIO/PostgreSQL is
-tracked separately (issue 19), mirroring the ingestion split (issue 18): this
-slice only converts the orchestration.
+The container stdout is each task's XCom (references only, no payloads). The real
+runtime behind these boundaries (dataset materialisation, train/eval, MLflow
+registration, the Registry transition and the inference HTTP reload) is tracked
+by the runtime sister issues 18-22: this slice only converts the orchestration.
 """
 
 from __future__ import annotations
@@ -21,27 +21,13 @@ from datetime import datetime
 
 try:
     from airflow import DAG
-    from airflow.operators.python import PythonOperator
 except ImportError:  # pragma: no cover
     DAG = None
-    PythonOperator = None
 
 try:
     from iqa.dags.operators import make_container_task
 except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
     make_container_task = None
-
-try:
-    from iqa.dags.lifecycle_tasks import (
-        task_promotion,
-        task_reload,
-    )
-except ImportError:  # pragma: no cover
-    def _placeholder_task(**_context):
-        return {"status": "placeholder", "reason": "iqa package not available in airflow image"}
-
-    task_promotion = _placeholder_task
-    task_reload = _placeholder_task
 
 
 DATA_IMAGE = os.environ.get("IQA_IMAGE_DATA", "iqa-data:local")
@@ -50,12 +36,7 @@ GPU_POOL = "iqa_gpu"
 
 
 dag = None
-if (
-    DAG is not None
-    and PythonOperator is not None
-    and make_container_task is not None
-    and all([task_promotion, task_reload])
-):
+if DAG is not None and make_container_task is not None:
     try:
         with DAG(
             dag_id="iqa_lifecycle",
@@ -161,16 +142,25 @@ if (
                 ],
             )
 
-            op_promotion = PythonOperator(
+            op_promotion = make_container_task(
                 task_id="promotion",
-                python_callable=task_promotion,
-                doc="Promote model to production",
+                image="{{ params.ml_image }}",
+                command=[
+                    "iqa-run-promotion",
+                    "--scenario-id", "{{ params.scenario_id }}",
+                    "--source-stage", "{{ params.registry_stage }}",
+                    "--target-stage", "{{ params.target_stage }}",
+                ],
             )
 
-            op_reload = PythonOperator(
+            op_reload = make_container_task(
                 task_id="reload",
-                python_callable=task_reload,
-                doc="Reload model in inference service",
+                image="{{ params.image }}",
+                command=[
+                    "iqa-run-reload",
+                    "--scenario-id", "{{ params.scenario_id }}",
+                    "--target-stage", "{{ params.target_stage }}",
+                ],
             )
 
             # Linear chain: lifecycle_decision -> dataset -> train -> eval -> gates -> mlflow -> promotion -> reload

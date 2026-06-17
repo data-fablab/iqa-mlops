@@ -37,6 +37,8 @@ iqa-run-train = "scripts.run_train:main"
 iqa-run-eval = "scripts.run_eval:main"
 iqa-run-gates = "scripts.run_gates:main"
 iqa-run-mlflow = "scripts.run_mlflow:main"
+iqa-run-promotion = "scripts.run_promotion:main"
+iqa-run-reload = "scripts.run_reload:main"
 iqa-demo-phase2 = "scripts.demo_phase2:main"
 
 [project.optional-dependencies]

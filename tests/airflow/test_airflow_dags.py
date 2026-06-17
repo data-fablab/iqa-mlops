@@ -122,8 +122,8 @@ def test_ingestion_dag_runs_data_image_via_factory() -> None:
 def test_lifecycle_dag_containerises_decision_and_dataset_via_factory() -> None:
     """Lifecycle DAG (issue 08) runs lifecycle_decision + dataset as containers.
 
-    The two leading stages move to the data image via the operator factory; the
-    tail (train..reload) stays on PythonOperator until issues 09-11.
+    The two leading stages move to the data image via the operator factory
+    (issue 11 later containerises the whole tail, removing every PythonOperator).
     """
     source = _read_dag_source("iqa_lifecycle.py")
 
@@ -136,8 +136,6 @@ def test_lifecycle_dag_containerises_decision_and_dataset_via_factory() -> None:
     # These two tasks no longer route through the iqa lifecycle_tasks callables.
     assert "task_lifecycle_decision" not in source
     assert "task_dataset" not in source
-    # Tail stages still use PythonOperator for now.
-    assert "PythonOperator(" in source
 
 
 @pytest.mark.unit
@@ -165,8 +163,8 @@ def test_lifecycle_dag_containerises_gates_and_mlflow_via_factory() -> None:
     """Lifecycle DAG (issue 10) runs gates + mlflow as containers.
 
     gates evaluates promotion_gates.yaml on the data image (blocks on failure);
-    mlflow resolves the scenario-isolated name on the ml image. Only promotion +
-    reload stay on PythonOperator (issue 11).
+    mlflow resolves the scenario-isolated name on the ml image. Issue 11 then
+    containerises the promotion/reload tail.
     """
     source = _read_dag_source("iqa_lifecycle.py")
 
@@ -176,9 +174,27 @@ def test_lifecycle_dag_containerises_gates_and_mlflow_via_factory() -> None:
     # gates/mlflow no longer route through the iqa lifecycle_tasks callables.
     assert "task_gates" not in source
     assert "task_mlflow" not in source
-    # Only the promotion/reload tail is still on PythonOperator.
-    assert "task_promotion" in source
-    assert "task_reload" in source
+
+
+@pytest.mark.unit
+def test_lifecycle_dag_containerises_promotion_and_reload_via_factory() -> None:
+    """Lifecycle DAG (issue 11) runs promotion + reload as containers.
+
+    The last two stages move to the factory, so ADR 0008 is fully resolved: no
+    PythonOperator and no iqa lifecycle_tasks import remain in the DAG. promotion
+    runs on the ml image (MLflow is the source of truth); reload runs on the data
+    image and only acts for prod promotions.
+    """
+    source = _read_dag_source("iqa_lifecycle.py")
+
+    assert '"iqa-run-promotion"' in source
+    assert '"iqa-run-reload"' in source
+    assert '"{{ params.target_stage }}"' in source
+    # No PythonOperator instantiation and no lifecycle_tasks callables anymore.
+    assert "PythonOperator(" not in source
+    assert "task_promotion" not in source
+    assert "task_reload" not in source
+    assert "lifecycle_tasks" not in source
 
 
 @pytest.mark.unit

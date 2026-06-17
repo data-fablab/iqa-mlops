@@ -11,12 +11,21 @@ MLOps automatisee.
 
 ## Acceptance criteria
 
-- [ ] `promotion` promeut le modele au `target_stage` dans MLflow
-- [ ] `reload` declenche le rechargement de `iqa-inference` via son contrat HTTP
-- [ ] Apres un run complet, `iqa-inference` sert la nouvelle version
-- [ ] `iqa_lifecycle` ne contient plus aucun `PythonOperator`/placeholder (ADR 0008 entierement resolu)
-- [ ] Import DagBag vert
+- [~] `promotion` promeut le modele au `target_stage` dans MLflow
+  (conversion DAG faite : `iqa-run-promotion` sur image ml resout le nom isole +
+  la transition `candidate -> target_stage` ; la transition reelle au Registry est
+  differee a l'issue 22, `promoted: false`)
+- [~] `reload` declenche le rechargement de `iqa-inference` via son contrat HTTP
+  (regle de skip reelle : reload seulement si `target_stage == prod` ; l'appel HTTP
+  reel est differe a l'issue 22, `reloaded: false`)
+- [~] Apres un run complet, `iqa-inference` sert la nouvelle version (issue 22 : runtime)
+- [x] `iqa_lifecycle` ne contient plus aucun `PythonOperator`/placeholder (ADR 0008 entierement resolu)
+- [x] Import DagBag vert (tests `docker_contract` : 8 task_ids + chaine lineaire intacts)
 
 ## Blocked by
 
 - 10 - Lifecycle (3/4) : gates + MLflow
+
+## Sibling (runtime)
+
+- 22 - Runtime promotion + reload : transition Registry reelle + reload HTTP inference
