@@ -76,6 +76,26 @@ def test_metadata_store_is_documented_as_postgresql() -> None:
         assert "sqlite" not in content
 
 
+def test_readme_describes_current_phase_2_surfaces() -> None:
+    content = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "API Skeleton" not in content
+    assert "Phase 1 foundation" not in content
+    for term in [
+        "iqa_dvc_reproducibility",
+        "iqa-check-dvc-reproducibility",
+        "iqa-init-metadata-db",
+        "iqa-demo-phase2",
+        "production_replay_natural",
+        "drift_domain_extension",
+        "PostgreSQL",
+        "MLflow",
+        "MinIO",
+        "Airflow",
+    ]:
+        assert term in content
+
+
 def test_architecture_documents_microservices_and_registry_truth() -> None:
     docs = _docs_corpus()
 
