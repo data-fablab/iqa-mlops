@@ -20,5 +20,16 @@ if DAG is not None and BashOperator is not None:
         catchup=False,
         start_date=datetime(2026, 1, 1),
         tags=["iqa", "replay"],
+        params={
+            "scenario_id": "production_replay_natural",
+            "plan": "data/metadata/casting_flux_replay_plan_natural.csv",
+        },
     ) as dag:
-        BashOperator(task_id="run_replay", bash_command="iqa-run-replay")
+        BashOperator(
+            task_id="run_replay",
+            bash_command=(
+                "iqa-run-replay "
+                "--scenario-id '{{ params.scenario_id }}' "
+                "--plan '{{ params.plan }}'"
+            ),
+        )
