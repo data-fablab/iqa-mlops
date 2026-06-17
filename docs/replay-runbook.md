@@ -22,6 +22,19 @@ Scenarios supportes :
 
 Chaque run conserve son curseur. Un reset ne modifie pas les autres runs.
 Deux runs du meme scenario servent les evenements dans le meme ordre stable.
+Les reponses de run exposent aussi `lot_ids`, `source_classes`, `created_at` et
+`updated_at`. Chaque evenement servi porte `replay_run_id`, `replay_position`,
+`served_at`, `lot_id`, `source_class`, `scheduled_at` et `event_time`.
+
+Le scheduler file-backed utilise les manifests CSV comme source d'evenements.
+Les scenarios restent declares dans `src/iqa/replay/scenarios.py` pour ce lot ;
+un `replay_scenarios.csv` pourra etre materialise plus tard si Airflow ou DVC en
+ont besoin comme artefact.
+
+`production_replay_natural` suit l'ordre stable du manifest. Le scenario
+`drift_domain_extension` est servi par regime de source, dans l'ordre
+`Casting_class1 -> Casting_class2 -> Casting_class3`, tout en conservant l'ordre
+stable interne de chaque classe.
 
 ## Airflow Docker
 
