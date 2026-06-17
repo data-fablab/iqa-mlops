@@ -123,6 +123,22 @@ def test_boundary_dags_pass_explicit_runtime_params_to_cli() -> None:
     assert "--roi-fail-rate '{{ params.roi_fail_rate }}'" in monitoring
 
 
+@pytest.mark.unit
+def test_dvc_reproducibility_dag_declares_safe_dvc_gate() -> None:
+    """DVC is exposed to Airflow as an explicit reproducibility gate."""
+    source = _read_dag_source("iqa_dvc_reproducibility.py")
+
+    assert 'dag_id="iqa_dvc_reproducibility"' in source
+    assert 'task_id="dvc_reproducibility_check"' in source
+    assert '"with_network": False' in source
+    assert '"skip_regeneration": False' in source
+    assert '"dvc_target": "data/raw/hss-iad.dvc"' in source
+    assert "iqa-check-dvc-reproducibility" in source
+    assert "{% if params.with_network %}--with-network {% endif %}" in source
+    assert "{% if params.skip_regeneration %}--skip-regeneration {% endif %}" in source
+    assert "dvc push" not in source
+
+
 @pytest.mark.docker_contract
 def test_iqa_lifecycle_dag_has_linear_dependencies() -> None:
     """Test that iqa_lifecycle DAG has linear dependencies: dataset→train→eval→gates→mlflow→promotion→reload."""

@@ -115,6 +115,19 @@ Verifie sante API/inference, endpoints cles (`/metrics`, `/model/version`,
 `/predictions`, `/lots/summary`), MinIO, Prometheus (+ targets), Grafana et
 MLflow. Code de sortie 0 = tout vert.
 
+## 5.1 Gate DVC / data lineage
+
+Airflow expose le DAG `iqa_dvc_reproducibility` pour valider le remote DVC et la
+reproductibilite metadata. Le mode reseau MinIO doit rester explicite :
+
+```bash
+docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibility \
+  --conf '{"with_network": true}'
+```
+
+Ce DAG est un gate de reproductibilite ; il ne remplace pas les DAGs metier et ne
+declenche pas de lifecycle modele.
+
 ## 6. Acces via le reverse proxy
 
 Le service `reverse-proxy` (Nginx) expose tout derriere le port 80 :
