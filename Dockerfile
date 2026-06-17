@@ -5,6 +5,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY scripts ./scripts
+# Config-driven boundaries read these at runtime (gates, monitoring thresholds).
+COPY configs ./configs
 RUN pip install --no-cache-dir uv && uv sync --no-dev
 
 # Console scripts (iqa-api, iqa-run-ingestion, ...) are on PATH; no uv at runtime.

@@ -2070,6 +2070,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -2140,6 +2141,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'serving'", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "python-multipart", marker = "extra == 'serving'", specifier = ">=0.0.9" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "scikit-learn", marker = "extra == 'ml'", specifier = ">=1.5" },
     { name = "streamlit", marker = "extra == 'app'", specifier = ">=1.40" },
     { name = "torch", marker = "extra == 'cpu'", specifier = ">=2.1", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "iqa-mlops", extra = "cpu" } },
