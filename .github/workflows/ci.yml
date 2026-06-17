@@ -42,8 +42,23 @@ jobs:
       - name: API contracts
         run: uv run --extra cpu --extra mlops pytest tests/api tests/contracts -q
 
+      # Real "zero broken DAG" check: parse the DAGs via DagBag (import_errors is
+      # populated without a metadata DB). Excludes docker_contract tests, which
+      # require a live Airflow runtime + initialized DB (run in the Docker image).
       - name: Import Airflow DAGs (zero broken DAG)
-        run: uv run --extra cpu --extra mlops pytest tests/airflow -q
+        run: |
+          uv run --extra cpu --extra mlops python - <<'PY'
+          from airflow.models import DagBag
+
+          bag = DagBag(dag_folder="airflow/dags", include_examples=False)
+          assert not bag.import_errors, bag.import_errors
+          for dag_id in ["iqa_ingestion", "iqa_replay", "iqa_lifecycle", "iqa_monitoring"]:
+              assert dag_id in bag.dag_ids, f"missing DAG: {dag_id}"
+          print("DAGs OK:", sorted(bag.dag_ids))
+          PY
+
+      - name: Airflow DAG unit checks
+        run: uv run --extra cpu --extra mlops pytest tests/airflow -q -m "not docker_contract"
 
   docker-build:
     runs-on: ubuntu-latest
