@@ -118,7 +118,7 @@ def test_postgres_repository_keeps_oracle_and_display_feedback_separate(
             "eligible_for_train": False,
         },
     )
-    postgres_repo.save_feedback(
+    postgres_repo.save_feedback_and_close_prediction(
         prediction_id,
         {
             "prediction_id": prediction_id,
@@ -128,8 +128,8 @@ def test_postgres_repository_keeps_oracle_and_display_feedback_separate(
             "eligible_for_train": True,
             "closed_at": "2026-06-16T12:05:00+00:00",
         },
+        "2026-06-16T12:05:00+00:00",
     )
-    postgres_repo.mark_feedback_closed(prediction_id, "2026-06-16T12:05:00+00:00")
 
     assert postgres_repo.get_display_feedback(prediction_id)["feedback_source"] == "human_sophie"
     assert postgres_repo.get_feedback(prediction_id)["feedback_source"] == "oracle_gt"

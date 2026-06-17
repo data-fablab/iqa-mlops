@@ -38,6 +38,14 @@ class MetadataRepository(Protocol):
     def save_feedback(self, prediction_id: str, record: dict[str, Any]) -> None:
         """Store an oracle feedback metadata record."""
 
+    def save_feedback_and_close_prediction(
+        self,
+        prediction_id: str,
+        feedback_record: dict[str, Any],
+        closed_at: str,
+    ) -> None:
+        """Store oracle feedback and close the matching prediction atomically."""
+
     def get_feedback(self, prediction_id: str) -> dict[str, Any] | None:
         """Return an oracle feedback metadata record."""
 
@@ -86,6 +94,15 @@ class MemoryMetadataRepository:
 
     def save_feedback(self, prediction_id: str, record: dict[str, Any]) -> None:
         self._feedbacks[prediction_id] = deepcopy(record)
+
+    def save_feedback_and_close_prediction(
+        self,
+        prediction_id: str,
+        feedback_record: dict[str, Any],
+        closed_at: str,
+    ) -> None:
+        self.save_feedback(prediction_id, feedback_record)
+        self.mark_feedback_closed(prediction_id, closed_at)
 
     def get_feedback(self, prediction_id: str) -> dict[str, Any] | None:
         record = self._feedbacks.get(prediction_id)

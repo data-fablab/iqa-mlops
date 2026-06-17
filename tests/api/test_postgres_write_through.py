@@ -33,6 +33,15 @@ class RecordingRepository:
     def save_feedback(self, prediction_id: str, record: dict) -> None:
         self.feedbacks[prediction_id] = dict(record)
 
+    def save_feedback_and_close_prediction(
+        self,
+        prediction_id: str,
+        feedback_record: dict,
+        closed_at: str,
+    ) -> None:
+        self.save_feedback(prediction_id, feedback_record)
+        self.mark_feedback_closed(prediction_id, closed_at)
+
     def get_feedback(self, prediction_id: str) -> dict | None:
         return self.feedbacks.get(prediction_id)
 
@@ -57,12 +66,20 @@ class FailingRepository(RecordingRepository):
         raise RuntimeError("database unavailable")
 
 
+class FailingAdminReloadRepository(RecordingRepository):
+    def save_admin_reload_event(self, record: dict) -> None:
+        raise RuntimeError("database unavailable")
+
+
 @pytest.fixture(autouse=True)
 def _reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
     api.PREDICTION_STORE.clear()
     api.FEEDBACK_STORE.clear()
     api.DISPLAY_FEEDBACK_STORE.clear()
     api.ADMIN_RELOAD_LOG.clear()
+    api.INCIDENT_STORE.clear()
+    for metric in api.AI_SECURITY_METRICS:
+        api.AI_SECURITY_METRICS[metric] = 0
     api.METADATA_WRITE_THROUGH.reset()
     monkeypatch.delenv("IQA_METADATA_BACKEND", raising=False)
     monkeypatch.delenv("IQA_METADATA_DB_URL", raising=False)
@@ -73,6 +90,9 @@ def _reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
     api.FEEDBACK_STORE.clear()
     api.DISPLAY_FEEDBACK_STORE.clear()
     api.ADMIN_RELOAD_LOG.clear()
+    api.INCIDENT_STORE.clear()
+    for metric in api.AI_SECURITY_METRICS:
+        api.AI_SECURITY_METRICS[metric] = 0
     api.METADATA_WRITE_THROUGH.reset()
 
 
@@ -135,6 +155,21 @@ def test_postgres_write_failure_returns_503_without_memory_prediction(monkeypatc
 
     assert exc_info.value.status_code == 503
     assert api.PREDICTION_STORE == {}
+
+
+def test_admin_reload_refusal_keeps_security_audit_when_postgres_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IQA_METADATA_BACKEND", "postgres")
+    monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
+    monkeypatch.setattr(api, "create_metadata_repository", lambda: FailingAdminReloadRepository())
+
+    with pytest.raises(HTTPException) as exc_info:
+        api.reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="wrong")
+
+    assert exc_info.value.status_code == 401
+    assert api.AI_SECURITY_METRICS["reload_refused_total"] == 1
+    assert api.ADMIN_RELOAD_LOG[0]["reload_status"] == "refused"
+    assert api.ADMIN_RELOAD_LOG[0]["metadata_persisted"] is False
+    assert api.INCIDENT_STORE[0]["incident_type"] == "reload_refused"
 
 
 def test_postgres_backend_without_url_returns_503_without_memory_prediction(monkeypatch: pytest.MonkeyPatch) -> None:

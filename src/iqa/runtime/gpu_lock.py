@@ -108,7 +108,8 @@ def gpu_lock(*, owner: str, blocking: bool = False) -> Iterator[Path]:
             _lock_file(fd, blocking=blocking)
             locked = True
         except OSError as exc:
-            if exc.errno in (errno.EACCES, errno.EAGAIN):
+            busy_errnos = (errno.EACCES, errno.EAGAIN, getattr(errno, "EDEADLOCK", 36))
+            if exc.errno in busy_errnos:
                 holder = read_gpu_lock_holder(path) or "another process"
                 raise GpuBusyError(
                     f"GPU lock held by {holder}; {owner} refused to run concurrently"

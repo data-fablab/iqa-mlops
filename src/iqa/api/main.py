@@ -286,13 +286,21 @@ def _inc_security_metric(name: str) -> None:
     AI_SECURITY_METRICS[name] = AI_SECURITY_METRICS.get(name, 0) + 1
 
 
-def _persist_metadata(operation: str, writer: Callable[[MetadataRepository], None]) -> None:
+def _persist_metadata(
+    operation: str,
+    writer: Callable[[MetadataRepository], None],
+    *,
+    best_effort: bool = False,
+) -> bool:
     try:
         repository = METADATA_WRITE_THROUGH.repository()
         if repository is None:
-            return
+            return True
         writer(repository)
+        return True
     except Exception as exc:
+        if best_effort:
+            return False
         raise HTTPException(status_code=503, detail=f"PostgreSQL metadata write failed during {operation}.") from exc
 
 
@@ -670,9 +678,10 @@ def feedback(
     }
     _persist_metadata(
         "oracle_gt feedback",
-        lambda repository: (
-            repository.save_feedback(request.prediction_id, feedback_record),
-            repository.mark_feedback_closed(request.prediction_id, closed_at),
+        lambda repository: repository.save_feedback_and_close_prediction(
+            request.prediction_id,
+            feedback_record,
+            closed_at,
         ),
     )
     prediction.update(updated_prediction)
@@ -1030,11 +1039,13 @@ def _append_admin_reload_log(
         "source_of_truth": "mlflow_registry",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    _persist_metadata(
+    ADMIN_RELOAD_LOG.append(audit_event)
+    persisted = _persist_metadata(
         "admin reload",
         lambda repository: repository.save_admin_reload_event(audit_event),
+        best_effort=True,
     )
-    ADMIN_RELOAD_LOG.append(audit_event)
+    audit_event["metadata_persisted"] = persisted
     return audit_event
 
 

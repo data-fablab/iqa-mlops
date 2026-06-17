@@ -283,6 +283,60 @@ class PostgresMetadataRepository:
                 ),
             )
 
+    def save_feedback_and_close_prediction(
+        self,
+        prediction_id: str,
+        feedback_record: dict[str, Any],
+        closed_at: str,
+    ) -> None:
+        with psycopg.connect(self.db_url, row_factory=dict_row) as connection:
+            connection.execute(
+                """
+                INSERT INTO feedback_events (
+                    prediction_id, piece_event_id, scenario_id, feedback_source,
+                    eligible_for_train, closed_at, payload
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (prediction_id) DO UPDATE SET
+                    piece_event_id = EXCLUDED.piece_event_id,
+                    scenario_id = EXCLUDED.scenario_id,
+                    feedback_source = EXCLUDED.feedback_source,
+                    eligible_for_train = EXCLUDED.eligible_for_train,
+                    closed_at = EXCLUDED.closed_at,
+                    payload = EXCLUDED.payload,
+                    updated_at = now();
+                """,
+                (
+                    prediction_id,
+                    feedback_record.get("piece_event_id"),
+                    feedback_record.get("scenario_id"),
+                    feedback_record.get("feedback_source", "oracle_gt"),
+                    feedback_record.get("eligible_for_train"),
+                    _timestamp(feedback_record.get("closed_at")),
+                    _json_payload(feedback_record),
+                ),
+            )
+            row = connection.execute(
+                "SELECT payload FROM predictions WHERE prediction_id = %s;",
+                (prediction_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(prediction_id)
+            payload = deepcopy(row["payload"])
+            payload["feedback_closed"] = True
+            payload["feedback_closed_at"] = closed_at
+            connection.execute(
+                """
+                UPDATE predictions
+                SET feedback_closed = true,
+                    feedback_closed_at = %s,
+                    payload = %s,
+                    updated_at = now()
+                WHERE prediction_id = %s;
+                """,
+                (_timestamp(closed_at), _json_payload(payload), prediction_id),
+            )
+
     def get_feedback(self, prediction_id: str) -> dict[str, Any] | None:
         with psycopg.connect(self.db_url, row_factory=dict_row) as connection:
             row = connection.execute(
