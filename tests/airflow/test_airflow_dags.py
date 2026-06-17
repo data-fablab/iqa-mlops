@@ -105,15 +105,27 @@ def test_iqa_lifecycle_dag_source_declares_dependencies() -> None:
 
 
 @pytest.mark.unit
-def test_boundary_dags_pass_explicit_runtime_params_to_cli() -> None:
-    """Boundary DAGs call CLI scripts with templated Airflow params."""
+def test_ingestion_dag_runs_data_image_via_factory() -> None:
+    """Ingestion DAG (issue 07) launches the data container, not a local CLI."""
     ingestion = _read_dag_source("iqa_ingestion.py")
+
+    assert "BashOperator(" not in ingestion
+    assert "make_container_task(" in ingestion
+    # Templated params passed as argv elements (no shell quoting).
+    assert '"iqa-run-ingestion"' in ingestion
+    assert '"{{ params.manifest }}"' in ingestion
+    assert '"{{ params.source }}"' in ingestion
+    assert '"{{ params.scenario_id }}"' in ingestion
+
+
+@pytest.mark.unit
+def test_boundary_dags_pass_explicit_runtime_params_to_cli() -> None:
+    """Replay/monitoring boundary DAGs call CLI scripts with templated params.
+
+    These remain BashOperator until issues 12/13 containerise them.
+    """
     replay = _read_dag_source("iqa_replay.py")
     monitoring = _read_dag_source("iqa_monitoring.py")
-
-    assert "--manifest '{{ params.manifest }}'" in ingestion
-    assert "--source '{{ params.source }}'" in ingestion
-    assert "--scenario-id '{{ params.scenario_id }}'" in ingestion
 
     assert "--scenario-id '{{ params.scenario_id }}'" in replay
     assert "--plan '{{ params.plan }}'" in replay

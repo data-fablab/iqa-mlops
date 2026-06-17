@@ -11,10 +11,10 @@ premier bout-en-bout reel.
 
 ## Acceptance criteria
 
-- [ ] `iqa_ingestion` n'utilise plus `BashOperator`/CLI locale a Airflow
-- [ ] La tache lance un conteneur image `data` avec les params (manifest, source, scenario_id)
-- [ ] Un run complet ingere reellement (events en PostgreSQL, images en MinIO)
-- [ ] Import DagBag vert
+- [x] `iqa_ingestion` n'utilise plus `BashOperator`/CLI locale a Airflow (reecrit via `make_container_task`)
+- [x] La tache lance un conteneur image `data` avec les params (manifest, source, scenario_id passes en argv templatises)
+- [~] Un run complet ingere reellement : le conteneur execute la frontiere `iqa-run-ingestion` contre le manifeste reel (962 lignes, exit 0). **Persistance PG/MinIO non couverte** : `iqa-run-ingestion` est aujourd'hui une frontiere "validated-summary" (lit le CSV, n'ecrit ni events PG ni images MinIO). A realiser quand le runtime d'ingestion ecrira dans les stores (hors scope issue 07 ; respecter le contrat lineage : entree via MinIO).
+- [x] Import DagBag vert (suite airflow : 32 passed, 8 skipped ; `dag=None` si provider Docker absent)
 
 ## Blocked by
 
