@@ -5,6 +5,31 @@ import pytest
 from iqa.metadata.repository import MemoryMetadataRepository, metadata_db_url
 
 
+def test_piece_event_is_saved_and_returned_as_copy():
+    repo = MemoryMetadataRepository()
+
+    record = {
+        "piece_event_id": "piece_001",
+        "source_event_id": "source_piece_001",
+        "scenario_id": "demo",
+        "payload": {"manifest_id": "casting_piece_events_v001"},
+    }
+
+    repo.save_piece_event("piece_001", record)
+    record["scenario_id"] = "changed"
+
+    saved = repo.get_piece_event("piece_001")
+    assert saved is not None
+    assert saved["scenario_id"] == "demo"
+    assert saved["payload"]["manifest_id"] == "casting_piece_events_v001"
+
+    saved["payload"]["manifest_id"] = "changed"
+
+    saved_again = repo.get_piece_event("piece_001")
+    assert saved_again is not None
+    assert saved_again["payload"]["manifest_id"] == "casting_piece_events_v001"
+
+
 def test_prediction_is_saved_listed_and_returned_as_copy():
     repo = MemoryMetadataRepository()
 
