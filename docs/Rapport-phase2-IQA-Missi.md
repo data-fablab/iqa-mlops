@@ -118,7 +118,32 @@ Pages livrees :
 Tests : `tests/api/test_review_dashboard.py` (routes, divergence faux_negatif,
 absence de divergence sans feedback, agregation par lot).
 
-## 7. Etat des taches Phase 2
+## 7. CI Phase 2, smoke tests, docs deploiement et demo
+
+- **CI Phase 2** (`.github/workflows/ci.yml`) : trois jobs.
+  - `lint-and-test` : `ruff check` + `pytest -q` (extra cpu).
+  - `api-and-dag-contracts` : contrats API (`tests/api`, `tests/contracts`) et
+    import des DAGs Airflow (`tests/airflow`) avec l'extra `mlops` installe, donc
+    DAGs reellement importes (zero broken DAG) au lieu d'etre skippes.
+  - `docker-build` : build de l'image applicative (`docker build`) et validation
+    `docker compose config`. La CI ne declenche jamais d'entrainement.
+- **Smoke tests deploiement** (`deploy/smoke-test.sh`) : verifie un stack
+  demarre - sante API/inference, `/metrics`, `/model/version`, `/predictions`,
+  `/lots/summary`, MinIO, Prometheus (+ targets), Grafana, MLflow. Hotes
+  configurables par variables d'environnement, code de sortie 0/1.
+- **`docs/deploy_runbook.md`** : runbook de deploiement serveur (prerequis GPU,
+  secrets `.env`, ordre de demarrage compose CPU + overlay GPU, smoke tests,
+  reverse proxy, verrou GPU demo, mise a jour, sauvegardes, arret).
+- **`docs/retention_storage.md`** : cartographie buckets MinIO / DVC /
+  PostgreSQL (3 bases) et politiques de retention (ILM heatmaps `lots/` 30j vs
+  `curated/`, immutables, sauvegardes).
+- **Script demo Phase 2** (`scripts/demo_phase2.py`, entrypoint
+  `iqa-demo-phase2`) : parcours bout-en-bout sans dependance (urllib) - predict
+  multi-lots, feedback oracle GT (dont une divergence faux_negatif), affichage
+  vue Marc (`/lots/summary`) et vue Sophie (divergences), URLs de visualisation.
+- Cibles Makefile ajoutees : `contracts`, `dags`, `demo`, `smoke`.
+
+## 8. Etat des taches Phase 2
 
 - Verrou GPU (pas de train concurrent pendant inference demo) : fait.
 - Nginx (`/IQA`, `/api`, `/mlflow`, `/minio`, `/grafana`, `/airflow`) : deja
@@ -128,8 +153,13 @@ absence de divergence sans feedback, agregation par lot).
   modele actif) : fait.
 - Streamlit dashboard Marc : fait.
 - Streamlit review Sophie (lecture seule, divergence oracle) : fait.
+- CI Phase 2 (lint, pytest, contrats API, import DAGs, build Docker) : fait.
+- Smoke tests deploiement : fait.
+- deploy_runbook.md : fait.
+- retention_storage.md : fait.
+- Script demo Phase 2 : fait.
 
-## 8. Fichiers touches
+## 9. Fichiers touches
 
 Nouveaux :
 
@@ -144,12 +174,19 @@ deploy/grafana/provisioning/dashboards/json/iqa-overview.json
 deploy/streamlit/iqa_client.py
 deploy/streamlit/pages/1_Dashboard_Marc.py
 deploy/streamlit/pages/2_Review_Sophie.py
+deploy/smoke-test.sh
+scripts/demo_phase2.py
+docs/deploy_runbook.md
+docs/retention_storage.md
 ```
 
 Modifies :
 
 ```text
 .env.example
+.github/workflows/ci.yml
+Makefile
+pyproject.toml
 deploy/docker-compose.yml
 deploy/prometheus/prometheus.yml
 deploy/grafana/provisioning/README.md

@@ -42,6 +42,7 @@ iqa-run-ingestion = "scripts.run_ingestion:main"
 iqa-run-replay = "scripts.run_replay:main"
 iqa-run-monitoring = "scripts.run_monitoring:main"
 iqa-run-lifecycle = "scripts.run_lifecycle:main"
+iqa-demo-phase2 = "scripts.demo_phase2:main"
 
 [project.optional-dependencies]
 app = [
