@@ -129,6 +129,7 @@ class TestWriteCandidateManifest:
         assert "image_id" in content
         assert "event_id" in content
         assert "label" in content
+        assert "manifest_version" in content
 
     def test_write_manifest_includes_sample_data(self, tmp_path: Path) -> None:
         """Write manifest includes sample data."""
@@ -284,6 +285,21 @@ class TestBuildOracleValidatedFeatureAEDataset:
         assert result.sample_count == 1
         assert FEATURE_AE_GOOD_V003 in content
         assert "drift_domain_extension_v001" not in content.splitlines()[1]
+
+    def test_build_oracle_dataset_writes_manifest_version(self, tmp_path: Path) -> None:
+        output = tmp_path / "feature_ae_good_v002.csv"
+        sample = _sample(image_id="versioned", oracle_verdict="conforme", train_eligible=True)
+
+        build_oracle_validated_feature_ae_dataset(
+            [sample],
+            output,
+            FEATURE_AE_GOOD_V002,
+            manifest_version="feature_ae_good_v002_manifest_v001",
+        )
+        content = output.read_text(encoding="utf-8")
+
+        assert "manifest_version" in content.splitlines()[0]
+        assert "feature_ae_good_v002_manifest_v001" in content.splitlines()[1]
 
 
 class TestCandidateBuilderIntegration:

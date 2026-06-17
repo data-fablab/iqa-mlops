@@ -91,6 +91,8 @@ def write_candidate_manifest(
     samples: Iterable[CastingImageSample],
     output_path: Path,
     version: str | None = None,
+    *,
+    manifest_version: str | None = None,
 ) -> None:
     """Write candidate samples to a CSV manifest.
 
@@ -117,6 +119,7 @@ def write_candidate_manifest(
         "is_defective",
         "scenario_id",
         "dataset_version",
+        "manifest_version",
         "gt_mask_path",
         "oracle_verdict",
         "train_eligible",
@@ -140,6 +143,7 @@ def write_candidate_manifest(
                 "is_defective": sample.is_defective,
                 "scenario_id": sample.scenario_id,
                 "dataset_version": version or sample.dataset_version,
+                "manifest_version": manifest_version or version or sample.dataset_version,
                 "gt_mask_path": sample.gt_mask_path,
                 "oracle_verdict": sample.oracle_verdict,
                 "train_eligible": str(sample.train_eligible).lower(),
@@ -154,6 +158,7 @@ def build_candidate_dataset(
     version: str = "v001",
     *,
     roi_status: dict[str, str] | None = None,
+    manifest_version: str | None = None,
 ) -> CandidateDataset:
     """Build a versioned candidate dataset with safety filters.
 
@@ -171,7 +176,7 @@ def build_candidate_dataset(
     filtered = filter_candidate_samples(samples_list, roi_status=roi_status)
     filtered_count = initial_count - len(filtered)
 
-    write_candidate_manifest(filtered, output_manifest, version=version)
+    write_candidate_manifest(filtered, output_manifest, version=version, manifest_version=manifest_version)
 
     return CandidateDataset(
         version=version,
@@ -187,6 +192,7 @@ def build_oracle_validated_feature_ae_dataset(
     version: str,
     *,
     roi_status: dict[str, str] | None = None,
+    manifest_version: str | None = None,
 ) -> CandidateDataset:
     """Build Feature-AE good-only datasets from oracle GT conforming samples."""
 
@@ -194,7 +200,7 @@ def build_oracle_validated_feature_ae_dataset(
     base_filtered = filter_candidate_samples(samples_list, roi_status=roi_status)
     oracle_filtered = [sample for sample in base_filtered if _is_oracle_train_eligible(sample)]
 
-    write_candidate_manifest(oracle_filtered, output_manifest, version=version)
+    write_candidate_manifest(oracle_filtered, output_manifest, version=version, manifest_version=manifest_version)
 
     return CandidateDataset(
         version=version,
