@@ -20,5 +20,18 @@ if DAG is not None and BashOperator is not None:
         catchup=False,
         start_date=datetime(2026, 1, 1),
         tags=["iqa", "ingestion"],
+        params={
+            "manifest": "data/metadata/casting_piece_events.csv",
+            "source": "historical_replay",
+            "scenario_id": "raw_ingestion",
+        },
     ) as dag:
-        BashOperator(task_id="run_ingestion", bash_command="iqa-run-ingestion")
+        BashOperator(
+            task_id="run_ingestion",
+            bash_command=(
+                "iqa-run-ingestion "
+                "--manifest '{{ params.manifest }}' "
+                "--source '{{ params.source }}' "
+                "--scenario-id '{{ params.scenario_id }}'"
+            ),
+        )

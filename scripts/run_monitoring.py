@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 
 from iqa.monitoring import LifecycleSignal, evaluate_lifecycle_signal, should_trigger_lifecycle
+from scripts.airflow_contracts import print_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,9 +30,10 @@ def main() -> None:
         "service": "iqa-monitoring",
         "signal": signal.to_dict(),
         "lifecycle_decision": decision.to_dict(),
+        "status": "validated",
         "trigger_lifecycle": should_trigger_lifecycle(signal),
     }
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print_json(result)
 
 
 if __name__ == "__main__":

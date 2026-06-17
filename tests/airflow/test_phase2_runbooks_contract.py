@@ -15,6 +15,12 @@ def test_replay_runbook_documents_api_and_airflow_checks() -> None:
         "drift_domain_extension",
         "airflow dags list",
         "airflow dags list-import-errors",
+        "iqa-run-ingestion",
+        "iqa-run-replay",
+        "iqa-run-monitoring",
+        "status=validated",
+        "plan_event_count",
+        "lifecycle_decision.trigger_reason",
     ]:
         assert term in content
 

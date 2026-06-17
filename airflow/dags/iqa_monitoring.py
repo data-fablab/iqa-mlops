@@ -20,5 +20,20 @@ if DAG is not None and BashOperator is not None:
         catchup=False,
         start_date=datetime(2026, 1, 1),
         tags=["iqa", "monitoring"],
+        params={
+            "scenario_id": "production_replay_natural",
+            "conforming_validated_count": 0,
+            "drift_confirmed": False,
+            "roi_fail_rate": 0.0,
+        },
     ) as dag:
-        BashOperator(task_id="evaluate_lifecycle_conditions", bash_command="iqa-run-monitoring")
+        BashOperator(
+            task_id="evaluate_lifecycle_conditions",
+            bash_command=(
+                "iqa-run-monitoring "
+                "--scenario-id '{{ params.scenario_id }}' "
+                "--conforming-validated-count '{{ params.conforming_validated_count }}' "
+                "{% if params.drift_confirmed %}--drift-confirmed {% endif %}"
+                "--roi-fail-rate '{{ params.roi_fail_rate }}'"
+            ),
+        )

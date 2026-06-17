@@ -12,9 +12,9 @@ DAG_FOLDER = Path(__file__).parents[2] / "airflow" / "dags"
 sys.path.insert(0, str(DAG_FOLDER))
 
 
-def _read_dag_source() -> str:
-    """Read the iqa_lifecycle DAG source code."""
-    return (DAG_FOLDER / "iqa_lifecycle.py").read_text(encoding="utf-8")
+def _read_dag_source(name: str = "iqa_lifecycle.py") -> str:
+    """Read an Airflow DAG source code file."""
+    return (DAG_FOLDER / name).read_text(encoding="utf-8")
 
 
 @pytest.mark.docker_contract
@@ -102,6 +102,25 @@ def test_iqa_lifecycle_dag_source_declares_dependencies() -> None:
         or ">> task_reload" in source
         or "task_promotion >> task_reload" in source
     )
+
+
+@pytest.mark.unit
+def test_boundary_dags_pass_explicit_runtime_params_to_cli() -> None:
+    """Boundary DAGs call CLI scripts with templated Airflow params."""
+    ingestion = _read_dag_source("iqa_ingestion.py")
+    replay = _read_dag_source("iqa_replay.py")
+    monitoring = _read_dag_source("iqa_monitoring.py")
+
+    assert "--manifest '{{ params.manifest }}'" in ingestion
+    assert "--source '{{ params.source }}'" in ingestion
+    assert "--scenario-id '{{ params.scenario_id }}'" in ingestion
+
+    assert "--scenario-id '{{ params.scenario_id }}'" in replay
+    assert "--plan '{{ params.plan }}'" in replay
+
+    assert "--conforming-validated-count '{{ params.conforming_validated_count }}'" in monitoring
+    assert "{% if params.drift_confirmed %}--drift-confirmed {% endif %}" in monitoring
+    assert "--roi-fail-rate '{{ params.roi_fail_rate }}'" in monitoring
 
 
 @pytest.mark.docker_contract

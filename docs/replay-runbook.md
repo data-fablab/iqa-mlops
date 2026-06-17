@@ -48,3 +48,45 @@ docker compose --env-file .env -f deploy/docker-compose.yml exec airflow-webserv
 Les DAGs doivent etre relancables sans ecriture partielle silencieuse. Les taches
 doivent loguer les chemins de manifests, `scenario_id`, `dataset_version` et le
 statut d'acceptation ou de refus.
+
+## Commandes batch durcies
+
+Les commandes appelees par Airflow valident maintenant leurs entrees et
+retournent un JSON explicite. Elles ne modifient pas les manifests ; elles sont
+donc idempotentes et peuvent etre relancees pendant les tests serveur.
+
+```bash
+iqa-run-ingestion \
+  --manifest data/metadata/casting_piece_events.csv \
+  --source historical_replay \
+  --scenario-id raw_ingestion
+
+iqa-run-replay \
+  --scenario-id production_replay_natural \
+  --plan data/metadata/casting_flux_replay_plan_natural.csv
+
+iqa-run-monitoring \
+  --scenario-id production_replay_natural \
+  --conforming-validated-count 50 \
+  --roi-fail-rate 0.0
+
+iqa-run-monitoring \
+  --scenario-id drift_domain_extension \
+  --drift-confirmed
+```
+
+Sorties attendues :
+
+- `status=validated` si les entrees sont coherentes ;
+- `manifest.row_count` ou `plan_event_count` pour les volumes ;
+- `dataset_versions`, `source_classes` et `lot_ids` quand disponibles ;
+- `lifecycle_decision.trigger_reason` pour monitoring/lifecycle.
+
+Airflow passe ces valeurs via `params` :
+
+- `iqa_ingestion` : `manifest`, `source`, `scenario_id` ;
+- `iqa_replay` : `scenario_id`, `plan` ;
+- `iqa_monitoring` : `scenario_id`, `conforming_validated_count`,
+  `drift_confirmed`, `roi_fail_rate` ;
+- `iqa_lifecycle` : `scenario_id`, `conforming_validated_count`,
+  `drift_confirmed`, `roi_fail_rate`, `target_stage`.
