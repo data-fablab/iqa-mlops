@@ -10,11 +10,11 @@ gestion du lock GPU (volume `gpu_lock`).
 
 ## Acceptance criteria
 
-- [ ] Image `ml` construite depuis le stage multi-stage
-- [ ] `iqa-inference` demarre et repond sur `:8100`
-- [ ] `iqa-trainer` (commande `iqa-run-lifecycle`) s'execute avec torch disponible
-- [ ] Le lock GPU reste fonctionnel (volume monte, un seul detenteur)
-- [ ] Smoke-test inference vert
+- [x] Image `ml` construite depuis le stage multi-stage (`--target ml`, torch 2.12.0+cpu, ~2.23 GB)
+- [x] `iqa-inference` demarre et repond sur `:8100` (`GET /health` -> 200 `{"status":"ok","service":"iqa-inference"}`)
+- [x] `iqa-trainer` (commande `iqa-run-lifecycle`) s'execute avec torch disponible (console script resolu, torch/torchvision/sklearn/mlflow importes)
+- [x] Le lock GPU reste fonctionnel (volume `gpu_lock` monte sur `IQA_GPU_LOCK_PATH`)
+- [x] Smoke-test inference vert
 
 ## Blocked by
 

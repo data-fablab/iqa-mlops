@@ -1,0 +1,39 @@
+# Dev overlay : code monte en bind-mount + hot-reload, build local.
+# Usage : docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# PYTHONPATH=/app/src dans l'image (voir Dockerfile) : monter ../src par-dessus
+# /app/src suffit a refleter le code live ; uvicorn --reload surveille /app.
+services:
+  iqa-api:
+    command: iqa-api --reload
+    volumes:
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+
+  iqa-inference:
+    command: iqa-inference --reload
+    volumes:
+      - gpu_lock:/var/run/iqa-gpu
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+
+  iqa-ingestion:
+    volumes:
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+
+  iqa-replay:
+    volumes:
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+
+  iqa-trainer:
+    volumes:
+      - gpu_lock:/var/run/iqa-gpu
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+
+  iqa-monitoring:
+    volumes:
+      - ../src:/app/src
+      - ../scripts:/app/scripts

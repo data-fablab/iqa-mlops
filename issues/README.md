@@ -25,6 +25,7 @@ Tranches verticales (tracer bullets). Une seule HITL (00) ; le reste est AFK.
 | 14 | CI build + push images Docker Hub (matrix) | AFK | 00, 03, 04 |
 | 15 | Compose + DAGs referencent les images du registre par tag | AFK | 14 |
 | 16 | Sensor de declenchement evenementiel du lifecycle | AFK | 11 |
+| 17 | Overlays Compose dev / prod | AFK | 02 |
 
 ## Chemin critique
 
@@ -36,6 +37,17 @@ Les images (03/04) et la CI (14 -> 15) se parallelisent ; 00 (HITL) doit etre tr
 
 ## Lots de travail
 
-- Microservices/images : 01, 02, 03, 04
+- Microservices/images : 01, 02, 03, 04, 17
 - Orchestration conteneurisee : 05, 06, 07, 08, 09, 10, 11, 12, 13
 - Automatisation / registre : 00, 14, 15, 16
+
+## Contrats transverses
+
+A respecter par toutes les tranches DAG (07-13) :
+
+- **Data lineage via stores, pas via XCom.** Chaque tache conteneur lit/ecrit ses
+  donnees dans MinIO / PostgreSQL / MLflow. XCom ne transporte que des *references*
+  (URI MinIO, `run_id` MLflow, `event_id`). C'est ce qui garde le lineage lisible et
+  modulable : on remplace un conteneur sans casser les autres. Option future
+  hors-scope : OpenLineage.
+- **dev/prod par overlays Compose** (issue 17), pas un Dockerfile par service.

@@ -9,10 +9,10 @@ et la cabler pour `iqa-ingestion`, `iqa-replay`, `iqa-monitoring`.
 
 ## Acceptance criteria
 
-- [ ] Image `data` construite depuis le stage multi-stage, sans torch
-- [ ] `iqa-run-ingestion`, `iqa-run-replay`, `iqa-run-monitoring` s'executent dans l'image data
-- [ ] Acces MinIO/PostgreSQL fonctionnel depuis l'image data
-- [ ] Profils `batch` du compose pointent vers l'image data
+- [x] Image `data` construite depuis le stage multi-stage, sans torch (`--target data`, ~540 MB, `torch` absent)
+- [x] `iqa-run-ingestion`, `iqa-run-replay`, `iqa-run-monitoring` s'executent dans l'image data (console scripts resolus, argparse OK)
+- [x] Acces MinIO/PostgreSQL : `pandas`/`boto3`/`psycopg` importes ; bout-en-bout couvert par `deploy/smoke-test.sh` sur la stack compose
+- [x] Profils `batch` du compose pointent vers l'image data (`target: data` dans `docker-compose.yml`)
 
 ## Blocked by
 
