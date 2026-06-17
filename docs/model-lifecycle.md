@@ -20,6 +20,29 @@ dataset -> train -> eval -> gates -> mlflow -> save previous prod -> alias prod 
 
 Le mode production necessite `target_stage="prod"` dans les parametres Airflow.
 
+## Declencheurs data-event
+
+Le lifecycle Feature-AE est declenche par evenement donnees. La CI ne declenche
+jamais un entrainement modele ; elle verifie uniquement le code, les contrats et
+la reproductibilite.
+
+Regles Phase 2 operationnelles :
+
+| Scenario | Declencheur | Dataset candidat |
+| --- | --- | --- |
+| `production_replay_natural` | au moins 50 nouveaux `piece_event` conformes valides par `oracle_gt` | `feature_ae_good_v002` |
+| `drift_domain_extension` | `drift_confirmed=true` | `feature_ae_good_v003` |
+
+Ces regles materialisent la decision projet historique : reentrainement apres
+volume suffisant de conformes valides, lot complet ou drift confirme. Le seuil
+retenu pour le replay naturel est 50, dans la plage documentee de 30 a 50
+nouvelles pieces conformes validees.
+
+Le batch monitoring expose une decision structuree (`lifecycle_decision`) avec
+la raison du declenchement et le `candidate_dataset_version`. Les lots Airflow et
+MLflow consommeront cette decision ; ce lot ne lance pas encore de training
+lourd automatiquement.
+
 ## Taches
 
 ### `task_dataset`

@@ -90,6 +90,12 @@ Les manifests materialises sont produits sous `data/model_datasets/` par
 `iqa-build-feature-ae-datasets` et portent `dataset_version` ainsi que
 `manifest_version`.
 
+Leur consommation par le lifecycle reste declenchee par evenement donnees :
+`feature_ae_good_v002` devient candidat quand `production_replay_natural`
+atteint 50 nouveaux `piece_event` conformes valides par `oracle_gt` ;
+`feature_ae_good_v003` devient candidat quand le scenario
+`drift_domain_extension` porte `drift_confirmed=true`.
+
 ## Validation set v001
 
 `data/validation/validation_set_v001.csv` est fige au niveau `piece_event`.
