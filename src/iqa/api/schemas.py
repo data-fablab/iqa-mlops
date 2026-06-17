@@ -265,8 +265,12 @@ class ReplayRunResponse(IQABaseModel):
     scenario_id: str
     cursor: int = 0
     total_events: int
+    lot_count: int = 0
+    lot_ids: list[str] = Field(default_factory=list)
+    source_classes: list[str] = Field(default_factory=list)
     finished: bool = False
     created_at: str
+    updated_at: str | None = None
 
 
 class ReplayNextResponse(ReplayRunResponse):

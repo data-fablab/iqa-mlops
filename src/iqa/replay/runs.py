@@ -19,6 +19,11 @@ REPLAY_CONTRACTS_BY_SCENARIO = {
     for contract in MANIFEST_CONTRACTS.values()
     if contract.kind == "replay" and contract.scenario_id is not None
 }
+DRIFT_SOURCE_CLASS_ORDER = {
+    "Casting_class1": 1,
+    "Casting_class2": 2,
+    "Casting_class3": 3,
+}
 
 
 def _int_value(value: str | None) -> int:
@@ -43,13 +48,7 @@ class FileBackedReplayRepository:
         with path.open(newline="", encoding="utf-8") as file:
             events = [dict(row) for row in csv.DictReader(file) if row.get("scenario_id") == scenario_id]
 
-        events.sort(
-            key=lambda row: (
-                _int_value(row.get("sequence_number")),
-                row.get("scheduled_at") or "",
-                row.get("piece_event_id") or "",
-            )
-        )
+        events.sort(key=lambda row: _event_sort_key(scenario_id, row))
         return events
 
 
@@ -60,10 +59,19 @@ class ReplayRunState:
     events: list[dict[str, Any]]
     cursor: int = 0
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str | None = None
 
     @property
     def total_events(self) -> int:
         return len(self.events)
+
+    @property
+    def lot_ids(self) -> list[str]:
+        return _stable_unique(row.get("lot_id") for row in self.events)
+
+    @property
+    def source_classes(self) -> list[str]:
+        return _stable_unique(row.get("source_class") for row in self.events)
 
 
 class ReplayRunStore:
@@ -98,11 +106,16 @@ class ReplayRunStore:
 
         event = deepcopy(state.events[state.cursor])
         state.cursor += 1
+        state.updated_at = datetime.now(timezone.utc).isoformat()
+        event["replay_run_id"] = state.replay_run_id
+        event["replay_position"] = str(state.cursor)
+        event["served_at"] = state.updated_at
         return self._next_response(state, event=event)
 
     def reset_run(self, replay_run_id: str) -> dict[str, Any]:
         state = self._get_run(replay_run_id)
         state.cursor = 0
+        state.updated_at = datetime.now(timezone.utc).isoformat()
         return self._run_response(state)
 
     def _get_run(self, replay_run_id: str) -> ReplayRunState:
@@ -117,7 +130,11 @@ class ReplayRunStore:
             "scenario_id": state.scenario_id,
             "cursor": state.cursor,
             "total_events": state.total_events,
+            "lot_count": len(state.lot_ids),
+            "lot_ids": state.lot_ids,
+            "source_classes": state.source_classes,
             "created_at": state.created_at,
+            "updated_at": state.updated_at,
             "finished": state.cursor >= state.total_events,
         }
 
@@ -129,7 +146,34 @@ class ReplayRunStore:
         }
 
 
+def _event_sort_key(scenario_id: str, row: dict[str, Any]) -> tuple[Any, ...]:
+    base = (
+        _int_value(row.get("sequence_number")),
+        row.get("scheduled_at") or "",
+        row.get("piece_event_id") or "",
+    )
+    if scenario_id != "drift_domain_extension":
+        return base
+    return (
+        DRIFT_SOURCE_CLASS_ORDER.get(row.get("source_class") or "", 99),
+        row.get("label") != "good",
+        *base,
+    )
+
+
+def _stable_unique(values: Any) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
 __all__ = [
+    "DRIFT_SOURCE_CLASS_ORDER",
     "FileBackedReplayRepository",
     "REPLAY_CONTRACTS_BY_SCENARIO",
     "ReplayRunStore",

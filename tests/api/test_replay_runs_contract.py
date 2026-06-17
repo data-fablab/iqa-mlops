@@ -43,6 +43,9 @@ def test_replay_runs_with_same_inputs_produce_same_order() -> None:
 
     assert first["replay_run_id"] != second["replay_run_id"]
     assert first["total_events"] == second["total_events"]
+    assert first["lot_count"] > 0
+    assert first["lot_ids"][0].startswith("IQA-")
+    assert first["source_classes"] == ["Casting_class1", "Casting_class2", "Casting_class3"]
     assert _event_ids(first["replay_run_id"], 5) == _event_ids(second["replay_run_id"], 5)
 
 
@@ -71,6 +74,49 @@ def test_drift_replay_run_is_supported() -> None:
 
     assert response["event"]["scenario_id"] == "drift_domain_extension"
     assert response["event"]["dataset_version"] == "drift_domain_extension_v001"
+    assert response["event"]["replay_run_id"] == run["replay_run_id"]
+    assert response["event"]["replay_position"] == "1"
+    assert response["event"]["served_at"]
+
+
+def test_drift_replay_scheduler_serves_class1_then_class2_then_class3() -> None:
+    run = create_replay_run(ReplayRunRequest(scenario_id="drift_domain_extension"))
+    seen_classes: list[str] = []
+    previous_class = ""
+
+    for _ in range(run["total_events"]):
+        event = next_replay_event(run["replay_run_id"])["event"]
+        assert event is not None
+        source_class = event["source_class"]
+        if source_class != previous_class:
+            seen_classes.append(source_class)
+            previous_class = source_class
+
+    assert seen_classes == ["Casting_class1", "Casting_class2", "Casting_class3"]
+
+
+def test_replay_run_events_keep_lot_and_runtime_timestamps() -> None:
+    run = create_replay_run(ReplayRunRequest(scenario_id="production_replay_natural"))
+    response = next_replay_event(run["replay_run_id"])
+    event = response["event"]
+
+    assert event is not None
+    assert event["lot_id"] in run["lot_ids"]
+    assert event["source_class"] in run["source_classes"]
+    assert event["scheduled_at"]
+    assert event["event_time"]
+    assert response["updated_at"] == event["served_at"]
+
+
+def test_replay_run_never_mixes_scenarios() -> None:
+    natural = create_replay_run(ReplayRunRequest(scenario_id="production_replay_natural"))
+    drift = create_replay_run(ReplayRunRequest(scenario_id="drift_domain_extension"))
+
+    for run in [natural, drift]:
+        for _ in range(3):
+            event = next_replay_event(run["replay_run_id"])["event"]
+            assert event is not None
+            assert event["scenario_id"] == run["scenario_id"]
 
 
 def test_replay_run_unknown_ids_return_structured_404() -> None:
