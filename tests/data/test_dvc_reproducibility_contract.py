@@ -5,6 +5,8 @@ from pathlib import Path
 
 DVC_YAML = Path("dvc.yaml")
 DVC_VERSIONING_DOC = Path("docs/dvc-versioning.md")
+DVC_REPRO_SCRIPT = Path("scripts/check_dvc_reproducibility.py")
+PYPROJECT = Path("pyproject.toml")
 
 
 def test_dvc_yaml_declares_phase2_data_stages() -> None:
@@ -28,6 +30,20 @@ def test_dvc_versioning_doc_links_remote_and_contracts() -> None:
     content = DVC_VERSIONING_DOC.read_text(encoding="utf-8")
 
     assert "iqa-minio" in content
-    assert "dvc pull" in content
-    assert "dvc repro" in content
+    assert "uv run --extra cpu --extra data dvc pull" in content
+    assert "uv run --extra cpu --extra data dvc repro" in content
+    assert "iqa-check-dvc-reproducibility --with-network" in content
     assert "docs/data-contracts.md" in content
+
+
+def test_dvc_reproducibility_script_checks_minio_and_manifests() -> None:
+    content = DVC_REPRO_SCRIPT.read_text(encoding="utf-8")
+    pyproject = PYPROJECT.read_text(encoding="utf-8")
+
+    assert 'EXPECTED_REMOTE_NAME = "iqa-minio"' in content
+    assert 'EXPECTED_REMOTE_URL = "s3://iqa-dvc"' in content
+    assert '["dvc", "pull", DVC_SOURCE_TARGET]' in content
+    assert '["dvc", "push", DVC_SOURCE_TARGET]' in content
+    assert "scripts/finalize_data_phase1.py" in content
+    assert "git\", \"diff\", \"--quiet\"" in content
+    assert "iqa-check-dvc-reproducibility" in pyproject
