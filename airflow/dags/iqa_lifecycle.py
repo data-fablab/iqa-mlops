@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover
 
 try:
     from iqa.dags.lifecycle_tasks import (
+        task_lifecycle_decision,
         task_dataset,
         task_eval,
         task_gates,
@@ -30,6 +31,7 @@ except ImportError:  # pragma: no cover
         return {"status": "placeholder", "reason": "iqa package not available in airflow image"}
 
     task_dataset = _placeholder_task
+    task_lifecycle_decision = _placeholder_task
     task_train = _placeholder_task
     task_eval = _placeholder_task
     task_gates = _placeholder_task
@@ -47,6 +49,7 @@ if (
     and PythonOperator is not None
     and all(
         [
+            task_lifecycle_decision,
             task_dataset,
             task_train,
             task_eval,
@@ -66,8 +69,18 @@ if (
         params={
             "regime": "natural",
             "scenario_id": "production_replay_natural",
+            "conforming_validated_count": 0,
+            "drift_confirmed": False,
+            "roi_fail_rate": 0.0,
+            "target_stage": "test",
         },
     ) as dag:
+        op_lifecycle_decision = PythonOperator(
+            task_id="lifecycle_decision",
+            python_callable=task_lifecycle_decision,
+            doc="Evaluate data-event trigger for Feature-AE lifecycle",
+        )
+
         op_dataset = PythonOperator(
             task_id="dataset",
             python_callable=task_dataset,
@@ -112,5 +125,5 @@ if (
             doc="Reload model in inference service",
         )
 
-        # Linear dependencies: dataset → train → eval → gates → mlflow → promotion → reload
-        op_dataset >> op_train >> op_eval >> op_gates >> op_mlflow >> op_promotion >> op_reload
+        # Linear dependencies: lifecycle_decision -> dataset -> train -> eval -> gates -> mlflow -> promotion -> reload
+        op_lifecycle_decision >> op_dataset >> op_train >> op_eval >> op_gates >> op_mlflow >> op_promotion >> op_reload

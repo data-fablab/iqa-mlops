@@ -41,6 +41,7 @@ class TestMLflowRunLoggerBasic:
             learning_rate=5e-5,
             scenario_id="test_scenario",
             dataset_version="v1",
+            manifest_version="v1_manifest_v001",
         )
 
         logger = MLflowRunLogger(
@@ -124,6 +125,7 @@ class TestMLflowRunLoggerBasic:
             git_commit="abc123def456",
             dataset_version="dataset_v2",
             scenario_id="test_scenario",
+            manifest_version="dataset_v2_manifest_v001",
         )
 
         run_id = logger.end_run()
@@ -144,6 +146,7 @@ class TestMLflowRunLoggerIntegration:
             learning_rate=5e-5,
             scenario_id="production_replay_natural",
             dataset_version="dataset_v1",
+            manifest_version="dataset_v1_manifest_v001",
         )
 
         logger = MLflowRunLogger(
@@ -158,6 +161,7 @@ class TestMLflowRunLoggerIntegration:
             git_commit="abc123",
             dataset_version=config.dataset_version,
             scenario_id=config.scenario_id,
+            manifest_version=config.manifest_version,
         )
 
         # Log metrics for each epoch
@@ -210,6 +214,7 @@ class TestMLflowRunLoggerVerification:
             learning_rate=5e-5,
             scenario_id="test_scenario",
             dataset_version="v1",
+            manifest_version="v1_manifest_v001",
         )
 
         logger = MLflowRunLogger(
@@ -224,6 +229,7 @@ class TestMLflowRunLoggerVerification:
             git_commit="abc123",
             dataset_version="v1",
             scenario_id="test_scenario",
+            manifest_version="v1_manifest_v001",
         )
         run_id = logger.end_run()
 
@@ -235,6 +241,7 @@ class TestMLflowRunLoggerVerification:
         assert run.data.params["batch_size"] == "16"
         assert run.data.params["epochs"] == "10"
         assert run.data.params["scenario_id"] == "test_scenario"
+        assert run.data.params["manifest_version"] == "v1_manifest_v001"
 
         # Check metrics
         assert "train_loss" in run.data.metrics
@@ -243,6 +250,7 @@ class TestMLflowRunLoggerVerification:
         # Check tags
         assert run.data.tags["git_commit"] == "abc123"
         assert run.data.tags["dataset_version"] == "v1"
+        assert run.data.tags["manifest_version"] == "v1_manifest_v001"
         assert run.data.tags["scenario_id"] == "test_scenario"
 
 
@@ -260,6 +268,7 @@ class TestAirflowWrapper:
             learning_rate=5e-5,
             scenario_id="test_scenario",
             dataset_version="v1",
+            manifest_version="v1_manifest_v001",
             run_name="test_wrapper",
         )
 

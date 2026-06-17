@@ -9,13 +9,13 @@ pas etre presente comme une promotion production automatique.
 Par defaut :
 
 ```text
-dataset -> train -> eval -> gates -> mlflow -> alias test -> reload skipped
+lifecycle_decision -> dataset -> train -> eval -> gates -> mlflow -> alias test -> reload skipped
 ```
 
 En mode production explicite :
 
 ```text
-dataset -> train -> eval -> gates -> mlflow -> save previous prod -> alias prod -> reload prod
+lifecycle_decision -> dataset -> train -> eval -> gates -> mlflow -> save previous prod -> alias prod -> reload prod
 ```
 
 Le mode production necessite `target_stage="prod"` dans les parametres Airflow.
@@ -39,11 +39,29 @@ retenu pour le replay naturel est 50, dans la plage documentee de 30 a 50
 nouvelles pieces conformes validees.
 
 Le batch monitoring expose une decision structuree (`lifecycle_decision`) avec
-la raison du declenchement et le `candidate_dataset_version`. Les lots Airflow et
-MLflow consommeront cette decision ; ce lot ne lance pas encore de training
-lourd automatiquement.
+la raison du declenchement et le `candidate_dataset_version`. Airflow consomme
+cette decision ; le mode par defaut reste `target_stage=test` et ne promeut pas
+automatiquement en production.
+
+Le DAG `iqa_lifecycle` consomme cette meme decision en premiere tache. Si
+`trigger_lifecycle=false`, les taches aval retournent un statut `skipped` et ne
+lancent pas de training. Si `trigger_lifecycle=true`, le `candidate_dataset_version`
+alimente le `dataset_version` candidat, et `manifest_version` est propage vers
+les parametres et tags MLflow.
 
 ## Taches
+
+### `task_lifecycle_decision`
+
+Evalue les parametres data-event du run Airflow :
+
+- `scenario_id`
+- `conforming_validated_count`
+- `drift_confirmed`
+- `roi_fail_rate`
+
+Elle retourne `trigger_lifecycle`, `trigger_reason` et
+`candidate_dataset_version`.
 
 ### `task_dataset`
 
@@ -102,7 +120,11 @@ retourne un statut `skipped` avec une raison explicite.
 | Parametre | Defaut | Role |
 |---|---|---|
 | `scenario_id` | `production_replay_natural` | Registered model cible |
+| `conforming_validated_count` | `0` | Nombre de conformes valides `oracle_gt` pour le replay naturel |
+| `drift_confirmed` | `false` | Declencheur explicite du scenario drift |
+| `roi_fail_rate` | `0.0` | Signal monitoring conserve pour audit |
 | `target_stage` | `test` | Alias MLflow cible |
+| `manifest_version` | derivee de `candidate_version` | Version du manifest candidat tracee dans MLflow |
 | `roi_predictions_dirs` | vide | Index de predictions ROI a appliquer au dataset |
 | `gates_config_path` | `configs/promotion_gates.yaml` | Config des gates |
 

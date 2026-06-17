@@ -68,6 +68,7 @@ class FeatureAETrainingConfig:
     save_best: bool = True
     scenario_id: str = ""
     dataset_version: str = ""
+    manifest_version: str = ""
     candidate_version: str = ""
     roi_model_version: str = ""
     feature_ae_version: str = ""
