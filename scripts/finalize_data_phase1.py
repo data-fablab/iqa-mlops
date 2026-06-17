@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from iqa.metadata.contracts import apply_metadata_contract, contract_for_key
+
 
 EVENTS_PATH = Path("data/metadata/casting_piece_events.csv")
 BOOTSTRAP_PATH = Path("data/metadata/feature_ae_bootstrap_events.csv")
@@ -81,21 +83,16 @@ def build_calibration_set(
     return calibration
 
 
-def update_replay_plan(path: Path, *, excluded_source_event_ids: set[str]) -> pd.DataFrame:
+def update_replay_plan(path: Path, *, contract_key: str, excluded_source_event_ids: set[str]) -> pd.DataFrame:
     plan = pd.read_csv(path)
     plan = plan[~plan["source_event_id"].isin(excluded_source_event_ids)].copy()
     plan["sequence_number"] = range(1, len(plan) + 1)
     plan["event_time"] = plan["scheduled_at"]
     plan["recorded_at"] = RECORDED_AT
     plan["is_simulated"] = True
-    plan["dataset_version"] = plan["scenario_id"].map(
-        {
-            "production_replay_natural": "production_replay_natural_v001",
-            "drift_domain_extension": "drift_domain_extension_v001",
-        }
-    )
     plan["roi_model_version"] = ROI_MODEL_VERSION
     plan["feature_ae_version"] = FEATURE_AE_VERSION
+    plan = apply_metadata_contract(plan, contract_for_key(contract_key))
     plan.to_csv(path, index=False)
     return plan
 
@@ -145,15 +142,25 @@ def main() -> None:
     args = parse_args()
     events = pd.read_csv(args.events)
     bootstrap = pd.read_csv(args.bootstrap)
+
+    events = apply_metadata_contract(events, contract_for_key("source_events"))
+    bootstrap = apply_metadata_contract(bootstrap, contract_for_key("bootstrap_events"))
+
     validation = build_validation_set(events)
     calibration = build_calibration_set(
         events,
         bootstrap_event_ids=set(bootstrap["event_id"]),
         validation_event_ids=set(validation["event_id"]),
     )
+    validation = apply_metadata_contract(validation, contract_for_key("validation_set"))
+    calibration = apply_metadata_contract(calibration, contract_for_key("calibration_set"))
 
+    args.events.parent.mkdir(parents=True, exist_ok=True)
+    args.bootstrap.parent.mkdir(parents=True, exist_ok=True)
     args.validation_output.parent.mkdir(parents=True, exist_ok=True)
     args.calibration_output.parent.mkdir(parents=True, exist_ok=True)
+    events.to_csv(args.events, index=False)
+    bootstrap.to_csv(args.bootstrap, index=False)
     validation.to_csv(args.validation_output, index=False)
     calibration.to_csv(args.calibration_output, index=False)
 
@@ -161,8 +168,16 @@ def main() -> None:
     validation_ids = set(validation["event_id"])
     calibration_ids = set(calibration["event_id"])
     excluded_ids = bootstrap_ids | validation_ids | calibration_ids
-    natural = update_replay_plan(args.natural_replay, excluded_source_event_ids=excluded_ids)
-    drift = update_replay_plan(args.drift_replay, excluded_source_event_ids=excluded_ids)
+    natural = update_replay_plan(
+        args.natural_replay,
+        contract_key="natural_replay",
+        excluded_source_event_ids=excluded_ids,
+    )
+    drift = update_replay_plan(
+        args.drift_replay,
+        contract_key="drift_replay",
+        excluded_source_event_ids=excluded_ids,
+    )
     replay_ids = set(natural["source_event_id"]) | set(drift["source_event_id"])
 
     overlaps = {

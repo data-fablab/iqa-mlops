@@ -11,8 +11,20 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 
+METADATA_BACKEND_ENV = "IQA_METADATA_BACKEND"
+METADATA_DB_URL_ENV = "IQA_METADATA_DB_URL"
+MEMORY_BACKEND = "memory"
+POSTGRES_BACKEND = "postgres"
+
+
 class MetadataRepository(Protocol):
     """Protocol for IQA metadata persistence."""
+
+    def save_piece_event(self, piece_event_id: str, record: dict[str, Any]) -> None:
+        """Store a piece event metadata record."""
+
+    def get_piece_event(self, piece_event_id: str) -> dict[str, Any] | None:
+        """Return a piece event metadata record."""
 
     def save_prediction(self, prediction_id: str, record: dict[str, Any]) -> None:
         """Store a prediction metadata record."""
@@ -49,10 +61,18 @@ class MemoryMetadataRepository:
     """In memory implementation used by the API and tests before PostgreSQL."""
 
     def __init__(self) -> None:
+        self._piece_events: dict[str, dict[str, Any]] = {}
         self._predictions: dict[str, dict[str, Any]] = {}
         self._feedbacks: dict[str, dict[str, Any]] = {}
         self._display_feedbacks: dict[str, dict[str, Any]] = {}
         self._admin_reload_events: list[dict[str, Any]] = []
+
+    def save_piece_event(self, piece_event_id: str, record: dict[str, Any]) -> None:
+        self._piece_events[piece_event_id] = deepcopy(record)
+
+    def get_piece_event(self, piece_event_id: str) -> dict[str, Any] | None:
+        record = self._piece_events.get(piece_event_id)
+        return deepcopy(record) if record is not None else None
 
     def save_prediction(self, prediction_id: str, record: dict[str, Any]) -> None:
         self._predictions[prediction_id] = deepcopy(record)
@@ -93,4 +113,30 @@ class MemoryMetadataRepository:
 def metadata_db_url() -> str | None:
     """Return the optional IQA metadata database URL."""
 
-    return os.getenv("IQA_METADATA_DB_URL")
+    return os.getenv(METADATA_DB_URL_ENV)
+
+
+def metadata_backend() -> str:
+    """Return the configured metadata backend name."""
+
+    return os.getenv(METADATA_BACKEND_ENV, MEMORY_BACKEND).strip().lower()
+
+
+def create_metadata_repository() -> MetadataRepository:
+    """Create the configured metadata repository.
+
+    The API still uses its in-memory stores directly in this lot. This factory is
+    the explicit opt-in boundary for later PostgreSQL integration.
+    """
+
+    backend = metadata_backend()
+    if backend == MEMORY_BACKEND:
+        return MemoryMetadataRepository()
+    if backend == POSTGRES_BACKEND:
+        db_url = metadata_db_url()
+        if not db_url:
+            raise RuntimeError(f"{METADATA_DB_URL_ENV} is required when {METADATA_BACKEND_ENV}=postgres.")
+        from iqa.metadata.postgres import PostgresMetadataRepository
+
+        return PostgresMetadataRepository(db_url)
+    raise RuntimeError(f"Unsupported {METADATA_BACKEND_ENV}: {backend!r}. Expected 'memory' or 'postgres'.")
