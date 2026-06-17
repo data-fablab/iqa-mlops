@@ -2,7 +2,8 @@ services:
   iqa-api:
     build:
       context: ..
-    command: uv run --extra cpu iqa-api
+      target: serving
+    command: iqa-api
     env_file: ../.env
     environment:
       IQA_INFERENCE_URL: http://iqa-inference:8100
@@ -12,7 +13,8 @@ services:
   iqa-inference:
     build:
       context: ..
-    command: uv run --extra cpu iqa-inference
+      target: ml
+    command: iqa-inference
     env_file: ../.env
     environment:
       IQA_GPU_LOCK_PATH: /var/run/iqa-gpu/gpu.lock
@@ -36,21 +38,24 @@ services:
   iqa-ingestion:
     build:
       context: ..
-    command: uv run --extra cpu iqa-run-ingestion
+      target: data
+    command: iqa-run-ingestion
     env_file: ../.env
     profiles: ["batch"]
 
   iqa-replay:
     build:
       context: ..
-    command: uv run --extra cpu iqa-run-replay
+      target: data
+    command: iqa-run-replay
     env_file: ../.env
     profiles: ["batch"]
 
   iqa-trainer:
     build:
       context: ..
-    command: uv run --extra cpu iqa-run-lifecycle
+      target: ml
+    command: iqa-run-lifecycle
     env_file: ../.env
     environment:
       IQA_GPU_LOCK_PATH: /var/run/iqa-gpu/gpu.lock
@@ -61,7 +66,8 @@ services:
   iqa-monitoring:
     build:
       context: ..
-    command: uv run --extra cpu iqa-run-monitoring
+      target: data
+    command: iqa-run-monitoring
     env_file: ../.env
     profiles: ["batch"]
 

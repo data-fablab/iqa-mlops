@@ -4,20 +4,9 @@ version = "0.1.0"
 description = "Industrial Quality Assistant MLOps MVP"
 requires-python = ">=3.12"
 dependencies = [
-    "boto3>=1.34",
-    "fastapi>=0.115",
-    "mlflow>=2.17",
     "numpy>=1.26",
-    "pandas>=2.2",
-    "pillow>=10.0",
-    "prometheus-client>=0.20",
-    "psycopg[binary]>=3.2",
     "pydantic>=2.8",
-    "python-multipart>=0.0.9",
-    "scikit-learn>=1.5",
-    "torch>=2.1",
-    "torchvision>=0.16",
-    "uvicorn[standard]>=0.30",
+    "pillow>=10.0",
 ]
 
 [project.scripts]
@@ -45,10 +34,27 @@ iqa-run-lifecycle = "scripts.run_lifecycle:main"
 iqa-demo-phase2 = "scripts.demo_phase2:main"
 
 [project.optional-dependencies]
+serving = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "psycopg[binary]>=3.2",
+    "boto3>=1.34",
+    "prometheus-client>=0.20",
+]
+ml = [
+    "scikit-learn>=1.5",
+    "mlflow>=2.17",
+]
+data = [
+    "pandas>=2.2",
+    "psycopg[binary]>=3.2",
+    "boto3>=1.34",
+]
 app = [
     "streamlit>=1.40",
 ]
-data = [
+dvc = [
     "dvc[s3]>=3.55",
 ]
 mlops = [
@@ -83,17 +89,28 @@ markers = [
 ]
 
 # ---------------------------------------------------------------------------
-# uv - CPU/CUDA selection for torch / torchvision
+# uv - extras by role + CPU/CUDA selection for torch / torchvision
 #
-# Usage:
-#   uv sync --extra cu128       # RTX 3060 / CUDA 12.8 capable machines
-#   uv sync --extra cu124       # CUDA 12.4 machines
-#   uv sync --extra cu121       # CUDA 12.1 machines
-#   uv sync --extra cpu         # local CPU-only or CI
-#   uv run --extra cpu pytest -q
+# Role extras (ADR 0007 amendement):
+#   --extra serving              # iqa-api (no torch)
+#   --extra ml                   # scikit-learn, mlflow (no torch alone)
+#   --extra data                 # ingestion, replay, monitoring (no torch)
 #
-# Public commands are exposed through [project.scripts], for example:
-#   uv run --extra cpu iqa-validate-mvp --help
+# Torch index selectors (mutually exclusive):
+#   --extra cpu                  # CPU-only torch
+#   --extra cu128                # CUDA 12.8
+#   --extra cu124                # CUDA 12.4
+#   --extra cu121                # CUDA 12.1
+#
+# Docker images:
+#   iqa-api:       --extra serving
+#   iqa-inference: --extra serving --extra ml --extra cpu  (or cu*)
+#   iqa-trainer:   --extra ml --extra cpu  (or cu*)
+#   iqa-data:      --extra data
+#
+# Local dev (all roles):
+#   uv sync --extra serving --extra ml --extra data --extra cpu
+#   uv run --extra serving --extra ml --extra data --extra cpu pytest -q
 # ---------------------------------------------------------------------------
 [tool.uv]
 conflicts = [[
