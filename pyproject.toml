@@ -33,6 +33,10 @@ iqa-run-monitoring = "scripts.run_monitoring:main"
 iqa-run-lifecycle = "scripts.run_lifecycle:main"
 iqa-run-lifecycle-decision = "scripts.run_lifecycle_decision:main"
 iqa-run-dataset = "scripts.run_dataset:main"
+iqa-run-train = "scripts.run_train:main"
+iqa-run-eval = "scripts.run_eval:main"
+iqa-run-gates = "scripts.run_gates:main"
+iqa-run-mlflow = "scripts.run_mlflow:main"
 iqa-demo-phase2 = "scripts.demo_phase2:main"
 
 [project.optional-dependencies]

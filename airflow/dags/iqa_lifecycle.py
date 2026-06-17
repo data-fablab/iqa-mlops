@@ -33,26 +33,19 @@ except ImportError:  # pragma: no cover - iqa package absent from the Airflow im
 
 try:
     from iqa.dags.lifecycle_tasks import (
-        task_eval,
-        task_gates,
-        task_mlflow,
         task_promotion,
         task_reload,
-        task_train,
     )
 except ImportError:  # pragma: no cover
     def _placeholder_task(**_context):
         return {"status": "placeholder", "reason": "iqa package not available in airflow image"}
 
-    task_train = _placeholder_task
-    task_eval = _placeholder_task
-    task_gates = _placeholder_task
-    task_mlflow = _placeholder_task
     task_promotion = _placeholder_task
     task_reload = _placeholder_task
 
 
 DATA_IMAGE = os.environ.get("IQA_IMAGE_DATA", "iqa-data:local")
+ML_IMAGE = os.environ.get("IQA_IMAGE_ML", "iqa-ml:local")
 GPU_POOL = "iqa_gpu"
 
 
@@ -61,7 +54,7 @@ if (
     DAG is not None
     and PythonOperator is not None
     and make_container_task is not None
-    and all([task_train, task_eval, task_gates, task_mlflow, task_promotion, task_reload])
+    and all([task_promotion, task_reload])
 ):
     try:
         with DAG(
@@ -79,7 +72,17 @@ if (
                 "target_stage": "test",
                 "manifest": "data/model_datasets/feature_ae_good_v002.csv",
                 "candidate_version": "",
+                "checkpoint": "models/feature_ae/candidate.pt",
+                "validation_set_id": "validation_set_v001",
+                "candidate_recall": 1.0,
+                "candidate_ap": 0.0,
+                "candidate_orange_rate": 0.0,
+                "candidate_latency_ms": 0.0,
+                "gates_config": "configs/promotion_gates.yaml",
+                "run_id": "",
+                "registry_stage": "candidate",
                 "image": DATA_IMAGE,
+                "ml_image": ML_IMAGE,
             },
         ) as _lifecycle_dag:
             op_lifecycle_decision = make_container_task(
@@ -105,30 +108,57 @@ if (
                 ],
             )
 
-            op_train = PythonOperator(
+            op_train = make_container_task(
                 task_id="train",
-                python_callable=task_train,
+                image="{{ params.ml_image }}",
+                command=[
+                    "iqa-run-train",
+                    "--scenario-id", "{{ params.scenario_id }}",
+                    "--dataset-version", "{{ params.candidate_version }}",
+                    "--output-checkpoint", "{{ params.checkpoint }}",
+                    "--wait-for-gpu",
+                ],
                 pool=GPU_POOL,
-                doc="Train model",
+                gpu_lock=True,
             )
 
-            op_eval = PythonOperator(
+            op_eval = make_container_task(
                 task_id="eval",
-                python_callable=task_eval,
+                image="{{ params.ml_image }}",
+                command=[
+                    "iqa-run-eval",
+                    "--scenario-id", "{{ params.scenario_id }}",
+                    "--checkpoint", "{{ params.checkpoint }}",
+                    "--validation-set-id", "{{ params.validation_set_id }}",
+                    "--wait-for-gpu",
+                ],
                 pool=GPU_POOL,
-                doc="Evaluate model",
+                gpu_lock=True,
             )
 
-            op_gates = PythonOperator(
+            op_gates = make_container_task(
                 task_id="gates",
-                python_callable=task_gates,
-                doc="Check promotion gates",
+                image="{{ params.image }}",
+                command=[
+                    "iqa-run-gates",
+                    "--scenario-id", "{{ params.scenario_id }}",
+                    "--recall", "{{ params.candidate_recall }}",
+                    "--ap", "{{ params.candidate_ap }}",
+                    "--orange-rate", "{{ params.candidate_orange_rate }}",
+                    "--latency-ms", "{{ params.candidate_latency_ms }}",
+                    "--gates-config", "{{ params.gates_config }}",
+                ],
             )
 
-            op_mlflow = PythonOperator(
+            op_mlflow = make_container_task(
                 task_id="mlflow",
-                python_callable=task_mlflow,
-                doc="Register model in MLflow",
+                image="{{ params.ml_image }}",
+                command=[
+                    "iqa-run-mlflow",
+                    "--scenario-id", "{{ params.scenario_id }}",
+                    "--run-id", "{{ params.run_id }}",
+                    "--stage", "{{ params.registry_stage }}",
+                ],
             )
 
             op_promotion = PythonOperator(

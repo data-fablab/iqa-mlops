@@ -141,6 +141,47 @@ def test_lifecycle_dag_containerises_decision_and_dataset_via_factory() -> None:
 
 
 @pytest.mark.unit
+def test_lifecycle_dag_containerises_train_and_eval_on_ml_image_with_gpu_lock() -> None:
+    """Lifecycle DAG (issue 09) runs train + eval as GPU-locked ml containers.
+
+    train/eval move to the ml image via the factory with the iqa_gpu pool and the
+    shared single-GPU lock; the tail (gates..reload) stays on PythonOperator.
+    """
+    source = _read_dag_source("iqa_lifecycle.py")
+
+    assert '"iqa-run-train"' in source
+    assert '"iqa-run-eval"' in source
+    assert '"{{ params.ml_image }}"' in source
+    # GPU-bound: factory mounts the shared lock and the iqa_gpu pool (slots=1).
+    assert "gpu_lock=True" in source
+    assert "pool=GPU_POOL" in source
+    # These two tasks no longer route through the iqa lifecycle_tasks callables.
+    assert "task_train" not in source
+    assert "task_eval" not in source
+
+
+@pytest.mark.unit
+def test_lifecycle_dag_containerises_gates_and_mlflow_via_factory() -> None:
+    """Lifecycle DAG (issue 10) runs gates + mlflow as containers.
+
+    gates evaluates promotion_gates.yaml on the data image (blocks on failure);
+    mlflow resolves the scenario-isolated name on the ml image. Only promotion +
+    reload stay on PythonOperator (issue 11).
+    """
+    source = _read_dag_source("iqa_lifecycle.py")
+
+    assert '"iqa-run-gates"' in source
+    assert '"iqa-run-mlflow"' in source
+    assert '"{{ params.gates_config }}"' in source
+    # gates/mlflow no longer route through the iqa lifecycle_tasks callables.
+    assert "task_gates" not in source
+    assert "task_mlflow" not in source
+    # Only the promotion/reload tail is still on PythonOperator.
+    assert "task_promotion" in source
+    assert "task_reload" in source
+
+
+@pytest.mark.unit
 def test_boundary_dags_pass_explicit_runtime_params_to_cli() -> None:
     """Replay/monitoring boundary DAGs call CLI scripts with templated params.
 

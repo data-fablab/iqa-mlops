@@ -28,6 +28,8 @@ Tranches verticales (tracer bullets). Une seule HITL (00) ; le reste est AFK.
 | 17 | Overlays Compose dev / prod | AFK | 02 |
 | 18 | Persistance runtime de l'ingestion (events PG / images MinIO) | AFK | 07 |
 | 19 | Persistance runtime du dataset candidat (materialisation MinIO / PG) | AFK | 08 |
+| 20 | Runtime train/eval : entrainement reel + checkpoint/metriques MinIO | AFK | 09, 19 |
+| 21 | Runtime MLflow : enregistrement reel du run au Registry | AFK | 10, 20 |
 
 ## Chemin critique
 
@@ -42,7 +44,7 @@ Les images (03/04) et la CI (14 -> 15) se parallelisent ; 00 (HITL) doit etre tr
 - Microservices/images : 01, 02, 03, 04, 17
 - Orchestration conteneurisee : 05, 06, 07, 08, 09, 10, 11, 12, 13
 - Automatisation / registre : 00, 14, 15, 16
-- Persistance runtime (data plane) : 18, 19 (et critères persistance embarqués dans 09-13)
+- Persistance runtime (data plane) : 18, 19, 20, 21 (et critères persistance embarqués dans 11-13)
 
 ## Cadrage : conteneurisation DAG vs persistance runtime
 
@@ -56,11 +58,11 @@ jeu et **ne doivent pas être confondus** :
 2. **Persistance runtime** (data plane) : implémenter l'écriture réelle dans les
    stores. Lourd, nécessite la logique métier dans les scripts.
 
-Les issues **09, 10, 11, 13 portent déjà des critères de persistance réelle**
-(« checkpoint persisté », « modèle enregistré au Registry », « inference sert la
-nouvelle version », « métriques dans Grafana »). Leur périmètre **inclut donc
-l'implémentation runtime**, pas seulement la conversion DAG — les traiter comme
-telles (ou les redécouper en deux sous-tranches chacune, comme 07→18 et 08→19).
+Les issues **11, 13 portent déjà des critères de persistance réelle**
+(« inference sert la nouvelle version », « métriques dans Grafana »). Leur périmètre
+**inclut donc l'implémentation runtime**, pas seulement la conversion DAG — les
+traiter comme telles (ou les redécouper en deux sous-tranches chacune, comme
+07→18, 08→19, 09→20 et 10→21).
 
 Cas particuliers :
 - **Ingestion (07)** : conversion DAG faite, mais aucune issue ultérieure ne la
@@ -68,6 +70,13 @@ Cas particuliers :
 - **Dataset (08)** : conversion DAG faite (lifecycle_decision + dataset en
   conteneurs) ; la matérialisation MinIO/PG du dataset candidat est isolée dans la
   **nouvelle issue 19** (même découpage que 07→18).
+- **Train/eval (09)** : conversion DAG faite (train + eval en conteneurs ml, pool
+  `iqa_gpu`, lock GPU) ; l'entraînement réel + matérialisation checkpoint/métriques
+  MinIO est isolé dans la **nouvelle issue 20** (même découpage).
+- **Gates/mlflow (10)** : conversion DAG faite. `gates` est **déjà réel et bloquant**
+  (évalue `promotion_gates.yaml`, exit non-zéro si échec) ; seul l'enregistrement
+  MLflow réel (le nom isolé par scénario est déjà réel) est isolé dans la **nouvelle
+  issue 21** (même découpage).
 - **Replay (12)** : critères centrés sur la sémantique des événements rejoués, pas
   explicitement sur l'écriture en store — à clarifier au moment de la traiter.
 
