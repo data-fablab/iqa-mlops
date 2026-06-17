@@ -31,6 +31,7 @@ Tranches verticales (tracer bullets). Une seule HITL (00) ; le reste est AFK.
 | 20 | Runtime train/eval : entrainement reel + checkpoint/metriques MinIO | AFK | 09, 19 |
 | 21 | Runtime MLflow : enregistrement reel du run au Registry | AFK | 10, 20 |
 | 22 | Runtime promotion + reload : transition Registry reelle + reload HTTP inference | AFK | 11, 21 |
+| 23 | Runtime monitoring : export des metriques vers Prometheus / Grafana | AFK | 13 |
 
 ## Chemin critique
 
@@ -45,7 +46,7 @@ Les images (03/04) et la CI (14 -> 15) se parallelisent ; 00 (HITL) doit etre tr
 - Microservices/images : 01, 02, 03, 04, 17
 - Orchestration conteneurisee : 05, 06, 07, 08, 09, 10, 11, 12, 13
 - Automatisation / registre : 00, 14, 15, 16
-- Persistance runtime (data plane) : 18, 19, 20, 21, 22 (et critères persistance embarqués dans 12-13)
+- Persistance runtime (data plane) : 18, 19, 20, 21, 22, 23
 
 ## Cadrage : conteneurisation DAG vs persistance runtime
 
@@ -59,10 +60,10 @@ jeu et **ne doivent pas être confondus** :
 2. **Persistance runtime** (data plane) : implémenter l'écriture réelle dans les
    stores. Lourd, nécessite la logique métier dans les scripts.
 
-L'issue **13 porte déjà des critères de persistance réelle**
-(« métriques dans Grafana »). Son périmètre **inclut donc l'implémentation
-runtime**, pas seulement la conversion DAG — la traiter comme telle (ou la
-redécouper en deux sous-tranches, comme 07→18, 08→19, 09→20, 10→21 et 11→22).
+Toutes les tranches DAG (07-13) sont désormais converties et chaque critère de
+persistance/runtime réel a été isolé dans une issue sœur (07→18, 08→19, 09→20,
+10→21, 11→22, 13→23 ; 12 close sans sœur, cf. ci-dessous). Le découpage
+« conversion légère vs runtime lourd » est appliqué uniformément.
 
 Cas particuliers :
 - **Ingestion (07)** : conversion DAG faite, mais aucune issue ultérieure ne la
@@ -83,8 +84,19 @@ Cas particuliers :
   skip non-prod du reload sont **déjà réels** ; la transition réelle au Registry
   et le reload HTTP de `iqa-inference` sont isolés dans la **nouvelle issue 22**
   (même découpage).
-- **Replay (12)** : critères centrés sur la sémantique des événements rejoués, pas
-  explicitement sur l'écriture en store — à clarifier au moment de la traiter.
+- **Replay (12)** : conversion DAG faite (BashOperator → `make_container_task`,
+  image `data`, `iqa-run-replay`). Les critères portent sur la **sémantique** des
+  événements rejoués (`event_time`/`recorded_at`/`is_simulated`) : vérifiable au
+  niveau frontière (`preserved_event_fields`, validé sur le plan réel — 832
+  événements) → **issue close sans sœur dédiée**. L'émission réelle des événements
+  dans le store relève du runtime d'ingestion (issue 18, les rejoués transitent par
+  l'ingestion), pas d'une nouvelle issue.
+- **Monitoring (13)** : conversion DAG faite (BashOperator → `make_container_task`,
+  image `data`, `iqa-run-monitoring` ; `drift_confirmed` passé en valeur). L'évaluation
+  des seuils (`configs/monitoring_thresholds.yaml`) est **déjà réelle** dans le
+  conteneur (`roi_fail_rate` comparé aux seuils warning/critical) ; seul le push des
+  métriques vers Prometheus/Grafana (« métriques visibles dans Grafana ») est isolé
+  dans la **nouvelle issue 23** (même découpage).
 
 ## Contrats transverses
 

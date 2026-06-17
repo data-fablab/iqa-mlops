@@ -72,6 +72,30 @@ def test_run_replay_validates_plan_for_requested_scenario(
     assert result["lot_ids"] == ["IQA-001"]
 
 
+def test_run_replay_preserves_event_time_recorded_at_is_simulated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    plan = tmp_path / "replay.csv"
+    plan.write_text(
+        "simulated_event_id,scenario_id,lot_id,event_time,recorded_at,is_simulated\n"
+        "sim_1,production_replay_natural,IQA-001,2026-01-02T08:00:00,2026-01-02T08:00:05,true\n",
+        encoding="utf-8",
+    )
+
+    result = _run_script(
+        monkeypatch,
+        capsys,
+        run_replay,
+        ["iqa-run-replay", "--scenario-id", "production_replay_natural", "--plan", str(plan)],
+    )
+
+    # Replayed events keep their temporal/simulation semantics (acceptance criterion).
+    assert result["preserved_event_fields"] == ["event_time", "recorded_at", "is_simulated"]
+    assert result["is_simulated_values"] == ["true"]
+
+
 def test_run_replay_rejects_unknown_scenario(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plan = tmp_path / "replay.csv"
     plan.write_text("scenario_id\nunknown_scenario\n", encoding="utf-8")
@@ -95,3 +119,34 @@ def test_run_monitoring_reports_lifecycle_decision(
     assert result["status"] == "validated"
     assert result["trigger_lifecycle"] is True
     assert result["lifecycle_decision"]["trigger_reason"] == "natural_50_oracle_conformes"
+
+
+def test_run_monitoring_evaluates_thresholds_config_in_container(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    thresholds = tmp_path / "monitoring_thresholds.yaml"
+    thresholds.write_text(
+        "quality:\n  roi_fail_rate_warning: 0.05\n  roi_fail_rate_critical: 0.10\n",
+        encoding="utf-8",
+    )
+
+    result = _run_script(
+        monkeypatch,
+        capsys,
+        run_monitoring,
+        [
+            "iqa-run-monitoring",
+            "--scenario-id", "production_replay_natural",
+            "--roi-fail-rate", "0.12",
+            "--thresholds-config", str(thresholds),
+        ],
+    )
+
+    # ROI fail rate above the critical threshold is flagged in-container.
+    assert result["thresholds_evaluated"] is True
+    roi = result["roi_fail_rate_evaluation"]
+    assert roi["status"] == "critical"
+    assert roi["breached"] is True
+    assert roi["critical"] == 0.10

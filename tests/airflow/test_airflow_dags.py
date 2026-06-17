@@ -198,20 +198,42 @@ def test_lifecycle_dag_containerises_promotion_and_reload_via_factory() -> None:
 
 
 @pytest.mark.unit
-def test_boundary_dags_pass_explicit_runtime_params_to_cli() -> None:
-    """Replay/monitoring boundary DAGs call CLI scripts with templated params.
+def test_replay_dag_containerises_via_factory() -> None:
+    """Replay DAG (issue 12) runs iqa-run-replay as a data-image container.
 
-    These remain BashOperator until issues 12/13 containerise them.
+    The BashOperator is replaced by make_container_task with templated argv
+    elements (no shell, no quoting); the DAG no longer references iqa metier code.
     """
     replay = _read_dag_source("iqa_replay.py")
+
+    assert "make_container_task(" in replay
+    assert '"iqa-run-replay"' in replay
+    assert '"{{ params.scenario_id }}"' in replay
+    assert '"{{ params.plan }}"' in replay
+    # No BashOperator shell form left.
+    assert "BashOperator(" not in replay
+    assert "bash_command" not in replay
+
+
+@pytest.mark.unit
+def test_monitoring_dag_containerises_via_factory() -> None:
+    """Monitoring DAG (issue 13) runs iqa-run-monitoring as a data-image container.
+
+    The BashOperator is replaced by make_container_task with templated argv
+    elements; drift_confirmed is passed as a value (not a Jinja-conditional flag)
+    and the thresholds config is evaluated in-container.
+    """
     monitoring = _read_dag_source("iqa_monitoring.py")
 
-    assert "--scenario-id '{{ params.scenario_id }}'" in replay
-    assert "--plan '{{ params.plan }}'" in replay
-
-    assert "--conforming-validated-count '{{ params.conforming_validated_count }}'" in monitoring
-    assert "{% if params.drift_confirmed %}--drift-confirmed {% endif %}" in monitoring
-    assert "--roi-fail-rate '{{ params.roi_fail_rate }}'" in monitoring
+    assert "make_container_task(" in monitoring
+    assert '"iqa-run-monitoring"' in monitoring
+    assert '"{{ params.conforming_validated_count }}"' in monitoring
+    assert '"--drift-confirmed", "{{ params.drift_confirmed }}"' in monitoring
+    assert '"{{ params.roi_fail_rate }}"' in monitoring
+    assert '"{{ params.thresholds_config }}"' in monitoring
+    # No BashOperator shell form left.
+    assert "BashOperator(" not in monitoring
+    assert "bash_command" not in monitoring
 
 
 @pytest.mark.docker_contract
