@@ -73,6 +73,7 @@ class MLflowRunLogger:
             "loss": config.loss,
             "scenario_id": config.scenario_id,
             "dataset_version": config.dataset_version,
+            "manifest_version": config.manifest_version,
             "candidate_version": config.candidate_version,
             "roi_model_version": config.roi_model_version,
             "feature_ae_version": config.feature_ae_version,
@@ -127,6 +128,7 @@ class MLflowRunLogger:
         git_commit: str,
         dataset_version: str,
         scenario_id: str,
+        manifest_version: str = "",
     ) -> None:
         """Set traceability tags.
 
@@ -138,6 +140,7 @@ class MLflowRunLogger:
         tags = {
             "git_commit": git_commit,
             "dataset_version": dataset_version,
+            "manifest_version": manifest_version,
             "scenario_id": scenario_id,
         }
         mlflow.set_tags(tags)
@@ -187,6 +190,7 @@ def train_feature_ae_with_mlflow_logging(
             git_commit=git_commit,
             dataset_version=config.dataset_version,
             scenario_id=config.scenario_id,
+            manifest_version=config.manifest_version,
         )
 
         # Train the model

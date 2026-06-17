@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from iqa.dags.lifecycle_tasks import (
+    task_lifecycle_decision,
     task_dataset,
     task_eval,
     task_gates,
@@ -63,6 +64,7 @@ class TestDatasetTask:
 
             assert result["manifest_path"] == str(out_manifest)
             assert result["dataset_version"] == "v001"
+            assert result["manifest_version"] == "v001_manifest_v001"
             assert result["sample_count"] == 42
             assert result["roi_status_count"] == 1
             mock_build.assert_called_once()
@@ -95,6 +97,57 @@ class TestDatasetTask:
 
             assert "warning" in result
 
+    def test_dataset_task_skips_when_lifecycle_decision_is_not_triggered(self, tmp_path: Path) -> None:
+        """Dataset task does not build when the lifecycle decision says no trigger."""
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.return_value = {
+            "trigger_lifecycle": False,
+            "trigger_reason": "natural_waiting_for_50_oracle_conformes",
+        }
+        context = {
+            "ti": mock_ti,
+            "params": {
+                "manifest_path": str(tmp_path / "source.csv"),
+                "image_root": str(tmp_path),
+                "output_manifest": str(tmp_path / "candidate.csv"),
+            },
+        }
+
+        with patch("iqa.dags.lifecycle_tasks.build_candidate_dataset") as mock_build:
+            result = task_dataset(**context)
+
+            mock_build.assert_not_called()
+            assert result["status"] == "skipped"
+            assert result["reason"] == "lifecycle_decision_not_triggered"
+
+
+class TestLifecycleDecisionTask:
+    """Evaluate data-event lifecycle decisions before training."""
+
+    def test_lifecycle_decision_task_triggers_natural_v002_at_50_conformes(self) -> None:
+        result = task_lifecycle_decision(
+            params={
+                "scenario_id": "production_replay_natural",
+                "conforming_validated_count": 50,
+                "drift_confirmed": False,
+            }
+        )
+
+        assert result["trigger_lifecycle"] is True
+        assert result["candidate_dataset_version"] == "feature_ae_good_v002"
+
+    def test_lifecycle_decision_task_triggers_drift_v003_on_confirmed_drift(self) -> None:
+        result = task_lifecycle_decision(
+            params={
+                "scenario_id": "drift_domain_extension",
+                "conforming_validated_count": 0,
+                "drift_confirmed": True,
+            }
+        )
+
+        assert result["trigger_lifecycle"] is True
+        assert result["candidate_dataset_version"] == "feature_ae_good_v003"
+
 
 class TestTrainTask:
     """Train Feature AE model."""
@@ -105,6 +158,7 @@ class TestTrainTask:
         mock_ti.xcom_pull.return_value = {
             "manifest_path": str(tmp_path / "candidate.csv"),
             "dataset_version": "v001",
+            "manifest_version": "v001_manifest_v001",
         }
         context = {
             "ti": mock_ti,
@@ -129,6 +183,7 @@ class TestTrainTask:
             assert config.roi_model_version == "roi_segmenter_v001_fixed"
             assert config.feature_ae_version == "rd_feature_ae_gated_v001_bootstrap"
             assert config.dataset_version == "v001"
+            assert config.manifest_version == "v001_manifest_v001"
 
     def test_train_task_uses_mlflow_logging_and_returns_run_id(self, tmp_path: Path) -> None:
         """Train task calls train_feature_ae_with_mlflow_logging and returns run_id."""
@@ -136,6 +191,7 @@ class TestTrainTask:
         mock_ti.xcom_pull.return_value = {
             "manifest_path": str(tmp_path / "candidate.csv"),
             "dataset_version": "v001",
+            "manifest_version": "v001_manifest_v001",
         }
         context = {
             "ti": mock_ti,
@@ -158,6 +214,8 @@ class TestTrainTask:
             mock_train.assert_called_once()
             assert result["run_id"] == "abc123"
             assert "checkpoint" in result
+            assert result["dataset_version"] == "v001"
+            assert result["manifest_version"] == "v001_manifest_v001"
 
 
 class TestEvalTask:
@@ -252,7 +310,12 @@ class TestMLflowTask:
     def test_mlflow_task_pulls_run_id_from_train_xcom(self) -> None:
         """MLflow task reads run_id from ti.xcom_pull(task_ids='train')."""
         mock_ti = MagicMock()
-        mock_ti.xcom_pull.return_value = {"run_id": "abc123def456", "checkpoint": "/tmp/ck.pt"}
+        mock_ti.xcom_pull.return_value = {
+            "run_id": "abc123def456",
+            "checkpoint": "/tmp/ck.pt",
+            "dataset_version": "feature_ae_good_v002",
+            "manifest_version": "feature_ae_good_v002_manifest_v001",
+        }
         context = {
             "ti": mock_ti,
             "params": {"scenario_id": "production_replay_natural"},
@@ -271,6 +334,8 @@ class TestMLflowTask:
             call_kwargs = mock_register.call_args[1]
             assert call_kwargs["run_id"] == "abc123def456"
             assert result["version"] == "3"
+            assert result["dataset_version"] == "feature_ae_good_v002"
+            assert result["manifest_version"] == "feature_ae_good_v002_manifest_v001"
 
     def test_mlflow_task_uses_scenario_id_from_params(self) -> None:
         """MLflow task reads scenario_id from context['params'] (not flat kwargs)."""

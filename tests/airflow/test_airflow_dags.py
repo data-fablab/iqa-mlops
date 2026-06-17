@@ -27,8 +27,8 @@ def test_iqa_lifecycle_dag_imports_without_error() -> None:
 
 
 @pytest.mark.docker_contract
-def test_iqa_lifecycle_dag_has_seven_tasks() -> None:
-    """Test that iqa_lifecycle DAG has all 7 pipeline tasks."""
+def test_iqa_lifecycle_dag_has_eight_tasks() -> None:
+    """Test that iqa_lifecycle DAG has all 8 pipeline tasks."""
     try:
         import iqa_lifecycle
     except ImportError as e:
@@ -39,16 +39,16 @@ def test_iqa_lifecycle_dag_has_seven_tasks() -> None:
         pytest.skip("DAG is None (Airflow not available)")
 
     task_ids = {task.task_id for task in dag.tasks}
-    expected_tasks = {"dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"}
+    expected_tasks = {"lifecycle_decision", "dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"}
 
     assert expected_tasks <= task_ids, f"Missing tasks: {expected_tasks - task_ids}"
 
 
 @pytest.mark.unit
-def test_iqa_lifecycle_dag_source_declares_seven_tasks() -> None:
-    """Test that DAG source declares all 7 tasks (code-level check)."""
+def test_iqa_lifecycle_dag_source_declares_eight_tasks() -> None:
+    """Test that DAG source declares all 8 tasks (code-level check)."""
     source = _read_dag_source()
-    task_ids = ["dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"]
+    task_ids = ["lifecycle_decision", "dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"]
 
     for task_id in task_ids:
         assert f'task_id="{task_id}"' in source, f"Task {task_id} not declared in DAG source"
@@ -59,8 +59,13 @@ def test_iqa_lifecycle_dag_source_declares_dependencies() -> None:
     """Test that DAG source declares linear dependencies (code-level check)."""
     source = _read_dag_source()
 
-    # Check for the dependency chain pattern: dataset >> train >> eval >> gates >> mlflow >> promotion >> reload
+    # Check for the dependency chain pattern: lifecycle_decision >> dataset >> train >> eval >> gates >> mlflow >> promotion >> reload
     # Support both old (task_*) and new (op_*) variable naming
+    assert (
+        "op_lifecycle_decision >> op_dataset" in source
+        or "lifecycle_decision >> dataset" in source
+        or "task_lifecycle_decision >> task_dataset" in source
+    )
     assert (
         ">> op_train >>" in source
         or "op_dataset >> op_train" in source
@@ -112,7 +117,7 @@ def test_iqa_lifecycle_dag_has_linear_dependencies() -> None:
         pytest.skip("DAG is None (Airflow not available)")
 
     # Expected linear chain
-    expected_chain = ["dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"]
+    expected_chain = ["lifecycle_decision", "dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"]
 
     # Verify downstream dependencies
     for i in range(len(expected_chain) - 1):
@@ -139,4 +144,4 @@ def test_iqa_lifecycle_dag_passes_dagbag_validation() -> None:
 
     dag = dag_bag.get_dag("iqa_lifecycle")
     assert dag is not None, "iqa_lifecycle DAG is None"
-    assert len(dag.tasks) == 7, f"Expected 7 tasks, got {len(dag.tasks)}"
+    assert len(dag.tasks) == 8, f"Expected 8 tasks, got {len(dag.tasks)}"

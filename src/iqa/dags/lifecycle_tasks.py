@@ -14,6 +14,7 @@ import yaml
 
 from iqa.datasets import build_candidate_dataset, iter_manifest_image_samples
 from iqa.inference.model_loader import ProdModelLoader
+from iqa.monitoring import LifecycleSignal, evaluate_lifecycle_signal
 from iqa.promotion import (
     evaluate_promotion_gates,
     promote_model_with_gates,
@@ -51,6 +52,30 @@ def _load_gates_config(path: str | Path | None = None) -> dict[str, Any]:
     return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
 
+def _xcom_pull(context: dict[str, Any], task_id: str) -> Any:
+    ti = context.get("ti")
+    if ti is None:
+        return None
+    return ti.xcom_pull(task_ids=task_id)
+
+
+def _skipped(reason: str, **extra: Any) -> dict[str, Any]:
+    return {"status": "skipped", "reason": reason, **extra}
+
+
+def task_lifecycle_decision(**context: Any) -> dict[str, Any]:
+    """Evaluate whether this DAG run should launch a Feature-AE lifecycle."""
+    params = context.get("params", {})
+    signal = LifecycleSignal(
+        scenario_id=params.get("scenario_id", "production_replay_natural"),
+        conforming_validated_count=int(params.get("conforming_validated_count", 0)),
+        drift_confirmed=bool(params.get("drift_confirmed", False)),
+        roi_fail_rate=float(params.get("roi_fail_rate", 0.0)),
+    )
+    decision = evaluate_lifecycle_signal(signal)
+    return decision.to_dict()
+
+
 def task_dataset(**context: Any) -> dict[str, Any]:
     """Build candidate dataset for training.
 
@@ -61,10 +86,22 @@ def task_dataset(**context: Any) -> dict[str, Any]:
         Dict with manifest_path, dataset_version, sample_count.
     """
     params = context.get("params", {})
+    decision = _xcom_pull(context, "lifecycle_decision")
+    if decision is not None and not decision.get("trigger_lifecycle", False):
+        return _skipped(
+            "lifecycle_decision_not_triggered",
+            lifecycle_decision=decision,
+        )
+
     manifest_path = Path(params["manifest_path"])
     image_root = Path(params["image_root"])
     output_manifest = Path(params["output_manifest"])
-    candidate_version = params.get("candidate_version", "v001")
+    candidate_version = (
+        params.get("candidate_version")
+        or (decision or {}).get("candidate_dataset_version")
+        or "v001"
+    )
+    manifest_version = params.get("manifest_version") or f"{candidate_version}_manifest_v001"
     roi_predictions_dirs = _path_tuple(params.get("roi_predictions_dirs"))
     roi_lookup = load_roi_mask_lookup(roi_predictions_dirs)
 
@@ -73,15 +110,18 @@ def task_dataset(**context: Any) -> dict[str, Any]:
         samples,
         output_manifest,
         version=candidate_version,
+        manifest_version=manifest_version,
         roi_status=roi_lookup.status,
     )
 
     result = {
         "manifest_path": str(dataset.output_manifest),
         "dataset_version": dataset.version,
+        "manifest_version": manifest_version,
         "sample_count": dataset.sample_count,
         "filtered_count": dataset.filtered_count,
         "roi_status_count": len(roi_lookup.status),
+        "lifecycle_decision": decision,
     }
     if not roi_predictions_dirs:
         result["warning"] = "roi_predictions_dirs not provided; ROI status filtering was not applied"
@@ -102,6 +142,8 @@ def task_train(**context: Any) -> dict[str, Any]:
     params = context.get("params", {})
     ti = context["ti"]
     dataset = ti.xcom_pull(task_ids="dataset")
+    if dataset.get("status") == "skipped":
+        return _skipped(dataset["reason"], lifecycle_decision=dataset.get("lifecycle_decision"))
 
     config = FeatureAETrainingConfig(
         manifest_path=Path(dataset["manifest_path"]),
@@ -109,6 +151,7 @@ def task_train(**context: Any) -> dict[str, Any]:
         output_checkpoint=Path(params["output_checkpoint"]),
         scenario_id=params.get("scenario_id", "production_replay_natural"),
         dataset_version=dataset.get("dataset_version", ""),
+        manifest_version=dataset.get("manifest_version", ""),
         candidate_version=params.get("candidate_version", dataset.get("dataset_version", "")),
         roi_model_version=params.get("roi_model_version", "roi_segmenter_v001_fixed"),
         feature_ae_version=params.get("feature_ae_version", "rd_feature_ae_gated_v001_bootstrap"),
@@ -120,6 +163,8 @@ def task_train(**context: Any) -> dict[str, Any]:
         "run_id": result.get("run_id", ""),
         "checkpoint": result.get("checkpoint", str(config.output_checkpoint)),
         "run_dir": result.get("run_dir", ""),
+        "dataset_version": config.dataset_version,
+        "manifest_version": config.manifest_version,
     }
 
 
@@ -137,6 +182,8 @@ def task_eval(**context: Any) -> dict[str, Any]:
     params = context.get("params", {})
     ti = context["ti"]
     train_output = ti.xcom_pull(task_ids="train")
+    if train_output.get("status") == "skipped":
+        return _skipped(train_output["reason"], lifecycle_decision=train_output.get("lifecycle_decision"))
 
     checkpoint = Path(train_output["checkpoint"])
     output_dir = Path(params.get("eval_output_dir", str(checkpoint.parent / "eval")))
@@ -176,6 +223,8 @@ def task_gates(**context: Any) -> dict[str, Any]:
     params = context.get("params", {})
     ti = context["ti"]
     eval_output = ti.xcom_pull(task_ids="eval")
+    if eval_output.get("status") == "skipped":
+        return _skipped(eval_output["reason"], lifecycle_decision=eval_output.get("lifecycle_decision"))
     gates_config = _load_gates_config(params.get("gates_config_path"))
 
     gates_result = evaluate_promotion_gates(
@@ -209,6 +258,8 @@ def task_mlflow(**context: Any) -> dict[str, Any]:
     params = context.get("params", {})
     ti = context["ti"]
     train_output = ti.xcom_pull(task_ids="train")
+    if train_output.get("status") == "skipped":
+        return _skipped(train_output["reason"], lifecycle_decision=train_output.get("lifecycle_decision"))
 
     run_id = train_output.get("run_id")
     if not run_id:
@@ -216,11 +267,14 @@ def task_mlflow(**context: Any) -> dict[str, Any]:
 
     scenario_id = params.get("scenario_id", "production_replay_natural")
 
-    return register_run_to_model(
+    result = register_run_to_model(
         run_id=run_id,
         scenario_id=scenario_id,
         stage="candidate",
     )
+    result["dataset_version"] = train_output.get("dataset_version", "")
+    result["manifest_version"] = train_output.get("manifest_version", "")
+    return result
 
 
 def task_promotion(**context: Any) -> dict[str, Any]:
@@ -241,6 +295,8 @@ def task_promotion(**context: Any) -> dict[str, Any]:
     ti = context["ti"]
     mlflow_output = ti.xcom_pull(task_ids="mlflow")
     eval_output = ti.xcom_pull(task_ids="eval")
+    if mlflow_output.get("status") == "skipped":
+        return _skipped(mlflow_output["reason"], lifecycle_decision=mlflow_output.get("lifecycle_decision"))
 
     registered_model_name_str = mlflow_output.get("registered_model_name")
     version = mlflow_output.get("version")
@@ -308,6 +364,7 @@ def task_reload(**context: Any) -> dict[str, Any]:
 
 
 __all__ = [
+    "task_lifecycle_decision",
     "task_dataset",
     "task_train",
     "task_eval",
