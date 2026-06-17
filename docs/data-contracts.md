@@ -76,6 +76,20 @@ train_eligibility_source = oracle_gt
 `human_sophie` reste display-only dans cette phase et ne rend jamais un exemple
 eligible au train normal.
 
+## Validation set v001
+
+`data/validation/validation_set_v001.csv` est fige au niveau `piece_event`.
+La repartition actuelle par `source_class` est :
+
+| `source_class` | Pieces |
+| --- | ---: |
+| `Casting_class1` | 5 |
+| `Casting_class2` | 8 |
+| `Casting_class3` | 7 |
+
+Ce set reste disjoint de bootstrap, calibration et replay. Il sert a verifier la
+regle oracle sans alimenter le train normal.
+
 ## Persistance PostgreSQL
 
 PostgreSQL est optionnel et active explicitement par `IQA_METADATA_BACKEND=postgres`.

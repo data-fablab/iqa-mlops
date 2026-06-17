@@ -19,6 +19,14 @@ def _ids(rows: list[dict[str, str]], key: str = "event_id") -> set[str]:
     return {row[key] for row in rows}
 
 
+def _counts(rows: list[dict[str, str]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = row[key]
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
 def test_phase1_core_manifest_volumes_are_stable() -> None:
     piece_events = _read_csv(METADATA / "casting_piece_events.csv")
     bootstrap = _read_csv(METADATA / "feature_ae_bootstrap_events.csv")
@@ -67,6 +75,12 @@ def test_validation_and_calibration_roles_are_explicit() -> None:
     calibration = _read_csv(METADATA / "calibration_set_v001.csv")
 
     assert {row["validation_set_id"] for row in validation} == {"validation_set_v001"}
+    assert len(validation) == 20
+    assert _counts(validation, "source_class") == {
+        "Casting_class1": 5,
+        "Casting_class2": 8,
+        "Casting_class3": 7,
+    }
     assert any(row["is_defective"].lower() == "true" for row in validation)
     assert {row["calibration_set_id"] for row in calibration} == {"calibration_set_v001"}
     assert {row["label"] for row in calibration} == {"good"}
