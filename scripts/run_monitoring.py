@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from iqa.monitoring import LifecycleSignal, should_trigger_lifecycle
+from iqa.monitoring import LifecycleSignal, evaluate_lifecycle_signal, should_trigger_lifecycle
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,9 +25,11 @@ def main() -> None:
         drift_confirmed=args.drift_confirmed,
         roi_fail_rate=args.roi_fail_rate,
     )
+    decision = evaluate_lifecycle_signal(signal)
     result = {
         "service": "iqa-monitoring",
         "signal": signal.to_dict(),
+        "lifecycle_decision": decision.to_dict(),
         "trigger_lifecycle": should_trigger_lifecycle(signal),
     }
     print(json.dumps(result, indent=2, sort_keys=True))
