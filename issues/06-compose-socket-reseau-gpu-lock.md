@@ -10,10 +10,10 @@ inference, et propager le lock GPU (volume `gpu_lock`) aux conteneurs de tache G
 
 ## Acceptance criteria
 
-- [ ] Socket Docker monte sur le scheduler
-- [ ] Les conteneurs de tache rejoignent le reseau des services et resolvent leurs noms
-- [ ] Volume `gpu_lock` propage aux taches GPU ; un seul detenteur a la fois
-- [ ] La tache tracer de l'issue 05 tourne reellement via compose
+- [x] Socket Docker monte sur le scheduler (`/var/run/docker.sock` + `group_add: IQA_DOCKER_GID` ; `docker ps` OK depuis le scheduler)
+- [x] Les conteneurs de tache rejoignent le reseau des services et resolvent leurs noms (reseau fixe `iqa_net` ; `IQA_DOCKER_NETWORK=iqa_net` consomme par la factory)
+- [x] Volume `gpu_lock` propage aux taches GPU ; un seul detenteur a la fois (volume nomme `iqa_gpu_lock` + `make_container_task(gpu_lock=True)` monte le lock partage avec l'inference)
+- [x] La tache tracer de l'issue 05 tourne reellement via compose (run `tracer_smoke_1` -> tache `run_container` = **success** ; conteneur `iqa-data:local` lance par le scheduler, exit code remonte dans Airflow)
 
 ## Blocked by
 

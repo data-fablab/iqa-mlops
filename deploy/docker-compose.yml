@@ -72,7 +72,10 @@ services:
     profiles: ["batch"]
 
   airflow-init:
-    image: apache/airflow:2.10.5-python3.12
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    image: iqa-airflow:local
     entrypoint: /bin/bash
     command: ["-c", "airflow db migrate && airflow pools import /opt/airflow/pools.json"]
     env_file: ../.env
@@ -86,7 +89,7 @@ services:
     depends_on: [postgres]
 
   airflow-webserver:
-    image: apache/airflow:2.10.5-python3.12
+    image: iqa-airflow:local
     command: webserver
     env_file: ../.env
     environment:
@@ -97,9 +100,12 @@ services:
       AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
       AIRFLOW__METRICS__STATSD_PORT: "9125"
       AIRFLOW__METRICS__STATSD_PREFIX: airflow
+      # Expose iqa.dags.operators (factory) without installing the metier runtime.
+      PYTHONPATH: /opt/iqa/src
     ports: ["8080:8080"]
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
+      - ../src:/opt/iqa/src:ro
     depends_on:
       postgres:
         condition: service_started
@@ -107,9 +113,13 @@ services:
         condition: service_completed_successfully
 
   airflow-scheduler:
-    image: apache/airflow:2.10.5-python3.12
+    image: iqa-airflow:local
     command: scheduler
     env_file: ../.env
+    # Access to the host Docker daemon to launch task containers (ADR 0008).
+    # IQA_DOCKER_GID must match the host docker group (`getent group docker`).
+    group_add:
+      - "${IQA_DOCKER_GID:-984}"
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -118,8 +128,16 @@ services:
       AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
       AIRFLOW__METRICS__STATSD_PORT: "9125"
       AIRFLOW__METRICS__STATSD_PREFIX: airflow
+      PYTHONPATH: /opt/iqa/src
+      # Containerised-task backend (ADR 0008): task containers join iqa_net so
+      # they resolve postgres/minio/mlflow/iqa-inference by name.
+      IQA_AIRFLOW_BACKEND: docker
+      IQA_DOCKER_NETWORK: iqa_net
+      IQA_GPU_LOCK_VOLUME: iqa_gpu_lock
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
+      - ../src:/opt/iqa/src:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_started
@@ -192,4 +210,13 @@ services:
 volumes:
   minio_data:
   postgres_data:
+  # Stable name so sibling task containers launched by the scheduler can mount
+  # the single-GPU lock by volume name (factory: IQA_GPU_LOCK_VOLUME).
   gpu_lock:
+    name: iqa_gpu_lock
+
+networks:
+  # Fixed network name so DockerOperator task containers join it (network_mode)
+  # and resolve service names (postgres/minio/mlflow/iqa-inference).
+  default:
+    name: iqa_net

@@ -12,11 +12,11 @@ variable d'environnement (`IQA_AIRFLOW_BACKEND=docker|k8s`). Aucun import du run
 
 ## Acceptance criteria
 
-- [ ] Module factory dans le package (ex. `src/iqa/dags/operators.py`) sans import du runtime metier
-- [ ] `make_container_task` produit un `DockerOperator` parametre (image, command, env, pool)
-- [ ] Bascule `IQA_AIRFLOW_BACKEND` prevue (chemin k8s stub/documente, non requis fonctionnel)
-- [ ] Une tache tracer lance un conteneur et son code de sortie remonte dans Airflow
-- [ ] Tests d'import des DAGs (DagBag) toujours verts
+- [x] Module factory dans le package (`src/iqa/dags/operators.py`) sans import du runtime metier (test garde-fou inclus)
+- [x] `make_container_task` produit un `DockerOperator` parametre (image, command, env, pool ; + `network_mode`/`docker_url` via env)
+- [x] Bascule `IQA_AIRFLOW_BACKEND` prevue (docker par defaut ; chemin k8s `KubernetesPodOperator` stub documente, non requis fonctionnel)
+- [x] Tache tracer `airflow/dags/iqa_container_tracer.py` cablee via la factory (1 tache = 1 conteneur, `command --help` exit 0) ; remontee du code de sortie reelle via compose = critere de l'issue 06
+- [x] Tests d'import des DAGs (DagBag) toujours verts (suite : 476 passed, 13 skipped ; tracer import -> `dag=None` quand le provider Docker est absent en CI)
 
 ## Blocked by
 
