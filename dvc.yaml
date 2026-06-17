@@ -40,9 +40,11 @@ stages:
       - data/metadata/casting_flux_replay_plan_drift.csv
 
   model_dataset:
-    cmd: uv run --extra cpu pytest -q tests/datasets/test_candidate_builder.py
+    cmd: uv run --extra cpu iqa-build-feature-ae-datasets && uv run --extra cpu pytest -q tests/datasets/test_candidate_builder.py
     deps:
+      - scripts/build_feature_ae_datasets.py
       - src/iqa/datasets/candidate_builder.py
       - src/iqa/datasets/casting.py
       - tests/datasets/test_candidate_builder.py
-      - data/metadata/feature_ae_bootstrap_events.csv
+      - data/metadata/casting_flux_replay_plan_natural.csv
+      - data/metadata/casting_flux_replay_plan_drift.csv

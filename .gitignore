@@ -29,6 +29,9 @@ data/raw/*
 !data/raw/*.dvc
 data/processed/
 data/model_datasets/
+!data/model_datasets/
+!data/model_datasets/feature_ae_good_v002.csv
+!data/model_datasets/feature_ae_good_v003.csv
 source-datasets/
 iqa-source-datasets/
 iqa-ingested-images/

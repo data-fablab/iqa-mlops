@@ -86,6 +86,9 @@ Les datasets Feature-AE candidats suivent ces versions :
 Un sample est eligible seulement si `oracle_verdict=conforme`,
 `train_eligible=true`, `train_eligibility_source=oracle_gt`, sans quarantaine et
 sans statut ROI bloquant.
+Les manifests materialises sont produits sous `data/model_datasets/` par
+`iqa-build-feature-ae-datasets` et portent `dataset_version` ainsi que
+`manifest_version`.
 
 ## Validation set v001
 
