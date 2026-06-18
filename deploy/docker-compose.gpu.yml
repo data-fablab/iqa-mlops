@@ -2,15 +2,17 @@ services:
   iqa-inference:
     build:
       context: ..
+      target: ml
       args:
-        IQA_UV_EXTRA: cu128
-    command: uv run --extra cu128 iqa-inference
+        IQA_TORCH_EXTRA: cu128
+    command: iqa-inference
     gpus: all
 
   iqa-trainer:
     build:
       context: ..
+      target: ml
       args:
-        IQA_UV_EXTRA: cu128
-    command: uv run --extra cu128 iqa-run-lifecycle
+        IQA_TORCH_EXTRA: cu128
+    command: iqa-run-lifecycle
     gpus: all

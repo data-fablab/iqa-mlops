@@ -47,4 +47,35 @@ def print_json(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
-__all__ = ["csv_manifest_summary", "print_json", "read_csv_rows", "stable_unique"]
+def str2bool(value: str | bool) -> bool:
+    """Parse a boolean passed as a templated argv value (not a CLI flag).
+
+    Airflow renders ``params`` as strings, so booleans arrive as ``"True"`` /
+    ``"false"`` rather than ``store_true`` flags; this keeps the argv static.
+    """
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_yaml_config(path: Path) -> dict[str, Any]:
+    """Load a YAML mapping in-container, or an empty dict when the file is absent.
+
+    yaml is imported lazily so boundary scripts that never read a config keep a
+    minimal import surface.
+    """
+    if not path.exists():
+        return {}
+    import yaml
+
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+__all__ = [
+    "csv_manifest_summary",
+    "load_yaml_config",
+    "print_json",
+    "read_csv_rows",
+    "stable_unique",
+    "str2bool",
+]
