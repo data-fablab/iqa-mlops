@@ -126,6 +126,7 @@ uv run --extra cpu iqa-run-ingestion --help
 uv run --extra cpu iqa-run-replay --help
 uv run --extra cpu iqa-run-monitoring --help
 uv run --extra cpu iqa-run-lifecycle --help
+uv run --extra cpu iqa-run-replay-lifecycle-cycle --help
 ```
 
 Phase 2 demo:
