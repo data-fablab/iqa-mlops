@@ -105,22 +105,56 @@ def test_iqa_lifecycle_dag_source_declares_dependencies() -> None:
 
 
 @pytest.mark.unit
-def test_boundary_dags_pass_explicit_runtime_params_to_cli() -> None:
-    """Boundary DAGs call CLI scripts with templated Airflow params."""
+def test_ingestion_dag_runs_data_image_via_factory() -> None:
+    """Ingestion DAG (issue 07) launches the data container, not a local CLI."""
     ingestion = _read_dag_source("iqa_ingestion.py")
+
+    assert "BashOperator(" not in ingestion
+    assert "make_container_task(" in ingestion
+    # Templated params passed as argv elements (no shell quoting).
+    assert '"iqa-run-ingestion"' in ingestion
+    assert '"{{ params.manifest }}"' in ingestion
+    assert '"{{ params.source }}"' in ingestion
+    assert '"{{ params.scenario_id }}"' in ingestion
+
+
+@pytest.mark.unit
+def test_replay_dag_containerises_via_factory() -> None:
+    """Replay DAG (issue 12) runs iqa-run-replay as a data-image container.
+
+    The BashOperator is replaced by make_container_task with templated argv
+    elements (no shell, no quoting); the DAG no longer references iqa metier code.
+    """
     replay = _read_dag_source("iqa_replay.py")
+
+    assert "make_container_task(" in replay
+    assert '"iqa-run-replay"' in replay
+    assert '"{{ params.scenario_id }}"' in replay
+    assert '"{{ params.plan }}"' in replay
+    # No BashOperator shell form left.
+    assert "BashOperator(" not in replay
+    assert "bash_command" not in replay
+
+
+@pytest.mark.unit
+def test_monitoring_dag_containerises_via_factory() -> None:
+    """Monitoring DAG (issue 13) runs iqa-run-monitoring as a data-image container.
+
+    The BashOperator is replaced by make_container_task with templated argv
+    elements; drift_confirmed is passed as a value (not a Jinja-conditional flag)
+    and the thresholds config is evaluated in-container.
+    """
     monitoring = _read_dag_source("iqa_monitoring.py")
 
-    assert "--manifest '{{ params.manifest }}'" in ingestion
-    assert "--source '{{ params.source }}'" in ingestion
-    assert "--scenario-id '{{ params.scenario_id }}'" in ingestion
-
-    assert "--scenario-id '{{ params.scenario_id }}'" in replay
-    assert "--plan '{{ params.plan }}'" in replay
-
-    assert "--conforming-validated-count '{{ params.conforming_validated_count }}'" in monitoring
-    assert "{% if params.drift_confirmed %}--drift-confirmed {% endif %}" in monitoring
-    assert "--roi-fail-rate '{{ params.roi_fail_rate }}'" in monitoring
+    assert "make_container_task(" in monitoring
+    assert '"iqa-run-monitoring"' in monitoring
+    assert '"{{ params.conforming_validated_count }}"' in monitoring
+    assert '"--drift-confirmed", "{{ params.drift_confirmed }}"' in monitoring
+    assert '"{{ params.roi_fail_rate }}"' in monitoring
+    assert '"{{ params.thresholds_config }}"' in monitoring
+    # No BashOperator shell form left.
+    assert "BashOperator(" not in monitoring
+    assert "bash_command" not in monitoring
 
 
 @pytest.mark.unit
