@@ -9,10 +9,7 @@ argv elements -- no shell, no quoting. The import/guard scaffolding lives in
 
 from __future__ import annotations
 
-try:
-    from iqa.dags import build_container_dag, data_image, make_container_task
-except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
-    build_container_dag = data_image = make_container_task = None
+from iqa.dags import build_container_dag, data_image, make_container_task
 
 
 def _define() -> None:
@@ -28,19 +25,15 @@ def _define() -> None:
     )
 
 
-dag = (
-    build_container_dag(
-        dag_id="iqa_ingestion",
-        define=_define,
-        schedule=None,
-        tags=["iqa", "ingestion"],
-        params={
-            "manifest": "data/metadata/casting_piece_events.csv",
-            "source": "historical_replay",
-            "scenario_id": "raw_ingestion",
-            "image": data_image(),
-        },
-    )
-    if build_container_dag is not None
-    else None
+dag = build_container_dag(
+    dag_id="iqa_ingestion",
+    define=_define,
+    schedule=None,
+    tags=["iqa", "ingestion"],
+    params={
+        "manifest": "data/metadata/casting_piece_events.csv",
+        "source": "historical_replay",
+        "scenario_id": "raw_ingestion",
+        "image": data_image(),
+    },
 )

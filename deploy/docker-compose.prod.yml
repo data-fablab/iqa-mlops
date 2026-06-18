@@ -37,12 +37,24 @@ services:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}
     build: null
 
+  iqa-dvc-gate:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-dvc-gate:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
+
   airflow-init:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-airflow:${IQA_IMAGE_TAG:-v0.1.0}
     build: null
 
   airflow-webserver:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-airflow:${IQA_IMAGE_TAG:-v0.1.0}
+    environment:
+      IQA_IMAGE_DATA: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}
+      IQA_IMAGE_ML: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-ml:${IQA_IMAGE_TAG:-v0.1.0}
+      IQA_IMAGE_DVC: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-dvc-gate:${IQA_IMAGE_TAG:-v0.1.0}
 
   airflow-scheduler:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-airflow:${IQA_IMAGE_TAG:-v0.1.0}
+    environment:
+      IQA_IMAGE_DATA: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}
+      IQA_IMAGE_ML: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-ml:${IQA_IMAGE_TAG:-v0.1.0}
+      IQA_IMAGE_DVC: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-dvc-gate:${IQA_IMAGE_TAG:-v0.1.0}

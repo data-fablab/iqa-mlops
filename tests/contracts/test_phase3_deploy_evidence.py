@@ -47,8 +47,21 @@ def test_prod_compose_uses_tagged_registry_images_without_latest_or_build_fallba
         assert "IQA_IMAGE_REGISTRY" in image
         assert "IQA_IMAGE_TAG" in image
         assert ":latest" not in image
-    for service in ["iqa-api", "iqa-inference", "iqa-ingestion", "iqa-replay", "iqa-trainer", "iqa-monitoring", "airflow-init"]:
+    services_with_base_build = [
+        "iqa-api",
+        "iqa-inference",
+        "iqa-ingestion",
+        "iqa-replay",
+        "iqa-trainer",
+        "iqa-monitoring",
+        "airflow-init",
+    ]
+    for service in services_with_base_build:
         assert services[service]["build"] is None
+    for service in ["airflow-webserver", "airflow-scheduler"]:
+        assert "build" not in services[service]
+        assert services[service]["environment"]["IQA_IMAGE_DATA"].endswith("/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}")
+        assert services[service]["environment"]["IQA_IMAGE_ML"].endswith("/iqa-ml:${IQA_IMAGE_TAG:-v0.1.0}")
 
 
 def test_ci_publish_images_covers_role_and_airflow_images_without_latest() -> None:

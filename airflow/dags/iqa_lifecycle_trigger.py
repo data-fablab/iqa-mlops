@@ -30,10 +30,7 @@ from __future__ import annotations
 
 import json
 
-try:
-    from iqa.dags import build_container_dag, data_image, make_container_task
-except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
-    build_container_dag = data_image = make_container_task = None
+from iqa.dags import build_container_dag, data_image, make_container_task
 
 
 DECISION_TASK_ID = "evaluate_decision"
@@ -93,21 +90,17 @@ def _define() -> None:
     op_evaluate_decision >> op_gate_on_decision >> op_trigger_lifecycle
 
 
-dag = (
-    build_container_dag(
-        dag_id="iqa_lifecycle_trigger",
-        define=_define,
-        schedule="@hourly",
-        tags=["iqa", "lifecycle", "trigger"],
-        params={
-            "scenario_id": "production_replay_natural",
-            "conforming_validated_count": 0,
-            "drift_confirmed": False,
-            "roi_fail_rate": 0.0,
-            "target_stage": "test",
-            "image": data_image(),
-        },
-    )
-    if build_container_dag is not None
-    else None
+dag = build_container_dag(
+    dag_id="iqa_lifecycle_trigger",
+    define=_define,
+    schedule="@hourly",
+    tags=["iqa", "lifecycle", "trigger"],
+    params={
+        "scenario_id": "production_replay_natural",
+        "conforming_validated_count": 0,
+        "drift_confirmed": False,
+        "roi_fail_rate": 0.0,
+        "target_stage": "test",
+        "image": data_image(),
+    },
 )

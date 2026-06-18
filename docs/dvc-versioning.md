@@ -28,8 +28,9 @@ Le remote par defaut reste `iqa-minio`, configure dans `.dvc/config`.
 ## Airflow
 
 Le DAG `iqa_dvc_reproducibility` expose DVC comme gate de reproductibilite et
-de data lineage. Il appelle `iqa-check-dvc-reproducibility` sans reseau par
-defaut.
+de data lineage. Il lance `iqa-check-dvc-reproducibility` dans l'image `data`
+via la factory Airflow containerisee ; l'image Airflow ne porte pas la CLI IQA.
+Le mode reseau reste desactive par defaut.
 
 Mode local ou CI Airflow :
 
@@ -37,15 +38,17 @@ Mode local ou CI Airflow :
 airflow dags trigger iqa_dvc_reproducibility
 ```
 
-Mode serveur avec MinIO :
+Mode serveur gate runtime conteneurise :
 
 ```bash
 airflow dags trigger iqa_dvc_reproducibility \
-  --conf '{"with_network": true}'
+  --conf '{"with_network": false,"skip_regeneration": true}'
 ```
 
 `--with-network` reste explicite : c'est uniquement dans ce mode que la commande
-verifie `dvc pull` et `dvc push` sur `data/raw/hss-iad.dvc`. Les DAGs metier
+verifie `dvc pull` et `dvc push` sur `data/raw/hss-iad.dvc`. La preuve Airflow
+serveur utilise `skip_regeneration=true` parce que la regeneration stricte avec
+`git diff` est une commande operateur/CI hors conteneur one-shot. Les DAGs metier
 `iqa_ingestion`, `iqa_replay`, `iqa_monitoring` et `iqa_lifecycle` ne lancent pas
 de `dvc push` directement.
 

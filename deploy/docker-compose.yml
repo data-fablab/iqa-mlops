@@ -1,5 +1,6 @@
 services:
   iqa-api:
+    image: iqa-serving:local
     build:
       context: ..
       target: serving
@@ -11,6 +12,7 @@ services:
     depends_on: [iqa-inference, postgres]
 
   iqa-inference:
+    image: iqa-ml:local
     build:
       context: ..
       target: ml
@@ -36,6 +38,7 @@ services:
     depends_on: [iqa-api]
 
   iqa-ingestion:
+    image: iqa-data:local
     build:
       context: ..
       target: data
@@ -44,6 +47,7 @@ services:
     profiles: ["batch"]
 
   iqa-replay:
+    image: iqa-data:local
     build:
       context: ..
       target: data
@@ -52,6 +56,7 @@ services:
     profiles: ["batch"]
 
   iqa-trainer:
+    image: iqa-ml:local
     build:
       context: ..
       target: ml
@@ -64,6 +69,7 @@ services:
       - gpu_lock:/var/run/iqa-gpu
 
   iqa-monitoring:
+    image: iqa-data:local
     build:
       context: ..
       target: data
@@ -109,6 +115,9 @@ services:
       AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
       AIRFLOW__METRICS__STATSD_PORT: "9125"
       AIRFLOW__METRICS__STATSD_PREFIX: airflow
+      IQA_IMAGE_DATA: ${IQA_IMAGE_DATA:-iqa-data:local}
+      IQA_IMAGE_ML: ${IQA_IMAGE_ML:-iqa-ml:local}
+      IQA_IMAGE_DVC: ${IQA_IMAGE_DVC:-iqa-dvc-gate:local}
       # Expose iqa.dags.operators (factory) without installing the metier runtime.
       PYTHONPATH: /opt/iqa/src
     ports: ["8080:8080"]
@@ -143,6 +152,9 @@ services:
       IQA_AIRFLOW_BACKEND: docker
       IQA_DOCKER_NETWORK: iqa_net
       IQA_GPU_LOCK_VOLUME: iqa_gpu_lock
+      IQA_IMAGE_DATA: ${IQA_IMAGE_DATA:-iqa-data:local}
+      IQA_IMAGE_ML: ${IQA_IMAGE_ML:-iqa-ml:local}
+      IQA_IMAGE_DVC: ${IQA_IMAGE_DVC:-iqa-dvc-gate:local}
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
       - ../src:/opt/iqa/src:ro
