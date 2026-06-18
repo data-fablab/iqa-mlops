@@ -206,6 +206,27 @@ def test_run_dataset_materialises_the_candidate_and_reports_its_uri(
     assert result["dataset_uri"].startswith("s3://")
 
 
+def test_run_dataset_emits_the_dataset_uri_as_its_last_stdout_line(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """DockerOperator pushes the last stdout line as XCom: it must be the URI."""
+    manifest = tmp_path / "candidate.csv"
+    manifest.write_text("event_id\nevt_1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["iqa-run-dataset", "--manifest", str(manifest),
+         "--scenario-id", "s1", "--candidate-version", "v002"],
+    )
+
+    run_dataset.main()
+
+    last_line = capsys.readouterr().out.strip().splitlines()[-1]
+    assert last_line == "s3://iqa-source-datasets/model_datasets/s1/v002/candidate.csv"
+
+
 def test_materialise_dataset_writes_exact_bytes_to_a_deterministic_key(
     tmp_path: Path,
 ) -> None:

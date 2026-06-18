@@ -47,6 +47,18 @@ def print_json(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def print_json_with_xcom_ref(payload: dict[str, Any], ref: str) -> None:
+    """Print the human-readable JSON, then ``ref`` as the final line.
+
+    ``DockerOperator`` pushes the container's *last* stdout line as the task
+    XCom. A boundary whose result feeds a downstream task prints its pretty JSON
+    for the logs, then a single-line reference (e.g. an ``s3://`` URI) that
+    becomes the XCom value -- "references only, no payloads" (ADR 0008).
+    """
+    print_json(payload)
+    print(ref)
+
+
 def str2bool(value: str | bool) -> bool:
     """Parse a boolean passed as a templated argv value (not a CLI flag).
 
@@ -75,6 +87,7 @@ __all__ = [
     "csv_manifest_summary",
     "load_yaml_config",
     "print_json",
+    "print_json_with_xcom_ref",
     "read_csv_rows",
     "stable_unique",
     "str2bool",

@@ -55,6 +55,9 @@ def _define() -> None:
             "iqa-run-train",
             "--scenario-id", "{{ params.scenario_id }}",
             "--dataset-version", "{{ params.candidate_version }}",
+            # XCom from the dataset task: the s3:// URI of the materialised
+            # candidate (its last stdout line), so train resolves it by URI.
+            "--dataset-uri", "{{ ti.xcom_pull(task_ids='dataset') }}",
             "--output-checkpoint", "{{ params.checkpoint }}",
             "--wait-for-gpu",
         ],

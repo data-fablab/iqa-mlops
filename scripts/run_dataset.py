@@ -18,7 +18,7 @@ from pathlib import Path
 from iqa.storage import IQA_BUCKETS
 from iqa.storage.object_store import ObjectStore, create_object_store
 
-from scripts.airflow_contracts import csv_manifest_summary, print_json
+from scripts.airflow_contracts import csv_manifest_summary, print_json_with_xcom_ref
 
 DATASET_BUCKET = IQA_BUCKETS["source_datasets"]
 
@@ -73,7 +73,8 @@ def main() -> None:
         "dataset_uri": dataset_uri,
         "status": "materialized",
     }
-    print_json(result)
+    # The dataset URI is the XCom the downstream train task pulls (ADR 0008).
+    print_json_with_xcom_ref(result, dataset_uri)
 
 
 if __name__ == "__main__":
