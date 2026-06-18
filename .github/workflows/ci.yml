@@ -79,7 +79,8 @@ jobs:
           rm -f .env
 
   publish-images:
-    # Build and push the per-role images (serving/ml/data) to Docker Hub with
+    # Build and push the per-role images (serving/ml/data) plus the Airflow
+    # orchestration image to Docker Hub with
     # immutable tags (git SHA + version tag on v* releases; never `latest`).
     # Opt-in: enable by setting the IQA_PUBLISH_IMAGES=true repo variable and the
     # DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets. Skipped on PRs and when off,
@@ -130,5 +131,27 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Compute immutable tags for iqa-airflow (never latest)
+        if: matrix.image == 'iqa-data'
+        id: meta_airflow
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ vars.IQA_IMAGE_REGISTRY || 'data-fablab' }}/iqa-airflow
+          tags: |
+            type=sha,format=long
+            type=ref,event=tag
+          flavor: latest=false
+
+      - name: Build and push iqa-airflow
+        if: matrix.image == 'iqa-data'
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/airflow
+          push: true
+          tags: ${{ steps.meta_airflow.outputs.tags }}
+          labels: ${{ steps.meta_airflow.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

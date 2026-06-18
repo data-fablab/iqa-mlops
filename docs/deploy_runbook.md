@@ -163,6 +163,12 @@ Le service `reverse-proxy` (Nginx) expose tout derriere le port 80 :
 Dashboard Grafana : dossier "IQA" -> `IQA - Vue d'ensemble` (V/O/R, latence,
 erreurs, ROI fail, incidents IA, modele actif, verrou GPU).
 
+Kong est la cible Phase 3 pour la couche API Gateway / policies : protection de
+routes, extension d'authentification, rate limiting et gouvernance transversale.
+Nginx reste le reverse proxy operationnel/fallback du compose tant que Kong est
+integre progressivement. `iqa-api` reste l'API metier ; Kong porte les politiques
+transverses ; Nginx assure l'exposition pragmatique des services.
+
 ## 7. Verrou GPU pendant une demo
 
 Mono-GPU : pas d'entrainement concurrent pendant l'inference demo.
@@ -188,10 +194,12 @@ MLflow Registry (source de verite), pas par redeploiement de conteneur.
 
 ### 8.1 Deploiement depuis les images publiees (registre, tags figes)
 
-La CI (`publish-images`) builde et pousse les 3 images par role vers Docker Hub
+La CI (`publish-images`) builde et pousse les images par role vers Docker Hub
 avec des tags **immuables** (SHA git pour chaque push ; tag de version `vX.Y.Z`
 sur un tag git `v*`). Jamais de `latest`. Activation : variable repo
 `IQA_PUBLISH_IMAGES=true` + secrets `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`.
+Les images publiees couvrent `iqa-serving`, `iqa-ml`, `iqa-data` et l'image
+custom `iqa-airflow`.
 
 Sur le serveur, l'overlay `docker-compose.prod.yml` tire les images du registre au
 lieu de builder localement. Figer la version a deployer dans `.env` :
