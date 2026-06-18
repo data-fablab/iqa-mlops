@@ -1,6 +1,25 @@
 {
   "artifact_uri": "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt",
   "dataset_version": "feature_ae_good_v001_bootstrap",
+  "decision_thresholds": {
+    "calibration_set_id": "calibration_set_v001",
+    "created_at": "2026-06-18T12:56:24.127337+00:00",
+    "method": "calibration_good_quantiles",
+    "model_version": "rd_feature_ae_gated_v001_bootstrap",
+    "orange_quantile": 0.95,
+    "red_quantile": 0.99,
+    "sample_count": 102,
+    "score_contract_version": "feature_ae_preprocessing_v001",
+    "score_image": "topk_mean",
+    "score_max": 292.6936340332031,
+    "score_median": 2.961828827857971,
+    "score_min": 0.6641950011253357,
+    "score_region": "functional_surface_prediction",
+    "score_smoothing": "median3",
+    "threshold_orange": 125.7439712524414,
+    "threshold_red": 203.27940811157205,
+    "topk_fraction": 0.005
+  },
   "model_type": "reverse_distill_resnet18_dual_context_gated",
   "model_version": "rd_feature_ae_gated_v001_bootstrap",
   "preprocessing_contract": {
