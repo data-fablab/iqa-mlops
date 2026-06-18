@@ -49,10 +49,20 @@ the replay/data context:
 - `git_commit`
 - `scenario_id`
 - `model_version` or candidate version
+- `candidate_version`
+- `roi_model_version`
+- `feature_ae_version`
 - `preprocessing_contract_version`
 
 The MLflow Registry remains the source of truth for active/promoted model
 versions. MinIO stores the files; MLflow decides which model is active.
+
+There are two evidence modes:
+
+- `decision-only`: proves replay, DVC stages, MinIO model restore, model
+  manifest, thresholds and trigger decision.
+- `train-on-trigger`: also proves an MLflow run, its required tags, its model
+  artifacts and the Registry naming contract.
 
 ## Operator Summary Command
 
@@ -76,6 +86,15 @@ uv run --extra cpu iqa-lineage-summary \
 The summary includes the replay scenario, processed lots, dataset versions,
 model artifact URI, SHA256, preprocessing contract, decision thresholds, DVC
 stages and MLflow traceability fields.
+
+For a training evidence run, require an MLflow run id explicitly:
+
+```bash
+uv run --extra cpu iqa-lineage-summary \
+  --replay-run-dir .cache/iqa/replay_lifecycle/production_replay_natural/<run_id> \
+  --model-version rd_feature_ae_gated_v001_bootstrap \
+  --require-mlflow-run
+```
 
 ## Server Evidence Flow
 
@@ -107,6 +126,18 @@ uv run --extra cu128 iqa-run-replay-lifecycle-cycle \
   --wait-for-gpu
 ```
 
+Run the full training evidence in stage `test` only:
+
+```bash
+uv run --extra cu128 iqa-run-replay-lifecycle-cycle \
+  --scenario-id production_replay_natural \
+  --image-root /opt/iqa/iqa-mlops/data/raw/hss-iad \
+  --mode train-on-trigger \
+  --max-events 60 \
+  --stage test \
+  --wait-for-gpu
+```
+
 Build the lineage evidence:
 
 ```bash
@@ -114,6 +145,10 @@ uv run --extra cu128 iqa-lineage-summary \
   --replay-run-dir .cache/iqa/replay_lifecycle/production_replay_natural/<run_id> \
   --model-version rd_feature_ae_gated_v001_bootstrap
 ```
+
+For `train-on-trigger`, add `--require-mlflow-run`. The command must expose
+`mlflow_tracking.evidence_status = "present"`, `mlflow_tracking.run_id`, the
+required tags, and `mlflow_tracking.registry_source_of_truth = "mlflow_registry"`.
 
 Validate DVC/MinIO explicitly:
 

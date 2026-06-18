@@ -8,21 +8,21 @@ from scripts.lineage_summary import build_lineage_summary
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _write_replay_run(run_dir: Path) -> None:
+def _write_replay_run(run_dir: Path, *, mlflow_run_id: str | None = None) -> None:
     run_dir.mkdir(parents=True)
     (run_dir / "summary.json").write_text(
         json.dumps(
             {
                 "scenario_id": "production_replay_natural",
                 "run_id": "replay_lifecycle_test",
-                "mode": "decision-only",
+                "mode": "train-on-trigger" if mlflow_run_id else "decision-only",
                 "events_processed": 2,
                 "lots_processed": 1,
                 "trigger_lifecycle": False,
                 "trigger_reason": "natural_waiting_for_50_oracle_conformes",
                 "candidate_dataset_version": "",
                 "candidate_checkpoint": None,
-                "mlflow_run_id": None,
+                "mlflow_run_id": mlflow_run_id,
             }
         ),
         encoding="utf-8",
@@ -114,6 +114,52 @@ def test_lineage_summary_builds_complete_evidence(tmp_path: Path) -> None:
     assert summary["threshold_sources"] == ["manifest:calibration_good_quantiles"]
     assert set(summary["dvc"]["stages"]) >= {"inventory", "piece_events", "replay", "validation", "model_dataset"}
     assert summary["mlflow_tracking"]["source_of_truth"] == "mlflow_registry"
+    assert summary["mlflow_tracking"]["evidence_status"] == "absent_decision_only"
+    assert summary["mlflow_tracking"]["registered_model_name"] == "feature_ae__production_replay_natural"
+    assert summary["mlflow_tracking"]["registry_source_of_truth"] == "mlflow_registry"
+
+
+def test_lineage_summary_requires_mlflow_run_when_requested(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    _write_replay_run(run_dir)
+
+    with pytest.raises(ValueError, match="requires mlflow_run_id"):
+        build_lineage_summary(
+            replay_run_dir=run_dir,
+            model_version="rd_feature_ae_gated_v001_bootstrap",
+            dvc_yaml=ROOT / "dvc.yaml",
+            require_mlflow_run=True,
+        )
+
+
+def test_lineage_summary_reports_mlflow_training_evidence(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    _write_replay_run(run_dir, mlflow_run_id="mlflow-run-001")
+
+    summary = build_lineage_summary(
+        replay_run_dir=run_dir,
+        model_version="rd_feature_ae_gated_v001_bootstrap",
+        dvc_yaml=ROOT / "dvc.yaml",
+        require_mlflow_run=True,
+    )
+
+    assert summary["lineage_status"] == "complete"
+    assert summary["mlflow_run_id"] == "mlflow-run-001"
+    assert summary["mlflow_tracking"]["run_id"] == "mlflow-run-001"
+    assert summary["mlflow_tracking"]["evidence_status"] == "present"
+    assert summary["mlflow_tracking"]["registered_model_name"] == "feature_ae__production_replay_natural"
+    assert summary["mlflow_tracking"]["registry_source_of_truth"] == "mlflow_registry"
+    assert set(summary["mlflow_tracking"]["required_tags"]) >= {
+        "dataset_version",
+        "manifest_version",
+        "git_commit",
+        "scenario_id",
+        "model_version",
+        "candidate_version",
+        "roi_model_version",
+        "feature_ae_version",
+        "preprocessing_contract_version",
+    }
 
 
 def test_lineage_summary_rejects_incomplete_replay_run(tmp_path: Path) -> None:
@@ -137,6 +183,10 @@ def test_mlflow_logger_declares_required_lineage_fields() -> None:
         '"manifest_version"',
         '"git_commit"',
         '"scenario_id"',
+        '"model_version"',
+        '"candidate_version"',
+        '"roi_model_version"',
+        '"feature_ae_version"',
         '"preprocessing_contract_version"',
         "mlflow.set_tags(tags)",
     ]:

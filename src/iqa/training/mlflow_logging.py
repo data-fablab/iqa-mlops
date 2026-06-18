@@ -132,6 +132,11 @@ class MLflowRunLogger:
         dataset_version: str,
         scenario_id: str,
         manifest_version: str = "",
+        model_version: str = "",
+        candidate_version: str = "",
+        roi_model_version: str = "",
+        feature_ae_version: str = "",
+        preprocessing_contract_version: str = FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
     ) -> None:
         """Set traceability tags.
 
@@ -145,6 +150,11 @@ class MLflowRunLogger:
             "dataset_version": dataset_version,
             "manifest_version": manifest_version,
             "scenario_id": scenario_id,
+            "model_version": model_version or candidate_version,
+            "candidate_version": candidate_version,
+            "roi_model_version": roi_model_version,
+            "feature_ae_version": feature_ae_version,
+            "preprocessing_contract_version": preprocessing_contract_version,
         }
         mlflow.set_tags(tags)
 
@@ -194,6 +204,11 @@ def train_feature_ae_with_mlflow_logging(
             dataset_version=config.dataset_version,
             scenario_id=config.scenario_id,
             manifest_version=config.manifest_version,
+            model_version=config.candidate_version,
+            candidate_version=config.candidate_version,
+            roi_model_version=config.roi_model_version,
+            feature_ae_version=config.feature_ae_version,
+            preprocessing_contract_version=FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
         )
 
         # Train the model

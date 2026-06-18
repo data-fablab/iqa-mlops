@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from iqa.models.artifacts import DEFAULT_FEATURE_AE_MODEL_VERSION, load_model_manifest, model_manifest_path
+from iqa.registry import registered_model_name
 
 DEFAULT_DVC_YAML = Path("dvc.yaml")
 
@@ -20,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-version", default=DEFAULT_FEATURE_AE_MODEL_VERSION)
     parser.add_argument("--dvc-yaml", type=Path, default=DEFAULT_DVC_YAML)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--require-mlflow-run", action="store_true")
     return parser.parse_args()
 
 
@@ -29,6 +31,7 @@ def main() -> None:
         replay_run_dir=args.replay_run_dir,
         model_version=args.model_version,
         dvc_yaml=args.dvc_yaml,
+        require_mlflow_run=args.require_mlflow_run,
     )
     payload = json.dumps(summary, indent=2, sort_keys=True) + "\n"
     if args.output:
@@ -42,6 +45,7 @@ def build_lineage_summary(
     replay_run_dir: Path,
     model_version: str,
     dvc_yaml: Path = DEFAULT_DVC_YAML,
+    require_mlflow_run: bool = False,
 ) -> dict[str, Any]:
     run_summary = _read_required_json(replay_run_dir / "summary.json")
     events = _read_jsonl(replay_run_dir / "events.jsonl")
@@ -61,8 +65,12 @@ def build_lineage_summary(
     threshold_sources = _stable_unique(str(event.get("threshold_source") or "") for event in events)
 
     mlflow_run_id = str(run_summary.get("mlflow_run_id") or "")
+    if require_mlflow_run and not mlflow_run_id:
+        raise ValueError("lineage summary requires mlflow_run_id, but summary.json has no MLflow run.")
+    scenario_id = str(run_summary.get("scenario_id") or "")
+    registry_model_name = registered_model_name(scenario_id) if scenario_id else None
     summary = {
-        "scenario_id": run_summary.get("scenario_id"),
+        "scenario_id": scenario_id or None,
         "run_id": run_summary.get("run_id"),
         "mode": run_summary.get("mode"),
         "events_processed": run_summary.get("events_processed"),
@@ -75,12 +83,18 @@ def build_lineage_summary(
         "mlflow_tracking": {
             "source_of_truth": "mlflow_registry",
             "run_id": mlflow_run_id or None,
+            "evidence_status": "present" if mlflow_run_id else "absent_decision_only",
+            "registered_model_name": registry_model_name,
+            "registry_source_of_truth": "mlflow_registry",
             "required_tags": [
                 "dataset_version",
                 "manifest_version",
                 "git_commit",
                 "scenario_id",
                 "model_version",
+                "candidate_version",
+                "roi_model_version",
+                "feature_ae_version",
                 "preprocessing_contract_version",
             ],
         },
