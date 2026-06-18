@@ -208,7 +208,20 @@ bash ../deploy/smoke-test.sh
 ```
 
 Rollback applicatif = redeployer le tag precedent (`IQA_IMAGE_TAG=v0.0.9`, `pull`,
-`up -d`). Le rollback **modele** reste distinct : il passe par le MLflow Registry.
+`up -d`). Procedure detaillee (cas partiel, base de donnees, validation) :
+`rollback-server.md`. Le rollback **modele** reste distinct : il passe par le
+MLflow Registry (`rollback.md`).
+
+### 8.2 Demo reproductible from scratch
+
+```bash
+bash deploy/demo-from-scratch.sh      # ou : make demo-scratch
+```
+
+Repart d'un etat vierge (`down -v`), redemarre toute la stack, attend l'API,
+joue le smoke test puis le parcours metier (`iqa-demo-phase2`). Ideal pour une
+soutenance ou une validation de bout en bout. `--yes` saute la confirmation du
+`down -v` destructif.
 
 ## 9. Sauvegardes
 
