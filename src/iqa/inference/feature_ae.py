@@ -7,7 +7,7 @@ from pathlib import Path
 
 import torch
 
-from iqa.datasets import FEATURE_AE_CONTEXT_SIZE, FEATURE_AE_TILE_SIZE, load_image_tensor
+from iqa.datasets import load_image_tensor
 from iqa.inference.helpers import compute_status, measure_inference_time
 from iqa.models.feature_ae import (
     DEFAULT_FEATURE_LAYERS,
@@ -17,6 +17,7 @@ from iqa.models.feature_ae import (
     load_rd_feature_ae_gated,
     normalize_feature_layers,
 )
+from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING
 
 
 @dataclass(frozen=True)
@@ -39,9 +40,9 @@ def predict_feature_ae_image(
     image_path: str | Path,
     checkpoint_path: str | Path,
     *,
-    image_size: int = FEATURE_AE_TILE_SIZE,
-    context_size: int = FEATURE_AE_CONTEXT_SIZE,
-    preprocessing_mode: str = "tiled_context",
+    image_size: int = CANONICAL_FEATURE_AE_PREPROCESSING.image_size,
+    context_size: int = CANONICAL_FEATURE_AE_PREPROCESSING.context_size,
+    preprocessing_mode: str = CANONICAL_FEATURE_AE_PREPROCESSING.preprocessing_mode,
     threshold_orange: float = 0.02,
     threshold_red: float = 0.05,
     device: str = "cpu",

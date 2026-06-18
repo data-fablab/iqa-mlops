@@ -56,12 +56,14 @@ Le mode historique `tile_256_overlap` n'est pas conserve. Il correspondait a une
 Mode IQA retenu :
 
 ```text
+preprocessing_contract_version = feature_ae_preprocessing_v001
 preprocessing_mode = tiled_context
 image_size         = 384
 context_size       = 768
 tile_stride        = 192
 normalization      = imagenet
 sampling           = all
+augmentation       = none
 ```
 
 Pipeline image :
@@ -74,7 +76,12 @@ ResizeLetterbox
 -> contexte 768
 ```
 
-Le meme contrat de preprocessing doit etre utilise en training et en inference. Les parametres doivent etre sauvegardes dans les metadata du checkpoint.
+Le meme contrat de preprocessing doit etre utilise en training, evaluation,
+inference, bootstrap et lifecycle. Les parametres sont centralises dans
+`src/iqa/training/feature_ae_contracts.py` et sauvegardes dans les metadata du
+checkpoint. Les commandes champion/bootstrap/lifecycle refusent les overrides
+non canoniques, sauf avec le flag explicite de test local
+`--allow-noncanonical-preprocessing`.
 
 ## 4. Separation ROI et GT defaut
 
@@ -154,6 +161,7 @@ repeat_factor        = 2
 val_fraction         = 0.15
 scheduler            = plateau
 early_stopping       = 6 epochs
+metric_early_stopping = 4 epochs without business metric improvement
 ```
 
 Commande type :
@@ -174,6 +182,28 @@ uv run --extra cpu iqa-train-feature-ae `
   --layer-loss-weights layer2=0.65 layer3=0.35
 ```
 
+Commande bootstrap serveur recommandee :
+
+```bash
+uv run --extra cpu iqa-build-feature-ae-bootstrap \
+  --image-root /path/to/hss-iad \
+  --device cuda \
+  --publish-minio
+```
+
+Cette commande restaure le ROI depuis MinIO, genere les ROI bootstrap si
+necessaire, entraine le Feature-AE, selectionne le checkpoint champion par
+metriques metier, publie le checkpoint dans `s3://iqa-models` et met a jour le
+manifest Git du bootstrap. En developpement local, utiliser `--dry-run` pour
+verifier la configuration sans lancer le training.
+
+Le bootstrap serveur evalue les metriques metier a chaque epoch. L'arret
+anticipe principal suit la progression metier : si aucune metrique prioritaire
+ne s'ameliore pendant 4 evaluations consecutives, le training s'arrete. La
+`val_loss` reste utilisee pour le scheduler LR et comme signal de stabilite,
+mais ne pilote ni le champion ni l'arret principal quand les metriques metier
+sont disponibles.
+
 ## 6. Evaluation metier
 
 La selection du champion ne doit pas reposer sur la loss seule.
@@ -188,9 +218,23 @@ image_ap
 Metriques pixel avec GT oracle :
 
 ```text
+pixel_auroc
 pixel_ap
 pixel_aupimo_1e-5_1e-3
 ```
+
+Le bootstrap initial est selectionne selon l'ordre suivant :
+
+```text
+pixel_aupimo_1e-5_1e-3
+-> pixel_ap
+-> image_ap
+-> image_auroc
+```
+
+`val_loss` reste un garde-fou de stabilite et de debug. Elle ne doit pas
+selectionner le champion si les metriques metier pointent vers un autre
+checkpoint, et elle ne doit pas arreter le bootstrap avant la patience metier.
 
 Scoring cible :
 
@@ -232,7 +276,10 @@ params.json
 loss_history.csv
 ```
 
-`checkpoint.pt` pointe vers le meilleur checkpoint metier image si disponible, sinon vers le meilleur checkpoint loss.
+`checkpoint.pt` pointe vers le checkpoint champion selectionne par metriques
+metier. Pour le bootstrap initial, la priorite est donnee a la localisation
+metier (`pixel_aupimo`, puis `pixel_ap`) avant les metriques image. La loss ne
+sert pas de critere champion principal.
 
 Metadata minimales attendues dans le checkpoint :
 
@@ -241,6 +288,8 @@ model_type
 teacher_backbone
 layers
 preprocessing_mode
+preprocessing_contract_version
+preprocessing_contract
 image_size
 context_size
 tile_stride

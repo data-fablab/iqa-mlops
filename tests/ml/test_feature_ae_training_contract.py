@@ -185,12 +185,64 @@ def test_tiny_feature_ae_training_smoke(tmp_path: Path) -> None:
             val_fraction=0.0,
             max_steps=1,
             early_stopping_patience=0,
+            allow_noncanonical_preprocessing=True,
         )
     )
 
     assert result["steps"] == 1
     assert (tmp_path / "run" / "checkpoint_last.pt").exists()
     assert (tmp_path / "run" / "params.json").exists()
+
+
+def test_metric_early_stopping_uses_business_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    image_root = tmp_path / "images"
+    for index in range(2):
+        image_path = image_root / "Casting_class1" / "train" / "good" / f"part_{index}.jpg"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (32, 32), (128 + index, 128, 128)).save(image_path)
+    manifest = tmp_path / "manifest.csv"
+    _write_manifest(
+        manifest,
+        [
+            {
+                "image_ids": f"img_{index}",
+                "relative_paths": f"Casting_class1/train/good/part_{index}.jpg",
+                "split_set": "train",
+                "label": "good",
+                "is_defective": "false",
+            }
+            for index in range(2)
+        ],
+    )
+
+    def fake_eval(config: object) -> dict[str, object]:
+        return {"metrics": {"image_ap": 0.5}}
+
+    monkeypatch.setattr("iqa.training.feature_ae.evaluate_feature_ae_checkpoint", fake_eval)
+
+    result = train_feature_ae(
+        FeatureAETrainingConfig(
+            manifest_path=manifest,
+            image_root=image_root,
+            output_checkpoint=tmp_path / "run" / "checkpoint.pt",
+            image_size=32,
+            context_size=64,
+            tile_stride=32,
+            batch_size=1,
+            epochs=8,
+            repeat_factor=1,
+            val_fraction=0.0,
+            early_stopping_patience=0,
+            metric_eval_manifest_path=manifest,
+            metric_eval_every_epochs=1,
+            metric_early_stopping_patience=2,
+            allow_noncanonical_preprocessing=True,
+        )
+    )
+
+    assert result["metric_early_stopped"] is True
+    assert result["best_business_metric"] == "image_ap"
+    assert result["steps"] == 6
 
 
 def _write_manifest(path: Path, rows: list[dict[str, str]]) -> None:

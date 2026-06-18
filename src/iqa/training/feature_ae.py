@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader, random_split
 
-from iqa.datasets import FEATURE_AE_CONTEXT_SIZE, FEATURE_AE_TILE_SIZE, TiledFeatureAEDataset
+from iqa.datasets import TiledFeatureAEDataset
 from iqa.models.feature_ae import (
     DEFAULT_FEATURE_LAYERS,
     FEATURE_AE_MODEL_TYPE,
@@ -26,6 +27,13 @@ from iqa.training.feature_ae_evaluation import (
     evaluate_feature_ae_checkpoint,
     update_metric_best_checkpoints,
 )
+from iqa.training.feature_ae_contracts import (
+    CANONICAL_FEATURE_AE_PREPROCESSING,
+    FEATURE_AE_BUSINESS_METRIC_PRIORITY,
+    FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
+    assert_canonical_feature_ae_preprocessing,
+    canonical_feature_ae_preprocessing_dict,
+)
 
 
 REPLAY_SCENARIOS = {"production_replay_natural", "drift_domain_extension"}
@@ -37,11 +45,11 @@ class FeatureAETrainingConfig:
     image_root: Path
     output_checkpoint: Path
     category: str = ""
-    image_size: int = FEATURE_AE_TILE_SIZE
-    context_size: int = FEATURE_AE_CONTEXT_SIZE
-    preprocessing_mode: str = "tiled_context"
-    tile_stride: int = FEATURE_AE_TILE_SIZE // 2
-    tile_train_sampling: str = "all"
+    image_size: int = CANONICAL_FEATURE_AE_PREPROCESSING.image_size
+    context_size: int = CANONICAL_FEATURE_AE_PREPROCESSING.context_size
+    preprocessing_mode: str = CANONICAL_FEATURE_AE_PREPROCESSING.preprocessing_mode
+    tile_stride: int = CANONICAL_FEATURE_AE_PREPROCESSING.tile_stride
+    tile_train_sampling: str = CANONICAL_FEATURE_AE_PREPROCESSING.tile_train_sampling
     batch_size: int = 16
     epochs: int = 14
     learning_rate: float = 5e-5
@@ -56,14 +64,17 @@ class FeatureAETrainingConfig:
     repeat_factor: int = 2
     val_fraction: float = 0.15
     roi_predictions_dirs: tuple[Path, ...] = ()
-    roi_threshold: float = 0.30
+    roi_threshold: float = CANONICAL_FEATURE_AE_PREPROCESSING.roi_threshold
     roi_loss_weight: float = 1.0
     background_loss_weight: float = 0.02
-    min_roi_ratio: float = 0.03
+    min_roi_ratio: float = CANONICAL_FEATURE_AE_PREPROCESSING.min_roi_ratio
     lr_scheduler: str = "plateau"
     lr_patience: int = 4
     lr_factor: float = 0.5
     early_stopping_patience: int = 6
+    metric_early_stopping_patience: int = 4
+    require_business_metric_for_early_stopping: bool = False
+    allow_noncanonical_preprocessing: bool = False
     checkpoint_every_epochs: int = 1
     save_best: bool = True
     scenario_id: str = ""
@@ -87,11 +98,11 @@ class FeatureAETrainingConfig:
     metric_eval_calibration_mode: str = "per_layer"
     metric_eval_calibration_stat: str = "median_mad"
     metric_eval_calibration_max_images: int = 120
-    metric_eval_score_region: str = "functional_surface_prediction"
+    metric_eval_score_region: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_region
     metric_eval_apply_score_region_to_map: bool = False
-    metric_eval_score_smoothing: str = "median3"
-    metric_eval_score_image: str = "topk_mean"
-    metric_eval_topk_fraction: float = 0.005
+    metric_eval_score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing
+    metric_eval_score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image
+    metric_eval_topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction
     metric_eval_save_score_maps: bool = False
     metric_eval_save_previews: bool = False
     metric_eval_max_previews: int = 31
@@ -142,6 +153,12 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
     best_loss = float("inf")
     best_epoch = 0
     no_improve_epochs = 0
+    metric_eval_configured = config.metric_eval_every_epochs > 0 and config.metric_eval_manifest_path is not None
+    best_business_score: tuple[float, ...] | None = None
+    best_business_metric = ""
+    best_business_metric_value: float | None = None
+    metric_no_improve_epochs = 0
+    metric_early_stopped = False
     step = 0
     last_checkpoint = run_dir / "checkpoint_last.pt"
 
@@ -251,11 +268,40 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                 metrics=eval_result["metrics"],
                 epoch=epoch,
             )
+            business_score = _business_metric_score(eval_result["metrics"])
+            if business_score is None:
+                if config.require_business_metric_for_early_stopping:
+                    raise ValueError(
+                        "Feature-AE bootstrap requires at least one business metric: "
+                        + ", ".join(FEATURE_AE_BUSINESS_METRIC_PRIORITY)
+                    )
+            elif best_business_score is None or business_score > best_business_score:
+                best_business_score = business_score
+                best_business_metric, best_business_metric_value = _top_available_business_metric(eval_result["metrics"])
+                metric_no_improve_epochs = 0
+            else:
+                metric_no_improve_epochs += 1
+                if (
+                    config.metric_early_stopping_patience
+                    and metric_no_improve_epochs >= config.metric_early_stopping_patience
+                ):
+                    metric_early_stopped = True
+                    break
 
         if config.max_steps is not None and step >= config.max_steps:
             break
-        if config.early_stopping_patience and no_improve_epochs >= config.early_stopping_patience:
+        if (
+            not metric_eval_configured
+            and config.early_stopping_patience
+            and no_improve_epochs >= config.early_stopping_patience
+        ):
             break
+
+    if config.require_business_metric_for_early_stopping and metric_eval_configured and best_business_score is None:
+        raise ValueError(
+            "Feature-AE bootstrap finished without any usable business metric: "
+            + ", ".join(FEATURE_AE_BUSINESS_METRIC_PRIORITY)
+        )
 
     _write_history(run_dir / "loss_history.csv", history)
     (run_dir / "params.json").write_text(json.dumps(_metadata(config, layers), indent=2, sort_keys=True), encoding="utf-8")
@@ -268,8 +314,40 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
         "steps": step,
         "best_epoch": best_epoch,
         "best_loss": best_loss,
+        "best_business_metric": best_business_metric,
+        "best_business_metric_value": best_business_metric_value,
+        "metric_early_stopped": metric_early_stopped,
         "preprocessing_mode": config.preprocessing_mode,
+        "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
     }
+
+
+def _business_metric_score(metrics: dict[str, Any]) -> tuple[float, ...] | None:
+    score: list[float] = []
+    has_metric = False
+    for metric_name in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
+        value = metrics.get(metric_name)
+        if value is None:
+            score.append(float("-inf"))
+            continue
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            score.append(float("-inf"))
+            continue
+        has_metric = True
+        score.append(numeric)
+    return tuple(score) if has_metric else None
+
+
+def _top_available_business_metric(metrics: dict[str, Any]) -> tuple[str, float]:
+    for metric_name in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
+        value = metrics.get(metric_name)
+        if value is None:
+            continue
+        numeric = float(value)
+        if math.isfinite(numeric):
+            return metric_name, numeric
+    raise ValueError("No finite Feature-AE business metric is available.")
 
 
 def _run_epoch(
@@ -366,7 +444,8 @@ def _save_checkpoint(
             "image_size": config.image_size,
             "context_size": config.context_size,
             "preprocessing_mode": config.preprocessing_mode,
-            "normalization": "imagenet",
+            "normalization": CANONICAL_FEATURE_AE_PREPROCESSING.normalization,
+            "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
             "train_manifest": str(config.manifest_path),
             "steps": step,
         },
@@ -387,7 +466,9 @@ def _metadata(config: FeatureAETrainingConfig, layers: tuple[str, ...]) -> dict[
         "model_type": FEATURE_AE_MODEL_TYPE,
         "layers": list(layers),
         "teacher_backbone": "resnet18",
-        "normalization": "imagenet",
+        "normalization": CANONICAL_FEATURE_AE_PREPROCESSING.normalization,
+        "preprocessing_contract": canonical_feature_ae_preprocessing_dict(),
+        "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
     }
 
 
@@ -399,10 +480,20 @@ def _write_history(path: Path, history: list[dict[str, float | int]]) -> None:
 
 
 def _validate_config(config: FeatureAETrainingConfig) -> None:
-    if config.preprocessing_mode != "tiled_context":
-        raise ValueError("Feature-AE champion training only supports preprocessing_mode='tiled_context'.")
-    if config.tile_train_sampling != "all":
-        raise ValueError("Feature-AE champion training only supports tile_train_sampling='all'.")
+    assert_canonical_feature_ae_preprocessing(
+        preprocessing_mode=config.preprocessing_mode,
+        image_size=config.image_size,
+        context_size=config.context_size,
+        tile_stride=config.tile_stride,
+        tile_train_sampling=config.tile_train_sampling,
+        roi_threshold=config.roi_threshold,
+        min_roi_ratio=config.min_roi_ratio,
+        score_region=config.metric_eval_score_region,
+        score_smoothing=config.metric_eval_score_smoothing,
+        score_image=config.metric_eval_score_image,
+        topk_fraction=config.metric_eval_topk_fraction,
+        allow_noncanonical_preprocessing=config.allow_noncanonical_preprocessing,
+    )
     if config.loss != "l2_cosine":
         raise ValueError("Feature-AE champion training only supports loss='l2_cosine'.")
     if config.scenario_id in REPLAY_SCENARIOS:

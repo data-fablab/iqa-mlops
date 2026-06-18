@@ -93,6 +93,7 @@ def test_feature_ae_training_writes_reproducible_checkpoint(tmp_path: Path) -> N
             preprocessing_mode="tiled_context",
             batch_size=1,
             max_steps=1,
+            allow_noncanonical_preprocessing=True,
         )
     )
 

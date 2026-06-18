@@ -106,6 +106,7 @@ Model artifacts from MinIO:
 
 ```powershell
 uv run --extra cpu iqa-restore-model-artifacts --help
+uv run --extra cpu iqa-build-feature-ae-bootstrap --help
 ```
 
 Runtime services:

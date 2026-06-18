@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from iqa.training.feature_ae import FeatureAETrainingConfig, train_feature_ae
+from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING
 from iqa.training.feature_ae_evaluation import parse_layer_loss_weights
 
 
@@ -18,11 +19,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--category", default="")
     parser.add_argument("--model-type", default="reverse_distill_resnet18_dual_context_gated")
     parser.add_argument("--teacher-backbone", default="resnet18")
-    parser.add_argument("--image-size", "--input-size", "--tile-size", type=int, default=384)
-    parser.add_argument("--context-size", "--context-tile-size", type=int, default=768)
-    parser.add_argument("--preprocessing-mode", choices=["tiled_context"], default="tiled_context")
-    parser.add_argument("--tile-stride", "--tile-train-stride", type=int, default=192)
-    parser.add_argument("--tile-train-sampling", choices=["all"], default="all")
+    parser.add_argument("--image-size", "--input-size", "--tile-size", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.image_size)
+    parser.add_argument("--context-size", "--context-tile-size", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.context_size)
+    parser.add_argument("--preprocessing-mode", choices=["tiled_context"], default=CANONICAL_FEATURE_AE_PREPROCESSING.preprocessing_mode)
+    parser.add_argument("--tile-stride", "--tile-train-stride", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.tile_stride)
+    parser.add_argument("--tile-train-sampling", choices=["all"], default=CANONICAL_FEATURE_AE_PREPROCESSING.tile_train_sampling)
     parser.add_argument("--repeat-factor", type=int, default=2)
     parser.add_argument("--val-fraction", type=float, default=0.15)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -36,16 +37,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cosine-weight", type=float, default=0.5)
     parser.add_argument("--layers", nargs="+", default=["layer2", "layer3"])
     parser.add_argument("--layer-loss-weights", nargs="*", default=["layer2=0.65", "layer3=0.35"])
-    parser.add_argument("--augmentation-profile", default="none")
+    parser.add_argument("--augmentation-profile", default=CANONICAL_FEATURE_AE_PREPROCESSING.augmentation_profile)
     parser.add_argument("--roi-predictions-dir", action="append", type=Path, default=[])
-    parser.add_argument("--roi-threshold", type=float, default=0.30)
+    parser.add_argument("--roi-threshold", type=float, default=CANONICAL_FEATURE_AE_PREPROCESSING.roi_threshold)
     parser.add_argument("--roi-loss-weight", type=float, default=1.0)
     parser.add_argument("--background-loss-weight", type=float, default=0.02)
-    parser.add_argument("--min-roi-ratio", type=float, default=0.03)
+    parser.add_argument("--min-roi-ratio", type=float, default=CANONICAL_FEATURE_AE_PREPROCESSING.min_roi_ratio)
     parser.add_argument("--lr-scheduler", choices=["plateau", "none"], default="plateau")
     parser.add_argument("--lr-patience", type=int, default=4)
     parser.add_argument("--lr-factor", type=float, default=0.5)
     parser.add_argument("--early-stopping-patience", type=int, default=6)
+    parser.add_argument("--metric-early-stopping-patience", type=int, default=4)
+    parser.add_argument(
+        "--require-business-metric-for-early-stopping",
+        action="store_true",
+        help="Fail if metric-eval cannot produce any business metric.",
+    )
+    parser.add_argument(
+        "--allow-noncanonical-preprocessing",
+        action="store_true",
+        help="Only for tests/local dev; comparable champion/lifecycle candidates must use the canonical preprocessing contract.",
+    )
     parser.add_argument("--checkpoint-every-epochs", type=int, default=1)
     parser.add_argument("--save-best", action="store_true")
     parser.add_argument("--scenario-id", default="")
@@ -68,11 +80,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metric-eval-calibration-mode", default="per_layer")
     parser.add_argument("--metric-eval-calibration-stat", default="median_mad")
     parser.add_argument("--metric-eval-calibration-max-images", type=int, default=120)
-    parser.add_argument("--metric-eval-score-region", default="functional_surface_prediction")
+    parser.add_argument("--metric-eval-score-region", default=CANONICAL_FEATURE_AE_PREPROCESSING.score_region)
     parser.add_argument("--metric-eval-apply-score-region-to-map", action="store_true")
-    parser.add_argument("--metric-eval-score-smoothing", default="median3")
-    parser.add_argument("--metric-eval-score-image", default="topk_mean")
-    parser.add_argument("--metric-eval-topk-fraction", type=float, default=0.005)
+    parser.add_argument("--metric-eval-score-smoothing", default=CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing)
+    parser.add_argument("--metric-eval-score-image", default=CANONICAL_FEATURE_AE_PREPROCESSING.score_image)
+    parser.add_argument("--metric-eval-topk-fraction", type=float, default=CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction)
     parser.add_argument("--metric-eval-save-score-maps", action="store_true")
     parser.add_argument("--metric-eval-save-previews", action="store_true")
     parser.add_argument("--metric-eval-max-previews", type=int, default=31)
@@ -120,6 +132,9 @@ def main() -> None:
             lr_patience=args.lr_patience,
             lr_factor=args.lr_factor,
             early_stopping_patience=args.early_stopping_patience,
+            metric_early_stopping_patience=args.metric_early_stopping_patience,
+            require_business_metric_for_early_stopping=args.require_business_metric_for_early_stopping,
+            allow_noncanonical_preprocessing=args.allow_noncanonical_preprocessing,
             checkpoint_every_epochs=args.checkpoint_every_epochs,
             save_best=args.save_best,
             scenario_id=args.scenario_id,
