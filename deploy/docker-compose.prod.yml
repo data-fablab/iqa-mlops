@@ -1,19 +1,21 @@
 # Prod overlay : pas de bind-mount, redemarrage automatique, images taggees du
 # registre. Usage : docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Les images par role sont tirees du registre (cf. issues 00/14/15). Tant que le
-# registre n'est pas branche, `build:` (herite du compose de base) sert de repli :
-# Compose construit l'image et la tague avec `image:`. Variables dans ../.env :
-#   IQA_IMAGE_REGISTRY (defaut data-fablab) et IQA_IMAGE_TAG (defaut v0.1.0).
+# Les images par role sont tirees du registre (cf. issues 00/14/15). L'overlay
+# prod neutralise explicitement les `build:` herites du compose de base : le
+# serveur doit faire `pull -> up -d`, pas reconstruire localement. Variables dans
+# ../.env : IQA_IMAGE_REGISTRY (defaut data-fablab) et IQA_IMAGE_TAG (defaut v0.1.0).
 # Tags figes (jamais `latest`) pour un deploiement reproductible : bumper
 # IQA_IMAGE_TAG a chaque release publiee par la CI.
 services:
   iqa-api:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-serving:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
     restart: unless-stopped
 
   iqa-inference:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-ml:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
     restart: unless-stopped
 
   iqa-streamlit:
@@ -21,12 +23,26 @@ services:
 
   iqa-ingestion:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
 
   iqa-replay:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
 
   iqa-trainer:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-ml:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
 
   iqa-monitoring:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
+
+  airflow-init:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-airflow:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
+
+  airflow-webserver:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-airflow:${IQA_IMAGE_TAG:-v0.1.0}
+
+  airflow-scheduler:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-airflow:${IQA_IMAGE_TAG:-v0.1.0}
