@@ -25,6 +25,7 @@ DVC_YAML = Path("dvc.yaml")
 DVC_VERSIONING_DOC = Path("docs/dvc-versioning.md")
 DVC_REPRO_SCRIPT = Path("scripts/check_dvc_reproducibility.py")
 PYPROJECT = Path("pyproject.toml")
+DOCKERFILE = Path("Dockerfile")
 
 
 def test_dvc_yaml_declares_phase2_data_stages() -> None:
@@ -52,7 +53,7 @@ def test_dvc_versioning_doc_links_remote_and_contracts() -> None:
     assert "uv run --extra cpu --extra data dvc repro" in content
     assert "iqa-check-dvc-reproducibility --with-network" in content
     assert "iqa_dvc_reproducibility" in content
-    assert '"with_network": true' in content
+    assert '"with_network": false,"skip_regeneration": true' in content
     assert "DVC est un gate de reproductibilite" in content
     assert "docs/data-contracts.md" in content
 
@@ -65,6 +66,17 @@ def test_dvc_reproducibility_script_checks_minio_and_manifests() -> None:
     assert 'EXPECTED_REMOTE_URL = "s3://iqa-dvc"' in content
     assert '["dvc", "pull", dvc_target]' in content
     assert '["dvc", "push", dvc_target]' in content
+    assert '"--dvc-target"' in content
     assert "scripts/finalize_data_phase1.py" in content
     assert "git\", \"diff\", \"--quiet\"" in content
     assert "iqa-check-dvc-reproducibility" in pyproject
+
+
+def test_dvc_gate_image_contains_dvc_tooling_without_dvc_cache() -> None:
+    content = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "FROM base AS dvc-gate" in content
+    assert "COPY dvc.yaml ./dvc.yaml" in content
+    assert "COPY .dvc/config ./.dvc/config" in content
+    assert "COPY .dvc ./.dvc" not in content
+    assert "COPY data/raw/hss-iad.dvc ./data/raw/hss-iad.dvc" in content

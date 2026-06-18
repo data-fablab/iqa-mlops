@@ -26,8 +26,6 @@ REGENERATED_MANIFESTS = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    # Booleans are passed as values (not store_true flags) so they survive the
-    # templated argv of the containerised task (ADR 0008), like iqa_monitoring.
     parser.add_argument(
         "--with-network",
         type=str2bool,
@@ -60,7 +58,7 @@ def _check_dvc_remote() -> None:
         )
 
 
-def _check_dvc_network(dvc_target: str) -> None:
+def _check_dvc_network(dvc_target: str = DVC_SOURCE_TARGET) -> None:
     if not Path(dvc_target).exists():
         raise SystemExit(f"Missing DVC source target: {dvc_target}")
     _run(["dvc", "pull", dvc_target])

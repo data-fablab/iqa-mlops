@@ -87,6 +87,8 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
     dvc_source = dag_sources.get("iqa_dvc_reproducibility.py", "")
     if "iqa-check-dvc-reproducibility" not in dvc_source:
         raise AssertionError("DVC reproducibility DAG does not call iqa-check-dvc-reproducibility")
+    if "make_container_task(" not in dvc_source or "BashOperator(" in dvc_source:
+        raise AssertionError("DVC reproducibility DAG must run as a data container task")
     if "dvc push" in dvc_source:
         raise AssertionError("DVC reproducibility DAG must not call dvc push directly")
     if '"with_network"' not in dvc_source or '"skip_regeneration"' not in dvc_source:
@@ -106,6 +108,19 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         raise AssertionError("airflow-scheduler does not join task containers to iqa_net")
     if scheduler_env.get("IQA_GPU_LOCK_VOLUME") != "iqa_gpu_lock":
         raise AssertionError("airflow-scheduler does not expose the shared GPU lock volume")
+    if (
+        "IQA_IMAGE_DATA" not in scheduler_env
+        or "IQA_IMAGE_ML" not in scheduler_env
+        or "IQA_IMAGE_DVC" not in scheduler_env
+    ):
+        raise AssertionError("airflow-scheduler does not expose task runtime images")
+    webserver_env = webserver.get("environment", {})
+    if (
+        "IQA_IMAGE_DATA" not in webserver_env
+        or "IQA_IMAGE_ML" not in webserver_env
+        or "IQA_IMAGE_DVC" not in webserver_env
+    ):
+        raise AssertionError("airflow-webserver does not expose task runtime images")
     if not _volume_present(scheduler_volumes, "/var/run/docker.sock:/var/run/docker.sock"):
         raise AssertionError("airflow-scheduler does not mount the Docker socket")
     if not _volume_present(scheduler_volumes, "../src:/opt/iqa/src:ro"):
@@ -126,6 +141,8 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "iqa-check-airflow-container-runtime --json",
         "airflow dags list",
         "airflow dags list-import-errors",
+        "airflow dags unpause iqa_dvc_reproducibility",
+        "airflow dags unpause iqa_lifecycle_trigger",
         "airflow dags trigger iqa_dvc_reproducibility",
         "airflow dags trigger iqa_lifecycle_trigger",
         "/var/run/docker.sock",
@@ -145,6 +162,8 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
             "airflow dags list",
             "airflow dags list-import-errors",
             "airflow pools list",
+            "airflow dags unpause iqa_dvc_reproducibility",
+            "airflow dags unpause iqa_lifecycle_trigger",
             "airflow dags trigger iqa_dvc_reproducibility",
             "airflow dags trigger iqa_lifecycle_trigger",
         ],

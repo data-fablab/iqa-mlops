@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 RUN uv sync --no-dev --extra dvc
 # DVC wiring the gate reads at runtime: the remote config, the pipeline file and
 # the light *.dvc pointer (content-addressed; the heavy blob stays in MinIO).
-COPY .dvc ./.dvc
+# Never copy .dvc/cache or .dvc/config.local into the image.
+COPY .dvc/config ./.dvc/config
 COPY dvc.yaml ./dvc.yaml
 COPY data/raw/hss-iad.dvc ./data/raw/hss-iad.dvc

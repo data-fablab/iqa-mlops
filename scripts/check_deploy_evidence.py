@@ -23,6 +23,7 @@ PUBLISHED_IMAGE_SERVICES = {
     "iqa-replay": "iqa-data",
     "iqa-trainer": "iqa-ml",
     "iqa-monitoring": "iqa-data",
+    "iqa-dvc-gate": "iqa-dvc-gate",
     "airflow-init": "iqa-airflow",
     "airflow-webserver": "iqa-airflow",
     "airflow-scheduler": "iqa-airflow",
@@ -85,6 +86,21 @@ def build_deploy_evidence() -> dict[str, Any]:
             raise AssertionError(f"prod service keeps a build fallback: {service}")
         if not base_has_build and "build" in service_config:
             raise AssertionError(f"prod service adds an invalid build override: {service}")
+
+    for airflow_service in ["airflow-webserver", "airflow-scheduler"]:
+        env = prod_services[airflow_service].get("environment", {})
+        if "iqa-data" not in str(env.get("IQA_IMAGE_DATA", "")):
+            raise AssertionError(f"{airflow_service} does not pass the prod data image")
+        if "iqa-ml" not in str(env.get("IQA_IMAGE_ML", "")):
+            raise AssertionError(f"{airflow_service} does not pass the prod ml image")
+        if "iqa-dvc-gate" not in str(env.get("IQA_IMAGE_DVC", "")):
+            raise AssertionError(f"{airflow_service} does not pass the prod dvc gate image")
+        if "IQA_IMAGE_TAG" not in str(env.get("IQA_IMAGE_DATA", "")):
+            raise AssertionError(f"{airflow_service} data image is not tag-controlled")
+        if "IQA_IMAGE_TAG" not in str(env.get("IQA_IMAGE_ML", "")):
+            raise AssertionError(f"{airflow_service} ml image is not tag-controlled")
+        if "IQA_IMAGE_TAG" not in str(env.get("IQA_IMAGE_DVC", "")):
+            raise AssertionError(f"{airflow_service} dvc gate image is not tag-controlled")
 
     for term in EXPECTED_SMOKE_TERMS:
         if term not in smoke:

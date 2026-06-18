@@ -57,9 +57,12 @@ def test_dvc_reproducibility_dag_stays_explicit_and_does_not_push() -> None:
     source = (ROOT / "airflow" / "dags" / "iqa_dvc_reproducibility.py").read_text(encoding="utf-8")
 
     assert 'dag_id="iqa_dvc_reproducibility"' in source
+    assert "make_container_task(" in source
     assert "iqa-check-dvc-reproducibility" in source
     assert '"with_network": False' in source
-    assert '"skip_regeneration": False' in source
+    assert '"skip_regeneration": True' in source
+    assert '"--dvc-target", "{{ params.dvc_target }}"' in source
+    assert "BashOperator(" not in source
     assert "dvc push" not in source
 
 
@@ -71,6 +74,12 @@ def test_airflow_scheduler_compose_exposes_docker_backend_network_and_gpu_lock()
     assert scheduler["environment"]["IQA_AIRFLOW_BACKEND"] == "docker"
     assert scheduler["environment"]["IQA_DOCKER_NETWORK"] == "iqa_net"
     assert scheduler["environment"]["IQA_GPU_LOCK_VOLUME"] == "iqa_gpu_lock"
+    assert scheduler["environment"]["IQA_IMAGE_DATA"] == "${IQA_IMAGE_DATA:-iqa-data:local}"
+    assert scheduler["environment"]["IQA_IMAGE_ML"] == "${IQA_IMAGE_ML:-iqa-ml:local}"
+    assert scheduler["environment"]["IQA_IMAGE_DVC"] == "${IQA_IMAGE_DVC:-iqa-dvc-gate:local}"
+    assert webserver["environment"]["IQA_IMAGE_DATA"] == "${IQA_IMAGE_DATA:-iqa-data:local}"
+    assert webserver["environment"]["IQA_IMAGE_ML"] == "${IQA_IMAGE_ML:-iqa-ml:local}"
+    assert webserver["environment"]["IQA_IMAGE_DVC"] == "${IQA_IMAGE_DVC:-iqa-dvc-gate:local}"
     assert "/var/run/docker.sock:/var/run/docker.sock" in scheduler["volumes"]
     assert "../src:/opt/iqa/src:ro" in scheduler["volumes"]
     assert "../src:/opt/iqa/src:ro" in webserver["volumes"]
@@ -92,6 +101,8 @@ def test_airflow_runtime_docs_cover_server_evidence_and_security_boundary() -> N
         "airflow dags list",
         "airflow dags list-import-errors",
         "airflow pools list",
+        "airflow dags unpause iqa_dvc_reproducibility",
+        "airflow dags unpause iqa_lifecycle_trigger",
         "airflow dags trigger iqa_dvc_reproducibility",
         "airflow dags trigger iqa_lifecycle_trigger",
         "/var/run/docker.sock",

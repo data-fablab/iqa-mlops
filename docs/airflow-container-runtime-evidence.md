@@ -64,8 +64,11 @@ docker compose exec airflow-webserver airflow dags list
 docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow pools list
 
+docker compose exec airflow-webserver airflow dags unpause iqa_dvc_reproducibility
+docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle_trigger
+
 docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibility \
-  --conf '{"with_network": false}'
+  --conf '{"with_network": false,"skip_regeneration": true}'
 
 docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle_trigger \
   --conf '{"scenario_id":"production_replay_natural","conforming_validated_count":50,"drift_confirmed":false,"roi_fail_rate":0.0}'
@@ -77,6 +80,7 @@ Expected evidence:
   `iqa_lifecycle`, `iqa_lifecycle_trigger` and `iqa_dvc_reproducibility`;
 - `airflow dags list-import-errors` is empty;
 - `airflow pools list` includes `iqa_gpu`;
+- the DAGs used for the proof are unpaused before triggering;
 - `iqa_dvc_reproducibility` can be triggered explicitly;
 - `iqa_lifecycle_trigger` forwards a data event to `iqa_lifecycle`;
 - there is pas de training via CI.

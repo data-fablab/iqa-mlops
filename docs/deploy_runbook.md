@@ -158,8 +158,10 @@ uv run --extra cpu iqa-check-airflow-container-runtime --json
 docker compose exec airflow-webserver airflow dags list
 docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow pools list
+docker compose exec airflow-webserver airflow dags unpause iqa_dvc_reproducibility
+docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle_trigger
 docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibility \
-  --conf '{"with_network": false}'
+  --conf '{"with_network": false,"skip_regeneration": true}'
 docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle_trigger \
   --conf '{"scenario_id":"production_replay_natural","conforming_validated_count":50,"drift_confirmed":false,"roi_fail_rate":0.0}'
 ```

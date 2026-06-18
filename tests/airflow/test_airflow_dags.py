@@ -247,15 +247,17 @@ def test_dvc_reproducibility_dag_declares_safe_dvc_gate() -> None:
     # Image-friendly default: the git-diff regeneration check stays in CI.
     assert '"skip_regeneration": True' in source
     assert '"dvc_target": "data/raw/hss-iad.dvc"' in source
+    assert "make_container_task(" in source
     assert "iqa-check-dvc-reproducibility" in source
     # Containerised via the factory on the dedicated dvc-gate image (ADR 0008):
     # booleans pass as templated values, no shell-conditional flags.
-    assert "make_container_task" in source
     assert "dvc_image()" in source
     assert '"--with-network", "{{ params.with_network }}"' in source
     assert '"--skip-regeneration", "{{ params.skip_regeneration }}"' in source
     assert '"--dvc-target", "{{ params.dvc_target }}"' in source
     assert "{% if params.with_network %}" not in source  # no shell-conditional flags
+    assert "BashOperator(" not in source
+    assert "bash_command" not in source
     assert "dvc push" not in source
 
 
