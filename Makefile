@@ -1,4 +1,4 @@
-.PHONY: sync lint test contracts dags replay simulate validate api demo smoke
+.PHONY: sync lint test contracts dags replay simulate validate api demo demo-scratch smoke
 
 sync:
 	uv sync --extra cpu
@@ -17,6 +17,9 @@ dags:
 
 demo:
 	uv run --extra cpu iqa-demo-phase2
+
+demo-scratch:
+	bash deploy/demo-from-scratch.sh
 
 smoke:
 	bash deploy/smoke-test.sh
