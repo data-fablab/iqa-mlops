@@ -9,10 +9,11 @@ import pytest
 from scripts import run_ingestion, run_monitoring, run_replay
 
 
-def test_run_ingestion_validates_manifest_and_reports_counts(
+def test_run_ingestion_materialises_manifest_and_reports_counts(
     tmp_path: Path,
     run_boundary_script: Callable[[object, list[str]], dict],
 ) -> None:
+    """The ingestion boundary writes the manifest to the object store (issue 18)."""
     manifest = tmp_path / "pieces.csv"
     manifest.write_text(
         "event_id,scenario_id,dataset_version,source_class\n"
@@ -25,10 +26,37 @@ def test_run_ingestion_validates_manifest_and_reports_counts(
         ["iqa-run-ingestion", "--manifest", str(manifest), "--scenario-id", "raw_ingestion"],
     )
 
-    assert result["status"] == "validated"
+    assert result["status"] == "ingested"
     assert result["service"] == "iqa-ingestion"
     assert result["manifest"]["row_count"] == 1
     assert result["manifest"]["dataset_versions"] == ["hss_iad_casting_raw_v1"]
+    assert result["materialized"] is True
+    assert result["ingested_uri"].startswith("s3://")
+
+
+def test_materialise_ingestion_writes_exact_bytes_to_a_deterministic_key(
+    tmp_path: Path,
+) -> None:
+    """The ingested manifest lands verbatim at a scenario/source-derived key."""
+    from iqa.storage import IQA_BUCKETS, parse_s3_uri
+    from iqa.storage.object_store import InMemoryObjectStore
+
+    manifest = tmp_path / "pieces.csv"
+    body = b"event_id,scenario_id\nevt_1,raw_ingestion\n"
+    manifest.write_bytes(body)
+    store = InMemoryObjectStore()
+
+    uri = run_ingestion.materialise_ingestion(
+        store,
+        manifest=manifest,
+        scenario_id="raw_ingestion",
+        source="historical_replay",
+    )
+
+    parsed = parse_s3_uri(uri)
+    assert parsed.bucket == IQA_BUCKETS["ingested_images"]
+    assert parsed.key == "ingested/raw_ingestion/historical_replay/pieces.csv"
+    assert store.get_bytes(parsed.bucket, parsed.key) == body
 
 
 def test_run_ingestion_fails_clearly_for_missing_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
