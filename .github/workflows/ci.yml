@@ -98,6 +98,8 @@ jobs:
             image: iqa-ml
           - target: data
             image: iqa-data
+          - target: dvc-gate
+            image: iqa-dvc-gate
     steps:
       - uses: actions/checkout@v4
 

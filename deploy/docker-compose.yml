@@ -71,6 +71,15 @@ services:
     env_file: ../.env
     profiles: ["batch"]
 
+  iqa-dvc-gate:
+    build:
+      context: ..
+      target: dvc-gate
+    image: iqa-dvc-gate:local
+    command: iqa-check-dvc-reproducibility
+    env_file: ../.env
+    profiles: ["batch"]
+
   airflow-init:
     build:
       context: .
