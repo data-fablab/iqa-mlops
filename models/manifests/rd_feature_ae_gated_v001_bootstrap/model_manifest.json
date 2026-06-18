@@ -1,12 +1,38 @@
 {
-  "model_version": "rd_feature_ae_gated_v001_bootstrap",
-  "model_type": "reverse_distill_resnet18_dual_context_gated",
-  "status": "bootstrap",
   "artifact_uri": "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt",
-  "sha256": "pending-restore",
+  "dataset_version": "feature_ae_good_v001_bootstrap",
+  "model_type": "reverse_distill_resnet18_dual_context_gated",
+  "model_version": "rd_feature_ae_gated_v001_bootstrap",
+  "preprocessing_contract": {
+    "augmentation_profile": "none",
+    "context_size": 768,
+    "image_size": 384,
+    "min_roi_ratio": 0.03,
+    "normalization": "imagenet",
+    "preprocessing_mode": "tiled_context",
+    "roi_threshold": 0.3,
+    "score_image": "topk_mean",
+    "score_region": "functional_surface_prediction",
+    "score_smoothing": "median3",
+    "tile_stride": 192,
+    "tile_train_sampling": "all",
+    "topk_fraction": 0.005,
+    "version": "feature_ae_preprocessing_v001"
+  },
+  "preprocessing_contract_version": "feature_ae_preprocessing_v001",
+  "roi_model_version": "roi_segmenter_v001_fixed",
   "runtime": {
-    "package": "iqa.models.feature_ae",
     "loader": "load_rd_feature_ae_gated",
+    "package": "iqa.models.feature_ae",
     "teacher_version": "teacher_resnet18_imagenet_fixed"
-  }
+  },
+  "selected_epoch": 1,
+  "selected_metric": "image_ap",
+  "selected_metric_value": 0.9190951612731334,
+  "selected_val_loss": 1.153761516014735,
+  "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss stability only",
+  "sha256": "9e4e3cc84fb359408ec5c58020e799816942d6c46ae024b29acb82c1c8ebe146",
+  "source_checkpoint": "checkpoint_best_image_ap.pt",
+  "status": "bootstrap",
+  "validation_set_id": "validation_set_v001"
 }
