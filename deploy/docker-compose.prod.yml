@@ -43,6 +43,8 @@ services:
 
   airflow-webserver:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-airflow:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null
 
   airflow-scheduler:
     image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-airflow:${IQA_IMAGE_TAG:-v0.1.0}
+    build: null

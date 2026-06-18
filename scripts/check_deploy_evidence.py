@@ -88,6 +88,8 @@ def build_deploy_evidence() -> dict[str, Any]:
             "iqa-trainer",
             "iqa-monitoring",
             "airflow-init",
+            "airflow-webserver",
+            "airflow-scheduler",
         }:
             raise AssertionError(f"prod service keeps a build fallback: {service}")
 
