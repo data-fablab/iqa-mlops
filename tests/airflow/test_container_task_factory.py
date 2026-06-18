@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
+from iqa.dags import build_container_dag, data_image, dvc_image, make_container_task, ml_image
 from iqa.dags.operators import _normalise_command, _task_environment
 
 DAG_FOLDER = Path(__file__).parents[2] / "airflow" / "dags"
@@ -47,6 +47,14 @@ def test_ml_image_defaults_and_honours_the_env_override(monkeypatch: pytest.Monk
     assert ml_image() == "iqa-ml:local"
     monkeypatch.setenv("IQA_IMAGE_ML", "registry/iqa-ml:1.2.3")
     assert ml_image() == "registry/iqa-ml:1.2.3"
+
+
+@pytest.mark.unit
+def test_dvc_image_defaults_and_honours_the_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IQA_IMAGE_DVC", raising=False)
+    assert dvc_image() == "iqa-dvc-gate:local"
+    monkeypatch.setenv("IQA_IMAGE_DVC", "registry/iqa-dvc-gate:1.2.3")
+    assert dvc_image() == "registry/iqa-dvc-gate:1.2.3"
 
 
 @pytest.mark.unit
