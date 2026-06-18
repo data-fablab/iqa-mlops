@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 
@@ -132,14 +133,16 @@ def test_convergence_decisions_are_documented() -> None:
 
 def test_no_heavy_model_or_sqlite_artifacts_in_repo_tree() -> None:
     forbidden_suffixes = {".pt", ".pth", ".ckpt", ".onnx", ".sqlite"}
-    # Exclude: venv, cache, MLflow artifacts (temp test outputs), pytest temp files
-    excluded_dirs = {".venv", ".pytest_cache", "mlruns", "__pycache__", ".mypy_cache"}
+    tracked_files = subprocess.run(
+        ["git", "ls-files"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
     offenders = [
-        path
-        for path in ROOT.rglob("*")
-        if path.is_file()
-        and path.suffix.lower() in forbidden_suffixes
-        and not any(excluded in path.parts for excluded in excluded_dirs)
+        Path(path)
+        for path in tracked_files
+        if Path(path).suffix.lower() in forbidden_suffixes
     ]
 
     assert offenders == []
