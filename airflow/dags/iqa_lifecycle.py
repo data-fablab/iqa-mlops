@@ -1,70 +1,136 @@
 """IQA Feature-AE lifecycle DAG.
 
 Pipeline stages:
-  dataset → train → eval → gates → mlflow → promotion → reload
+  lifecycle_decision → dataset → train → eval → gates → mlflow → promotion → reload
+
+Issue 11 completes the conversion: every stage now runs as a container via the
+operator factory, so the Airflow scheduler never imports ``iqa`` (ADR 0008 fully
+resolved -- no ``PythonOperator`` left). Runtime params (scenario_id, stages,
+manifest) are passed as templated argv -- no shell, no quoting.
+
+The container stdout is each task's XCom (references only, no payloads). The real
+runtime behind these boundaries (dataset materialisation, train/eval, MLflow
+registration, the Registry transition and the inference HTTP reload) is tracked
+by the runtime sister issues 18-22: this slice only converts the orchestration.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
-
 try:
-    from airflow import DAG
-    from airflow.operators.python import PythonOperator
-except ImportError:  # pragma: no cover
-    DAG = None
-    PythonOperator = None
-
-try:
-    from iqa.dags.lifecycle_tasks import (
-        task_lifecycle_decision,
-        task_dataset,
-        task_eval,
-        task_gates,
-        task_mlflow,
-        task_promotion,
-        task_reload,
-        task_train,
-    )
-except ImportError:  # pragma: no cover
-    def _placeholder_task(**_context):
-        return {"status": "placeholder", "reason": "iqa package not available in airflow image"}
-
-    task_dataset = _placeholder_task
-    task_lifecycle_decision = _placeholder_task
-    task_train = _placeholder_task
-    task_eval = _placeholder_task
-    task_gates = _placeholder_task
-    task_mlflow = _placeholder_task
-    task_promotion = _placeholder_task
-    task_reload = _placeholder_task
-
+    from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
+except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
+    build_container_dag = data_image = make_container_task = ml_image = None
 
 GPU_POOL = "iqa_gpu"
 
 
-dag = None
-if (
-    DAG is not None
-    and PythonOperator is not None
-    and all(
-        [
-            task_lifecycle_decision,
-            task_dataset,
-            task_train,
-            task_eval,
-            task_gates,
-            task_mlflow,
-            task_promotion,
-            task_reload,
-        ]
+def _define() -> None:
+    op_lifecycle_decision = make_container_task(
+        task_id="lifecycle_decision",
+        image="{{ params.image }}",
+        command=[
+            "iqa-run-lifecycle-decision",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--conforming-validated-count", "{{ params.conforming_validated_count }}",
+            "--drift-confirmed", "{{ params.drift_confirmed }}",
+            "--roi-fail-rate", "{{ params.roi_fail_rate }}",
+        ],
     )
-):
-    with DAG(
+
+    op_dataset = make_container_task(
+        task_id="dataset",
+        image="{{ params.image }}",
+        command=[
+            "iqa-run-dataset",
+            "--manifest", "{{ params.manifest }}",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--candidate-version", "{{ params.candidate_version }}",
+        ],
+    )
+
+    op_train = make_container_task(
+        task_id="train",
+        image="{{ params.ml_image }}",
+        command=[
+            "iqa-run-train",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--dataset-version", "{{ params.candidate_version }}",
+            "--output-checkpoint", "{{ params.checkpoint }}",
+            "--wait-for-gpu",
+        ],
+        pool=GPU_POOL,
+        gpu_lock=True,
+    )
+
+    op_eval = make_container_task(
+        task_id="eval",
+        image="{{ params.ml_image }}",
+        command=[
+            "iqa-run-eval",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--checkpoint", "{{ params.checkpoint }}",
+            "--validation-set-id", "{{ params.validation_set_id }}",
+            "--wait-for-gpu",
+        ],
+        pool=GPU_POOL,
+        gpu_lock=True,
+    )
+
+    op_gates = make_container_task(
+        task_id="gates",
+        image="{{ params.image }}",
+        command=[
+            "iqa-run-gates",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--recall", "{{ params.candidate_recall }}",
+            "--ap", "{{ params.candidate_ap }}",
+            "--orange-rate", "{{ params.candidate_orange_rate }}",
+            "--latency-ms", "{{ params.candidate_latency_ms }}",
+            "--gates-config", "{{ params.gates_config }}",
+        ],
+    )
+
+    op_mlflow = make_container_task(
+        task_id="mlflow",
+        image="{{ params.ml_image }}",
+        command=[
+            "iqa-run-mlflow",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--run-id", "{{ params.run_id }}",
+            "--stage", "{{ params.registry_stage }}",
+        ],
+    )
+
+    op_promotion = make_container_task(
+        task_id="promotion",
+        image="{{ params.ml_image }}",
+        command=[
+            "iqa-run-promotion",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--source-stage", "{{ params.registry_stage }}",
+            "--target-stage", "{{ params.target_stage }}",
+        ],
+    )
+
+    op_reload = make_container_task(
+        task_id="reload",
+        image="{{ params.image }}",
+        command=[
+            "iqa-run-reload",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--target-stage", "{{ params.target_stage }}",
+        ],
+    )
+
+    # Linear chain: lifecycle_decision -> dataset -> train -> eval -> gates -> mlflow -> promotion -> reload
+    op_lifecycle_decision >> op_dataset >> op_train >> op_eval >> op_gates >> op_mlflow >> op_promotion >> op_reload
+
+
+dag = (
+    build_container_dag(
         dag_id="iqa_lifecycle",
+        define=_define,
         schedule=None,
-        catchup=False,
-        start_date=datetime(2026, 1, 1),
         tags=["iqa", "lifecycle"],
         params={
             "regime": "natural",
@@ -73,57 +139,21 @@ if (
             "drift_confirmed": False,
             "roi_fail_rate": 0.0,
             "target_stage": "test",
+            "manifest": "data/model_datasets/feature_ae_good_v002.csv",
+            "candidate_version": "",
+            "checkpoint": "models/feature_ae/candidate.pt",
+            "validation_set_id": "validation_set_v001",
+            "candidate_recall": 1.0,
+            "candidate_ap": 0.0,
+            "candidate_orange_rate": 0.0,
+            "candidate_latency_ms": 0.0,
+            "gates_config": "configs/promotion_gates.yaml",
+            "run_id": "",
+            "registry_stage": "candidate",
+            "image": data_image(),
+            "ml_image": ml_image(),
         },
-    ) as dag:
-        op_lifecycle_decision = PythonOperator(
-            task_id="lifecycle_decision",
-            python_callable=task_lifecycle_decision,
-            doc="Evaluate data-event trigger for Feature-AE lifecycle",
-        )
-
-        op_dataset = PythonOperator(
-            task_id="dataset",
-            python_callable=task_dataset,
-            doc="Prepare dataset for training",
-        )
-
-        op_train = PythonOperator(
-            task_id="train",
-            python_callable=task_train,
-            pool=GPU_POOL,
-            doc="Train model",
-        )
-
-        op_eval = PythonOperator(
-            task_id="eval",
-            python_callable=task_eval,
-            pool=GPU_POOL,
-            doc="Evaluate model",
-        )
-
-        op_gates = PythonOperator(
-            task_id="gates",
-            python_callable=task_gates,
-            doc="Check promotion gates",
-        )
-
-        op_mlflow = PythonOperator(
-            task_id="mlflow",
-            python_callable=task_mlflow,
-            doc="Register model in MLflow",
-        )
-
-        op_promotion = PythonOperator(
-            task_id="promotion",
-            python_callable=task_promotion,
-            doc="Promote model to production",
-        )
-
-        op_reload = PythonOperator(
-            task_id="reload",
-            python_callable=task_reload,
-            doc="Reload model in inference service",
-        )
-
-        # Linear dependencies: lifecycle_decision -> dataset -> train -> eval -> gates -> mlflow -> promotion -> reload
-        op_lifecycle_decision >> op_dataset >> op_train >> op_eval >> op_gates >> op_mlflow >> op_promotion >> op_reload
+    )
+    if build_container_dag is not None
+    else None
+)
