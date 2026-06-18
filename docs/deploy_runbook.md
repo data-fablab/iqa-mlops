@@ -97,6 +97,14 @@ docker compose up -d airflow-webserver airflow-scheduler
 
 Le pool `iqa_gpu` (1 slot) contraint les taches GPU a `max_active_tasks=1`.
 
+> **Privilege fort (a assumer / cantonner).** En backend `docker` (ADR 0008), le
+> `airflow-scheduler` monte le socket Docker hote (`/var/run/docker.sock`) pour
+> lancer les conteneurs de tache. Qui accede au socket est root-equivalent sur
+> l'hote : a reserver au MVP local/serveur de confiance, jamais expose publiquement.
+> Durcissement possible sans changer les DAGs : `docker-socket-proxy` (filtre l'API
+> Docker) via `IQA_DOCKER_URL=tcp://...`. La cible Kubernetes (`IQA_AIRFLOW_BACKEND=k8s`)
+> supprime ce privilege (l'orchestration passe par l'API server + RBAC).
+
 ### 4.6 Vitrine Streamlit (Accueil + Marc + Sophie)
 
 ```bash
@@ -166,6 +174,30 @@ bash ../deploy/smoke-test.sh
 Le lifecycle modele n'est jamais declenche par la CI ni par un deploiement : il
 reste un evenement donnees (DAG Airflow). Le rollback modele se fait via le
 MLflow Registry (source de verite), pas par redeploiement de conteneur.
+
+### 8.1 Deploiement depuis les images publiees (registre, tags figes)
+
+La CI (`publish-images`) builde et pousse les 3 images par role vers Docker Hub
+avec des tags **immuables** (SHA git pour chaque push ; tag de version `vX.Y.Z`
+sur un tag git `v*`). Jamais de `latest`. Activation : variable repo
+`IQA_PUBLISH_IMAGES=true` + secrets `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`.
+
+Sur le serveur, l'overlay `docker-compose.prod.yml` tire les images du registre au
+lieu de builder localement. Figer la version a deployer dans `.env` :
+
+```bash
+# .env
+IQA_IMAGE_REGISTRY=data-fablab
+IQA_IMAGE_TAG=v0.1.0           # tag immuable publie par la CI ; jamais latest
+
+cd deploy
+docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+bash ../deploy/smoke-test.sh
+```
+
+Rollback applicatif = redeployer le tag precedent (`IQA_IMAGE_TAG=v0.0.9`, `pull`,
+`up -d`). Le rollback **modele** reste distinct : il passe par le MLflow Registry.
 
 ## 9. Sauvegardes
 

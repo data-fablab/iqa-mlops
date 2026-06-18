@@ -1,0 +1,26 @@
+# Keep the build context lean and ensure heavy/secret files never reach an image.
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Not needed at runtime (images install from pyproject/uv.lock).
+tests
+docs
+issues
+
+# Secrets: never bake an env file into an image.
+.env
+*.env
+
+# Heavy, DVC-managed raw data: belongs in MinIO/DVC at runtime, not in images.
+# The light git-tracked manifests under data/metadata and data/model_datasets are
+# COPYed explicitly in the Dockerfile.
+data/raw
+data/processed
+source-datasets
+iqa-source-datasets

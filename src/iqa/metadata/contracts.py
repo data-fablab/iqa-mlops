@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
-import pandas as pd
+if TYPE_CHECKING:  # pragma: no cover - typing only; pandas is a ``data`` role dep.
+    import pandas as pd
 
 
 RAW_DATASET_ID = "hss_iad_casting_raw_v1"
@@ -22,7 +23,7 @@ PHASE2_METADATA_COLUMNS = (
 )
 
 ManifestKind = Literal["source", "bootstrap", "validation", "calibration", "replay"]
-MetadataValue = str | Callable[[pd.DataFrame], pd.Series]
+MetadataValue = str | Callable[["pd.DataFrame"], "pd.Series"]
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,32 @@
+# Prod overlay : pas de bind-mount, redemarrage automatique, images taggees du
+# registre. Usage : docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Les images par role sont tirees du registre (cf. issues 00/14/15). Tant que le
+# registre n'est pas branche, `build:` (herite du compose de base) sert de repli :
+# Compose construit l'image et la tague avec `image:`. Variables dans ../.env :
+#   IQA_IMAGE_REGISTRY (defaut data-fablab) et IQA_IMAGE_TAG (defaut v0.1.0).
+# Tags figes (jamais `latest`) pour un deploiement reproductible : bumper
+# IQA_IMAGE_TAG a chaque release publiee par la CI.
+services:
+  iqa-api:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-serving:${IQA_IMAGE_TAG:-v0.1.0}
+    restart: unless-stopped
+
+  iqa-inference:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-ml:${IQA_IMAGE_TAG:-v0.1.0}
+    restart: unless-stopped
+
+  iqa-streamlit:
+    restart: unless-stopped
+
+  iqa-ingestion:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}
+
+  iqa-replay:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}
+
+  iqa-trainer:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-ml:${IQA_IMAGE_TAG:-v0.1.0}
+
+  iqa-monitoring:
+    image: ${IQA_IMAGE_REGISTRY:-data-fablab}/iqa-data:${IQA_IMAGE_TAG:-v0.1.0}

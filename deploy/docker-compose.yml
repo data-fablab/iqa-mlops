@@ -2,7 +2,8 @@ services:
   iqa-api:
     build:
       context: ..
-    command: uv run --extra cpu iqa-api
+      target: serving
+    command: iqa-api
     env_file: ../.env
     environment:
       IQA_INFERENCE_URL: http://iqa-inference:8100
@@ -12,7 +13,8 @@ services:
   iqa-inference:
     build:
       context: ..
-    command: uv run --extra cpu iqa-inference
+      target: ml
+    command: iqa-inference
     env_file: ../.env
     environment:
       IQA_GPU_LOCK_PATH: /var/run/iqa-gpu/gpu.lock
@@ -36,21 +38,24 @@ services:
   iqa-ingestion:
     build:
       context: ..
-    command: uv run --extra cpu iqa-run-ingestion
+      target: data
+    command: iqa-run-ingestion
     env_file: ../.env
     profiles: ["batch"]
 
   iqa-replay:
     build:
       context: ..
-    command: uv run --extra cpu iqa-run-replay
+      target: data
+    command: iqa-run-replay
     env_file: ../.env
     profiles: ["batch"]
 
   iqa-trainer:
     build:
       context: ..
-    command: uv run --extra cpu iqa-run-lifecycle
+      target: ml
+    command: iqa-run-lifecycle
     env_file: ../.env
     environment:
       IQA_GPU_LOCK_PATH: /var/run/iqa-gpu/gpu.lock
@@ -61,12 +66,16 @@ services:
   iqa-monitoring:
     build:
       context: ..
-    command: uv run --extra cpu iqa-run-monitoring
+      target: data
+    command: iqa-run-monitoring
     env_file: ../.env
     profiles: ["batch"]
 
   airflow-init:
-    image: apache/airflow:2.10.5-python3.12
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    image: iqa-airflow:local
     entrypoint: /bin/bash
     command: ["-c", "airflow db migrate && airflow pools import /opt/airflow/pools.json"]
     env_file: ../.env
@@ -80,7 +89,7 @@ services:
     depends_on: [postgres]
 
   airflow-webserver:
-    image: apache/airflow:2.10.5-python3.12
+    image: iqa-airflow:local
     command: webserver
     env_file: ../.env
     environment:
@@ -91,9 +100,12 @@ services:
       AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
       AIRFLOW__METRICS__STATSD_PORT: "9125"
       AIRFLOW__METRICS__STATSD_PREFIX: airflow
+      # Expose iqa.dags.operators (factory) without installing the metier runtime.
+      PYTHONPATH: /opt/iqa/src
     ports: ["8080:8080"]
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
+      - ../src:/opt/iqa/src:ro
     depends_on:
       postgres:
         condition: service_started
@@ -101,9 +113,13 @@ services:
         condition: service_completed_successfully
 
   airflow-scheduler:
-    image: apache/airflow:2.10.5-python3.12
+    image: iqa-airflow:local
     command: scheduler
     env_file: ../.env
+    # Access to the host Docker daemon to launch task containers (ADR 0008).
+    # IQA_DOCKER_GID must match the host docker group (`getent group docker`).
+    group_add:
+      - "${IQA_DOCKER_GID:-984}"
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -112,8 +128,16 @@ services:
       AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
       AIRFLOW__METRICS__STATSD_PORT: "9125"
       AIRFLOW__METRICS__STATSD_PREFIX: airflow
+      PYTHONPATH: /opt/iqa/src
+      # Containerised-task backend (ADR 0008): task containers join iqa_net so
+      # they resolve postgres/minio/mlflow/iqa-inference by name.
+      IQA_AIRFLOW_BACKEND: docker
+      IQA_DOCKER_NETWORK: iqa_net
+      IQA_GPU_LOCK_VOLUME: iqa_gpu_lock
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
+      - ../src:/opt/iqa/src:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_started
@@ -121,19 +145,23 @@ services:
         condition: service_completed_successfully
 
   statsd-exporter:
-    image: prom/statsd-exporter:latest
+    image: prom/statsd-exporter:v0.28.0
     command: ["--statsd.listen-udp=:9125", "--web.listen-address=:9102"]
     expose: ["9102", "9125"]
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:latest
+    # Pinned by digest: ghcr publishes mlflow only under :latest, so we freeze
+    # the exact manifest instead of a moving tag (run `docker manifest inspect`
+    # to read the version, bump the digest when upgrading deliberately).
+    image: ghcr.io/mlflow/mlflow@sha256:45bdcc9439dac5c51c160a863e3c1cadae1757de9d6d1b9403e0a648a6f2333b
     command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/mlflow --default-artifact-root s3://mlflow-artifacts --allowed-hosts ${IQA_MLFLOW_ALLOWED_HOSTS:-localhost,localhost:5000,127.0.0.1,127.0.0.1:5000,mlflow,mlflow:5000}
     env_file: ../.env
     ports: ["5000:5000"]
     depends_on: [postgres, minio]
 
   minio:
-    image: minio/minio:latest
+    # Pinned by digest (MinIO uses moving RELEASE.* / latest tags upstream).
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data --console-address ":9001"
     env_file: ../.env
     environment:
@@ -143,7 +171,8 @@ services:
       - minio_data:/data
 
   minio-init:
-    image: minio/mc:latest
+    # Pinned by digest (MinIO client uses moving RELEASE.* / latest tags).
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     env_file: ../.env
     volumes:
       - ./minio/init-buckets.sh:/init-buckets.sh:ro
@@ -163,14 +192,14 @@ services:
       - ./postgres/init-databases.sql:/docker-entrypoint-initdb.d/10-init-databases.sql:ro
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     ports: ["9090:9090"]
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on: [statsd-exporter]
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     env_file: ../.env
     ports: ["3000:3000"]
     volumes:
@@ -186,4 +215,13 @@ services:
 volumes:
   minio_data:
   postgres_data:
+  # Stable name so sibling task containers launched by the scheduler can mount
+  # the single-GPU lock by volume name (factory: IQA_GPU_LOCK_VOLUME).
   gpu_lock:
+    name: iqa_gpu_lock
+
+networks:
+  # Fixed network name so DockerOperator task containers join it (network_mode)
+  # and resolve service names (postgres/minio/mlflow/iqa-inference).
+  default:
+    name: iqa_net
