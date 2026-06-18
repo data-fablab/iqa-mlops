@@ -23,6 +23,9 @@ def run_boundary_script(
     def _run(module: object, args: list[str]) -> dict:
         monkeypatch.setattr(sys, "argv", args)
         module.main()
-        return json.loads(capsys.readouterr().out)
+        out = capsys.readouterr().out
+        # A boundary may append a single-line XCom reference after its JSON
+        # payload (see print_json_with_xcom_ref); parse only the JSON object.
+        return json.loads(out[: out.rindex("}") + 1])
 
     return _run

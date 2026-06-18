@@ -14,6 +14,7 @@ registry tag without touching the DAGs:
 
 - ``IQA_IMAGE_DATA``  torch-free data runtime image (default ``iqa-data:local``)
 - ``IQA_IMAGE_ML``    GPU/torch ml runtime image     (default ``iqa-ml:local``)
+- ``IQA_IMAGE_DVC``   dvc[s3]+git gate image carrying ``.dvc``/``dvc.yaml`` (default ``iqa-dvc-gate:local``)
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, no runtime Airflow import.
 
 DEFAULT_DATA_IMAGE = "iqa-data:local"
 DEFAULT_ML_IMAGE = "iqa-ml:local"
+DEFAULT_DVC_IMAGE = "iqa-dvc-gate:local"
 DEFAULT_START_DATE = datetime(2026, 1, 1)
 
 
@@ -38,6 +40,11 @@ def data_image() -> str:
 def ml_image() -> str:
     """Service image carrying the GPU/torch ml runtime (override per deploy)."""
     return os.environ.get("IQA_IMAGE_ML", DEFAULT_ML_IMAGE)
+
+
+def dvc_image() -> str:
+    """Gate image carrying dvc[s3]+git and the repo's ``.dvc``/``dvc.yaml`` (override per deploy)."""
+    return os.environ.get("IQA_IMAGE_DVC", DEFAULT_DVC_IMAGE)
 
 
 def build_container_dag(
@@ -82,4 +89,4 @@ def build_container_dag(
         return None
 
 
-__all__ = ["build_container_dag", "data_image", "ml_image"]
+__all__ = ["build_container_dag", "data_image", "dvc_image", "ml_image"]

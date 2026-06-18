@@ -3,6 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def test_check_dvc_network_pulls_and_pushes_the_requested_target(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The network check honours --dvc-target so the containerised gate can pin it."""
+    from scripts import check_dvc_reproducibility as gate
+
+    target = tmp_path / "raw" / "custom.dvc"
+    target.parent.mkdir(parents=True)
+    target.write_text("outs: []\n", encoding="utf-8")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(gate, "_run", lambda command: calls.append(command))
+
+    gate._check_dvc_network(str(target))
+
+    assert ["dvc", "pull", str(target)] in calls
+    assert ["dvc", "push", str(target)] in calls
+
+
 DVC_YAML = Path("dvc.yaml")
 DVC_VERSIONING_DOC = Path("docs/dvc-versioning.md")
 DVC_REPRO_SCRIPT = Path("scripts/check_dvc_reproducibility.py")
@@ -45,8 +63,8 @@ def test_dvc_reproducibility_script_checks_minio_and_manifests() -> None:
 
     assert 'EXPECTED_REMOTE_NAME = "iqa-minio"' in content
     assert 'EXPECTED_REMOTE_URL = "s3://iqa-dvc"' in content
-    assert '["dvc", "pull", DVC_SOURCE_TARGET]' in content
-    assert '["dvc", "push", DVC_SOURCE_TARGET]' in content
+    assert '["dvc", "pull", dvc_target]' in content
+    assert '["dvc", "push", dvc_target]' in content
     assert "scripts/finalize_data_phase1.py" in content
     assert "git\", \"diff\", \"--quiet\"" in content
     assert "iqa-check-dvc-reproducibility" in pyproject

@@ -244,11 +244,18 @@ def test_dvc_reproducibility_dag_declares_safe_dvc_gate() -> None:
     assert 'dag_id="iqa_dvc_reproducibility"' in source
     assert 'task_id="dvc_reproducibility_check"' in source
     assert '"with_network": False' in source
-    assert '"skip_regeneration": False' in source
+    # Image-friendly default: the git-diff regeneration check stays in CI.
+    assert '"skip_regeneration": True' in source
     assert '"dvc_target": "data/raw/hss-iad.dvc"' in source
     assert "iqa-check-dvc-reproducibility" in source
-    assert "{% if params.with_network %}--with-network {% endif %}" in source
-    assert "{% if params.skip_regeneration %}--skip-regeneration {% endif %}" in source
+    # Containerised via the factory on the dedicated dvc-gate image (ADR 0008):
+    # booleans pass as templated values, no shell-conditional flags.
+    assert "make_container_task" in source
+    assert "dvc_image()" in source
+    assert '"--with-network", "{{ params.with_network }}"' in source
+    assert '"--skip-regeneration", "{{ params.skip_regeneration }}"' in source
+    assert '"--dvc-target", "{{ params.dvc_target }}"' in source
+    assert "{% if params.with_network %}" not in source  # no shell-conditional flags
     assert "dvc push" not in source
 
 
@@ -282,8 +289,13 @@ def test_iqa_lifecycle_dag_passes_dagbag_validation() -> None:
     """Test that iqa_lifecycle DAG passes Airflow DagBag validation."""
     try:
         from airflow.models import DagBag
+
+        import iqa_lifecycle
     except ImportError as e:
         pytest.skip(f"Airflow not installed: {e}")
+
+    if iqa_lifecycle.dag is None:
+        pytest.skip("DAG is None (Docker provider not available)")
 
     dag_bag = DagBag(dag_folder=str(DAG_FOLDER), include_examples=False)
 

@@ -21,6 +21,9 @@ issues
 # The light git-tracked manifests under data/metadata and data/model_datasets are
 # COPYed explicitly in the Dockerfile.
 data/raw
+# ...except the light, git-tracked *.dvc pointers (the dvc-gate image needs them
+# to pull/push the content-addressed blob from MinIO; the heavy blob stays out).
+!data/raw/*.dvc
 data/processed
 source-datasets
 iqa-source-datasets

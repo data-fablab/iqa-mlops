@@ -67,6 +67,50 @@ def test_run_train_emits_validated_summary_under_the_lock(
     assert result["persisted"] is False
 
 
+def test_run_train_carries_the_dataset_uri_into_its_summary(
+    run_boundary_script: Callable[[object, list[str]], dict],
+) -> None:
+    """The candidate dataset URI from the dataset task is traceable in train's XCom."""
+    uri = "s3://iqa-source-datasets/model_datasets/s1/v1/candidate.csv"
+
+    result = run_boundary_script(
+        run_train,
+        ["iqa-run-train", "--scenario-id", "s1", "--dataset-uri", uri],
+    )
+
+    assert result["dataset_uri"] == uri
+
+
+def test_train_resolves_a_dataset_materialised_by_the_dataset_boundary(
+    tmp_path,
+) -> None:
+    """Producer->consumer loop: train reads back what the dataset task wrote (issue 20)."""
+    from iqa.storage.object_store import InMemoryObjectStore
+
+    from scripts import run_dataset
+
+    manifest = tmp_path / "candidate.csv"
+    manifest.write_bytes(b"event_id,scenario_id\nevt_1,s1\nevt_2,s1\n")
+    store = InMemoryObjectStore()
+    uri = run_dataset.materialise_dataset(
+        store, manifest=manifest, scenario_id="s1", candidate_version="v1"
+    )
+
+    resolved = run_train.resolve_dataset(store, uri)
+
+    assert resolved["uri"] == uri
+    assert resolved["rows"] == 2
+
+
+def test_train_resolution_raises_when_the_dataset_uri_is_absent() -> None:
+    from iqa.storage.object_store import InMemoryObjectStore
+
+    with pytest.raises(KeyError, match="s3://iqa-source-datasets/missing.csv"):
+        run_train.resolve_dataset(
+            InMemoryObjectStore(), "s3://iqa-source-datasets/missing.csv"
+        )
+
+
 def test_run_eval_refuses_when_the_gpu_is_busy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

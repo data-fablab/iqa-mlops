@@ -20,7 +20,7 @@ jobs:
       # Role extras (ADR 0007): fastapi=serving, scikit-learn=ml, psycopg=data.
       # The full suite imports all three, so install them to collect/run it.
       - name: Sync dependencies
-        run: uv sync --extra cpu --extra serving --extra ml --extra data
+        run: uv sync --locked --extra cpu --extra serving --extra ml --extra data
 
       - name: Lint
         run: uv run --extra cpu --extra serving --extra ml --extra data ruff check src scripts tests
@@ -41,7 +41,7 @@ jobs:
       # Airflow (mlops) so the DAGs are importable instead of skipped; role extras
       # (serving/ml/data) so the API + lifecycle_tasks imports resolve (ADR 0007).
       - name: Sync dependencies (cpu + mlops + roles)
-        run: uv sync --extra cpu --extra mlops --extra serving --extra ml --extra data
+        run: uv sync --locked --extra cpu --extra mlops --extra serving --extra ml --extra data
 
       - name: API contracts
         run: uv run --extra cpu --extra mlops --extra serving --extra ml --extra data pytest tests/api tests/contracts -q
@@ -99,6 +99,8 @@ jobs:
             image: iqa-ml
           - target: data
             image: iqa-data
+          - target: dvc-gate
+            image: iqa-dvc-gate
     steps:
       - uses: actions/checkout@v4
 

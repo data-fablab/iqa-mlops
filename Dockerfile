@@ -30,3 +30,16 @@ RUN uv sync --no-dev --extra data
 # baked in -- they belong in MinIO/DVC (materialisation deferred, issues 18/19/20).
 COPY data/metadata ./data/metadata
 COPY data/model_datasets ./data/model_datasets
+
+# --- dvc-gate: iqa-check-dvc-reproducibility (dvc[s3] + git, no torch) ---
+FROM base AS dvc-gate
+# dvc shells out to git; install the CLI (not the repo history -- .git is never
+# baked in, so the gate runs the DVC/MinIO checks only, --skip-regeneration).
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+RUN uv sync --no-dev --extra dvc
+# DVC wiring the gate reads at runtime: the remote config, the pipeline file and
+# the light *.dvc pointer (content-addressed; the heavy blob stays in MinIO).
+COPY .dvc ./.dvc
+COPY dvc.yaml ./dvc.yaml
+COPY data/raw/hss-iad.dvc ./data/raw/hss-iad.dvc
