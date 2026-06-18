@@ -1,35 +1,48 @@
-"""IQA replay DAG skeleton."""
+"""IQA replay DAG: runs the data image as a container (ADR 0008, issue 12).
+
+The task launches the ``data`` image with ``iqa-run-replay`` via the operator
+factory, instead of a BashOperator that assumed ``iqa`` lived in the Airflow
+image. Runtime params (scenario_id, plan) are passed as templated argv elements
+-- no shell, no quoting.
+
+Replayed events keep their semantics (``event_time``, ``recorded_at``,
+``is_simulated``): the boundary validates the plan for the scenario and reports
+which of those fields are preserved. Real event emission into the ingestion store
+is runtime (data plane), tracked separately.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
-
 try:
-    from airflow import DAG
-    from airflow.operators.bash import BashOperator
-except ImportError:  # pragma: no cover
-    DAG = None
-    BashOperator = None
+    from iqa.dags import build_container_dag, data_image, make_container_task
+except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
+    build_container_dag = data_image = make_container_task = None
 
 
-dag = None
-if DAG is not None and BashOperator is not None:
-    with DAG(
+def _define() -> None:
+    make_container_task(
+        task_id="run_replay",
+        image="{{ params.image }}",
+        command=[
+            "iqa-run-replay",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--plan", "{{ params.plan }}",
+        ],
+    )
+
+
+dag = (
+    build_container_dag(
         dag_id="iqa_replay",
+        define=_define,
         schedule=None,
-        catchup=False,
-        start_date=datetime(2026, 1, 1),
         tags=["iqa", "replay"],
         params={
             "scenario_id": "production_replay_natural",
             "plan": "data/metadata/casting_flux_replay_plan_natural.csv",
+            "image": data_image(),
         },
-    ) as dag:
-        BashOperator(
-            task_id="run_replay",
-            bash_command=(
-                "iqa-run-replay "
-                "--scenario-id '{{ params.scenario_id }}' "
-                "--plan '{{ params.plan }}'"
-            ),
-        )
+    )
+    if build_container_dag is not None
+    else None
+)
