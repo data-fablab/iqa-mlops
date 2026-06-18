@@ -158,6 +158,85 @@ def test_monitoring_dag_containerises_via_factory() -> None:
 
 
 @pytest.mark.unit
+def test_lifecycle_dag_containerises_decision_and_dataset_via_factory() -> None:
+    """Lifecycle DAG (issue 08) runs lifecycle_decision + dataset as containers.
+
+    The two leading stages move to the data image via the operator factory
+    (issue 11 later containerises the whole tail, removing every PythonOperator).
+    """
+    source = _read_dag_source("iqa_lifecycle.py")
+
+    assert "make_container_task(" in source
+    # Decision + dataset call the data-image boundary scripts with templated argv.
+    assert '"iqa-run-lifecycle-decision"' in source
+    assert '"iqa-run-dataset"' in source
+    assert '"{{ params.scenario_id }}"' in source
+    assert '"{{ params.manifest }}"' in source
+    # These two tasks no longer route through the iqa lifecycle_tasks callables.
+    assert "task_lifecycle_decision" not in source
+    assert "task_dataset" not in source
+
+
+@pytest.mark.unit
+def test_lifecycle_dag_containerises_train_and_eval_on_ml_image_with_gpu_lock() -> None:
+    """Lifecycle DAG (issue 09) runs train + eval as GPU-locked ml containers.
+
+    train/eval move to the ml image via the factory with the iqa_gpu pool and the
+    shared single-GPU lock; the tail (gates..reload) stays on PythonOperator.
+    """
+    source = _read_dag_source("iqa_lifecycle.py")
+
+    assert '"iqa-run-train"' in source
+    assert '"iqa-run-eval"' in source
+    assert '"{{ params.ml_image }}"' in source
+    # GPU-bound: factory mounts the shared lock and the iqa_gpu pool (slots=1).
+    assert "gpu_lock=True" in source
+    assert "pool=GPU_POOL" in source
+    # These two tasks no longer route through the iqa lifecycle_tasks callables.
+    assert "task_train" not in source
+    assert "task_eval" not in source
+
+
+@pytest.mark.unit
+def test_lifecycle_dag_containerises_gates_and_mlflow_via_factory() -> None:
+    """Lifecycle DAG (issue 10) runs gates + mlflow as containers.
+
+    gates evaluates promotion_gates.yaml on the data image (blocks on failure);
+    mlflow resolves the scenario-isolated name on the ml image. Issue 11 then
+    containerises the promotion/reload tail.
+    """
+    source = _read_dag_source("iqa_lifecycle.py")
+
+    assert '"iqa-run-gates"' in source
+    assert '"iqa-run-mlflow"' in source
+    assert '"{{ params.gates_config }}"' in source
+    # gates/mlflow no longer route through the iqa lifecycle_tasks callables.
+    assert "task_gates" not in source
+    assert "task_mlflow" not in source
+
+
+@pytest.mark.unit
+def test_lifecycle_dag_containerises_promotion_and_reload_via_factory() -> None:
+    """Lifecycle DAG (issue 11) runs promotion + reload as containers.
+
+    The last two stages move to the factory, so ADR 0008 is fully resolved: no
+    PythonOperator and no iqa lifecycle_tasks import remain in the DAG. promotion
+    runs on the ml image (MLflow is the source of truth); reload runs on the data
+    image and only acts for prod promotions.
+    """
+    source = _read_dag_source("iqa_lifecycle.py")
+
+    assert '"iqa-run-promotion"' in source
+    assert '"iqa-run-reload"' in source
+    assert '"{{ params.target_stage }}"' in source
+    # No PythonOperator instantiation and no lifecycle_tasks callables anymore.
+    assert "PythonOperator(" not in source
+    assert "task_promotion" not in source
+    assert "task_reload" not in source
+    assert "lifecycle_tasks" not in source
+
+
+@pytest.mark.unit
 def test_dvc_reproducibility_dag_declares_safe_dvc_gate() -> None:
     """DVC is exposed to Airflow as an explicit reproducibility gate."""
     source = _read_dag_source("iqa_dvc_reproducibility.py")
