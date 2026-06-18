@@ -80,18 +80,11 @@ def build_deploy_evidence() -> dict[str, Any]:
             raise AssertionError(f"prod service image does not reference {image_name}: {service} -> {image}")
         if "IQA_IMAGE_TAG" not in image:
             raise AssertionError(f"prod service image is not controlled by IQA_IMAGE_TAG: {service}")
-        if service_config.get("build", "not-overridden") is not None and service in {
-            "iqa-api",
-            "iqa-inference",
-            "iqa-ingestion",
-            "iqa-replay",
-            "iqa-trainer",
-            "iqa-monitoring",
-            "airflow-init",
-            "airflow-webserver",
-            "airflow-scheduler",
-        }:
+        base_has_build = isinstance(base_services.get(service), dict) and "build" in base_services[service]
+        if base_has_build and service_config.get("build", "not-overridden") is not None:
             raise AssertionError(f"prod service keeps a build fallback: {service}")
+        if not base_has_build and "build" in service_config:
+            raise AssertionError(f"prod service adds an invalid build override: {service}")
 
     for term in EXPECTED_SMOKE_TERMS:
         if term not in smoke:
