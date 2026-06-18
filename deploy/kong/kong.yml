@@ -1,0 +1,196 @@
+_format_version: "3.0"
+_transform: true
+
+consumers:
+  - username: iqa-service
+    keyauth_credentials:
+      - key: iqa-service-demo-key-change-me
+    acls:
+      - group: service
+
+  - username: iqa-admin
+    keyauth_credentials:
+      - key: iqa-admin-demo-key-change-me
+    acls:
+      - group: admin
+
+  - username: iqa-monitoring
+    keyauth_credentials:
+      - key: iqa-monitoring-demo-key-change-me
+    acls:
+      - group: monitoring
+
+services:
+  - name: iqa-api
+    url: http://iqa-api:8000
+    routes:
+      - name: iqa-api-health
+        paths:
+          - /api/health
+        strip_path: true
+
+      - name: iqa-api-admin-reload
+        paths:
+          - /api/admin/reload-model
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - X-IQA-Gateway-Key
+              hide_credentials: true
+          - name: acl
+            config:
+              allow:
+                - admin
+          - name: rate-limiting
+            config:
+              minute: 3
+              policy: local
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 1
+
+      - name: iqa-api-metrics
+        paths:
+          - /api/metrics
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - X-IQA-Gateway-Key
+              hide_credentials: true
+          - name: acl
+            config:
+              allow:
+                - monitoring
+                - admin
+          - name: rate-limiting
+            config:
+              minute: 30
+              policy: local
+
+      - name: iqa-api-protected
+        paths:
+          - /api
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - X-IQA-Gateway-Key
+              hide_credentials: true
+          - name: acl
+            config:
+              allow:
+                - service
+                - admin
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+          - name: request-size-limiting
+            config:
+              allowed_payload_size: 10
+
+  - name: iqa-streamlit
+    url: http://iqa-streamlit:8501
+    routes:
+      - name: iqa-streamlit-ui
+        paths:
+          - /iqa
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - X-IQA-Gateway-Key
+              hide_credentials: true
+          - name: acl
+            config:
+              allow:
+                - service
+                - admin
+
+  - name: iqa-mlflow
+    url: http://mlflow:5000
+    routes:
+      - name: iqa-mlflow-ui
+        paths:
+          - /mlflow
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - X-IQA-Gateway-Key
+              hide_credentials: true
+          - name: acl
+            config:
+              allow:
+                - admin
+
+  - name: iqa-minio-console
+    url: http://minio:9001
+    routes:
+      - name: iqa-minio-ui
+        paths:
+          - /minio
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - X-IQA-Gateway-Key
+              hide_credentials: true
+          - name: acl
+            config:
+              allow:
+                - admin
+
+  - name: iqa-grafana
+    url: http://grafana:3000
+    routes:
+      - name: iqa-grafana-ui
+        paths:
+          - /grafana
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - X-IQA-Gateway-Key
+              hide_credentials: true
+          - name: acl
+            config:
+              allow:
+                - admin
+                - monitoring
+
+  - name: iqa-airflow
+    url: http://airflow-webserver:8080
+    routes:
+      - name: iqa-airflow-ui
+        paths:
+          - /airflow
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names:
+                - X-IQA-Gateway-Key
+              hide_credentials: true
+          - name: acl
+            config:
+              allow:
+                - admin
+
+plugins:
+  - name: response-transformer
+    config:
+      add:
+        headers:
+          - X-Content-Type-Options:nosniff
+          - Referrer-Policy:no-referrer
+          - X-Frame-Options:DENY

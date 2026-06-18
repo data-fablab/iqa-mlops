@@ -1,0 +1,25 @@
+services:
+  kong:
+    image: kong:3.8
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
+    ports:
+      - "${IQA_KONG_PROXY_PORT:-8008}:8000"
+      - "${IQA_KONG_ADMIN_PORT:-8001}:8001"
+      - "${IQA_KONG_STATUS_PORT:-8101}:8100"
+    volumes:
+      - ./kong/kong.yml:/kong/declarative/kong.yml:ro
+    depends_on:
+      - iqa-api
+      - iqa-streamlit
+      - mlflow
+      - minio
+      - grafana
+      - airflow-webserver
