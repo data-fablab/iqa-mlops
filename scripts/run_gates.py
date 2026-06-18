@@ -16,10 +16,8 @@ import argparse
 import sys
 from pathlib import Path
 
-import yaml
-
 from iqa.promotion.gates import evaluate_promotion_gates
-from scripts.airflow_contracts import print_json
+from scripts.airflow_contracts import load_yaml_config, print_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,12 +32,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _load_gates_config(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-
 def main() -> None:
     args = parse_args()
     gates = evaluate_promotion_gates(
@@ -48,7 +40,7 @@ def main() -> None:
         candidate_orange_rate=args.orange_rate,
         candidate_latency_ms=args.latency_ms,
         prod_ap=args.prod_ap,
-        gates_config=_load_gates_config(args.gates_config),
+        gates_config=load_yaml_config(args.gates_config),
     )
     all_passed = bool(gates["all_passed"])
     print_json(

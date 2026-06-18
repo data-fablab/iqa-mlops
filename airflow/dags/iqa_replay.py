@@ -13,47 +13,36 @@ is runtime (data plane), tracked separately.
 
 from __future__ import annotations
 
-import os
-from datetime import datetime
-
 try:
-    from airflow import DAG
-except ImportError:  # pragma: no cover - lets CI import the module without Airflow.
-    DAG = None
-
-try:
-    from iqa.dags.operators import make_container_task
+    from iqa.dags import build_container_dag, data_image, make_container_task
 except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
-    make_container_task = None
+    build_container_dag = data_image = make_container_task = None
 
 
-DATA_IMAGE = os.environ.get("IQA_IMAGE_DATA", "iqa-data:local")
+def _define() -> None:
+    make_container_task(
+        task_id="run_replay",
+        image="{{ params.image }}",
+        command=[
+            "iqa-run-replay",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--plan", "{{ params.plan }}",
+        ],
+    )
 
 
-dag = None
-if DAG is not None and make_container_task is not None:
-    try:
-        with DAG(
-            dag_id="iqa_replay",
-            schedule=None,
-            catchup=False,
-            start_date=datetime(2026, 1, 1),
-            tags=["iqa", "replay"],
-            params={
-                "scenario_id": "production_replay_natural",
-                "plan": "data/metadata/casting_flux_replay_plan_natural.csv",
-                "image": DATA_IMAGE,
-            },
-        ) as _replay_dag:
-            make_container_task(
-                task_id="run_replay",
-                image="{{ params.image }}",
-                command=[
-                    "iqa-run-replay",
-                    "--scenario-id", "{{ params.scenario_id }}",
-                    "--plan", "{{ params.plan }}",
-                ],
-            )
-        dag = _replay_dag
-    except ImportError:  # pragma: no cover - Docker/K8s provider absent (e.g. CI).
-        dag = None
+dag = (
+    build_container_dag(
+        dag_id="iqa_replay",
+        define=_define,
+        schedule=None,
+        tags=["iqa", "replay"],
+        params={
+            "scenario_id": "production_replay_natural",
+            "plan": "data/metadata/casting_flux_replay_plan_natural.csv",
+            "image": data_image(),
+        },
+    )
+    if build_container_dag is not None
+    else None
+)

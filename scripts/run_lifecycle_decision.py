@@ -11,11 +11,7 @@ from __future__ import annotations
 import argparse
 
 from iqa.monitoring import LifecycleSignal, evaluate_lifecycle_signal, should_trigger_lifecycle
-from scripts.airflow_contracts import print_json
-
-
-def _str2bool(value: str) -> bool:
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+from scripts.airflow_contracts import print_json, str2bool
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario-id", default="production_replay_natural")
     parser.add_argument("--conforming-validated-count", type=int, default=0)
     # Passed as a value (not a flag) so it survives templated argv from Airflow.
-    parser.add_argument("--drift-confirmed", type=_str2bool, default=False)
+    parser.add_argument("--drift-confirmed", type=str2bool, default=False)
     parser.add_argument("--roi-fail-rate", type=float, default=0.0)
     return parser.parse_args()
 

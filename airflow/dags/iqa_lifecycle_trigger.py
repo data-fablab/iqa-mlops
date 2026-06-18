@@ -29,21 +29,13 @@ sisters (18 / 23). This slice wires the automatic trigger, not the polling I/O.
 from __future__ import annotations
 
 import json
-import os
-from datetime import datetime
 
 try:
-    from airflow import DAG
-except ImportError:  # pragma: no cover - lets CI import the module without Airflow.
-    DAG = None
-
-try:
-    from iqa.dags.operators import make_container_task
+    from iqa.dags import build_container_dag, data_image, make_container_task
 except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
-    make_container_task = None
+    build_container_dag = data_image = make_container_task = None
 
 
-DATA_IMAGE = os.environ.get("IQA_IMAGE_DATA", "iqa-data:local")
 DECISION_TASK_ID = "evaluate_decision"
 LIFECYCLE_DAG_ID = "iqa_lifecycle"
 
@@ -63,59 +55,59 @@ def _should_trigger(ti=None, **_context) -> bool:
     return bool(payload.get("trigger_lifecycle", False))
 
 
-dag = None
-if DAG is not None and make_container_task is not None:
-    try:
-        from airflow.operators.python import ShortCircuitOperator
-        from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+def _define() -> None:
+    from airflow.operators.python import ShortCircuitOperator
+    from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
-        with DAG(
-            dag_id="iqa_lifecycle_trigger",
-            schedule="@hourly",
-            catchup=False,
-            start_date=datetime(2026, 1, 1),
-            tags=["iqa", "lifecycle", "trigger"],
-            params={
-                "scenario_id": "production_replay_natural",
-                "conforming_validated_count": 0,
-                "drift_confirmed": False,
-                "roi_fail_rate": 0.0,
-                "target_stage": "test",
-                "image": DATA_IMAGE,
-            },
-        ) as _trigger_dag:
-            op_evaluate_decision = make_container_task(
-                task_id=DECISION_TASK_ID,
-                image="{{ params.image }}",
-                command=[
-                    "iqa-run-lifecycle-decision",
-                    "--scenario-id", "{{ params.scenario_id }}",
-                    "--conforming-validated-count", "{{ params.conforming_validated_count }}",
-                    "--drift-confirmed", "{{ params.drift_confirmed }}",
-                    "--roi-fail-rate", "{{ params.roi_fail_rate }}",
-                ],
-            )
+    op_evaluate_decision = make_container_task(
+        task_id=DECISION_TASK_ID,
+        image="{{ params.image }}",
+        command=[
+            "iqa-run-lifecycle-decision",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--conforming-validated-count", "{{ params.conforming_validated_count }}",
+            "--drift-confirmed", "{{ params.drift_confirmed }}",
+            "--roi-fail-rate", "{{ params.roi_fail_rate }}",
+        ],
+    )
 
-            op_gate_on_decision = ShortCircuitOperator(
-                task_id="gate_on_decision",
-                python_callable=_should_trigger,
-            )
+    op_gate_on_decision = ShortCircuitOperator(
+        task_id="gate_on_decision",
+        python_callable=_should_trigger,
+    )
 
-            op_trigger_lifecycle = TriggerDagRunOperator(
-                task_id="trigger_lifecycle",
-                trigger_dag_id=LIFECYCLE_DAG_ID,
-                # Relay the raw signal; iqa_lifecycle re-derives the candidate
-                # dataset version in its own lifecycle_decision task.
-                conf={
-                    "scenario_id": "{{ params.scenario_id }}",
-                    "conforming_validated_count": "{{ params.conforming_validated_count }}",
-                    "drift_confirmed": "{{ params.drift_confirmed }}",
-                    "roi_fail_rate": "{{ params.roi_fail_rate }}",
-                    "target_stage": "{{ params.target_stage }}",
-                },
-            )
+    op_trigger_lifecycle = TriggerDagRunOperator(
+        task_id="trigger_lifecycle",
+        trigger_dag_id=LIFECYCLE_DAG_ID,
+        # Relay the raw signal; iqa_lifecycle re-derives the candidate
+        # dataset version in its own lifecycle_decision task.
+        conf={
+            "scenario_id": "{{ params.scenario_id }}",
+            "conforming_validated_count": "{{ params.conforming_validated_count }}",
+            "drift_confirmed": "{{ params.drift_confirmed }}",
+            "roi_fail_rate": "{{ params.roi_fail_rate }}",
+            "target_stage": "{{ params.target_stage }}",
+        },
+    )
 
-            op_evaluate_decision >> op_gate_on_decision >> op_trigger_lifecycle
-        dag = _trigger_dag
-    except ImportError:  # pragma: no cover - Docker/K8s provider absent (e.g. CI).
-        dag = None
+    op_evaluate_decision >> op_gate_on_decision >> op_trigger_lifecycle
+
+
+dag = (
+    build_container_dag(
+        dag_id="iqa_lifecycle_trigger",
+        define=_define,
+        schedule="@hourly",
+        tags=["iqa", "lifecycle", "trigger"],
+        params={
+            "scenario_id": "production_replay_natural",
+            "conforming_validated_count": 0,
+            "drift_confirmed": False,
+            "roi_fail_rate": 0.0,
+            "target_stage": "test",
+            "image": data_image(),
+        },
+    )
+    if build_container_dag is not None
+    else None
+)

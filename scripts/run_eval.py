@@ -15,10 +15,8 @@ the ingestion/dataset split (issues 18, 19).
 from __future__ import annotations
 
 import argparse
-import sys
 
-from iqa.runtime import GpuBusyError, gpu_lock
-from scripts.airflow_contracts import print_json
+from scripts.gpu_boundary import emit_gpu_locked_summary
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,15 +52,12 @@ def _summary(args: argparse.Namespace) -> dict[str, object]:
 
 def main() -> None:
     args = parse_args()
-    if args.no_gpu_lock:
-        print_json(_summary(args))
-        return
-    try:
-        with gpu_lock(owner="iqa-evaluator", blocking=args.wait_for_gpu):
-            print_json(_summary(args))
-    except GpuBusyError as exc:
-        print(f"iqa-evaluator: {exc}", file=sys.stderr)
-        raise SystemExit(75) from exc
+    emit_gpu_locked_summary(
+        owner="iqa-evaluator",
+        summary=_summary(args),
+        no_gpu_lock=args.no_gpu_lock,
+        wait_for_gpu=args.wait_for_gpu,
+    )
 
 
 if __name__ == "__main__":

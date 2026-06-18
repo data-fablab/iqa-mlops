@@ -13,53 +13,42 @@ runtime observability, tracked separately (issue 23).
 
 from __future__ import annotations
 
-import os
-from datetime import datetime
-
 try:
-    from airflow import DAG
-except ImportError:  # pragma: no cover - lets CI import the module without Airflow.
-    DAG = None
-
-try:
-    from iqa.dags.operators import make_container_task
+    from iqa.dags import build_container_dag, data_image, make_container_task
 except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
-    make_container_task = None
+    build_container_dag = data_image = make_container_task = None
 
 
-DATA_IMAGE = os.environ.get("IQA_IMAGE_DATA", "iqa-data:local")
+def _define() -> None:
+    make_container_task(
+        task_id="evaluate_lifecycle_conditions",
+        image="{{ params.image }}",
+        command=[
+            "iqa-run-monitoring",
+            "--scenario-id", "{{ params.scenario_id }}",
+            "--conforming-validated-count", "{{ params.conforming_validated_count }}",
+            "--drift-confirmed", "{{ params.drift_confirmed }}",
+            "--roi-fail-rate", "{{ params.roi_fail_rate }}",
+            "--thresholds-config", "{{ params.thresholds_config }}",
+        ],
+    )
 
 
-dag = None
-if DAG is not None and make_container_task is not None:
-    try:
-        with DAG(
-            dag_id="iqa_monitoring",
-            schedule="@hourly",
-            catchup=False,
-            start_date=datetime(2026, 1, 1),
-            tags=["iqa", "monitoring"],
-            params={
-                "scenario_id": "production_replay_natural",
-                "conforming_validated_count": 0,
-                "drift_confirmed": False,
-                "roi_fail_rate": 0.0,
-                "thresholds_config": "configs/monitoring_thresholds.yaml",
-                "image": DATA_IMAGE,
-            },
-        ) as _monitoring_dag:
-            make_container_task(
-                task_id="evaluate_lifecycle_conditions",
-                image="{{ params.image }}",
-                command=[
-                    "iqa-run-monitoring",
-                    "--scenario-id", "{{ params.scenario_id }}",
-                    "--conforming-validated-count", "{{ params.conforming_validated_count }}",
-                    "--drift-confirmed", "{{ params.drift_confirmed }}",
-                    "--roi-fail-rate", "{{ params.roi_fail_rate }}",
-                    "--thresholds-config", "{{ params.thresholds_config }}",
-                ],
-            )
-        dag = _monitoring_dag
-    except ImportError:  # pragma: no cover - Docker/K8s provider absent (e.g. CI).
-        dag = None
+dag = (
+    build_container_dag(
+        dag_id="iqa_monitoring",
+        define=_define,
+        schedule="@hourly",
+        tags=["iqa", "monitoring"],
+        params={
+            "scenario_id": "production_replay_natural",
+            "conforming_validated_count": 0,
+            "drift_confirmed": False,
+            "roi_fail_rate": 0.0,
+            "thresholds_config": "configs/monitoring_thresholds.yaml",
+            "image": data_image(),
+        },
+    )
+    if build_container_dag is not None
+    else None
+)
