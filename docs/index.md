@@ -34,6 +34,7 @@ IQA est un MVP MLOps pour le controle visuel de pieces `Casting`.
 | Comprendre la chaine d'audit et de tracabilite | [audit_trail.md](audit_trail.md) |
 | Produire une preuve lineage Phase 3 | [lineage-evidence.md](lineage-evidence.md) |
 | Prouver le deploiement Phase 3 depuis images publiees | [phase3-deploy-evidence.md](phase3-deploy-evidence.md) |
+| Prouver Airflow comme orchestrateur de conteneurs | [airflow-container-runtime-evidence.md](airflow-container-runtime-evidence.md) |
 
 ## Phase 3 Deploiement Et Exploitation
 

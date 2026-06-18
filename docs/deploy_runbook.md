@@ -147,6 +147,28 @@ docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibili
 Ce DAG est un gate de reproductibilite ; il ne remplace pas les DAGs metier et ne
 declenche pas de lifecycle modele.
 
+## 5.2 Preuve Airflow container runtime
+
+La preuve Phase 3 Airflow verifie que les DAGs metier orchestrent des conteneurs
+via `DockerOperator`, sans importer le runtime metier dans le scheduler :
+
+```bash
+uv run --extra cpu iqa-check-airflow-container-runtime --json
+
+docker compose exec airflow-webserver airflow dags list
+docker compose exec airflow-webserver airflow dags list-import-errors
+docker compose exec airflow-webserver airflow pools list
+docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibility \
+  --conf '{"with_network": false}'
+docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle_trigger \
+  --conf '{"scenario_id":"production_replay_natural","conforming_validated_count":50,"drift_confirmed":false,"roi_fail_rate":0.0}'
+```
+
+Le backend Docker est valide pour la Phase 3. Le socket Docker
+`/var/run/docker.sock` reste un privilege fort a reserver au serveur MVP de
+confiance ; Kubernetes reste Phase 4. Le lifecycle reste declenche par evenement
+data et il n'y a pas de training via CI.
+
 ## 6. Acces via le reverse proxy
 
 Le service `reverse-proxy` (Nginx) expose tout derriere le port 80 :

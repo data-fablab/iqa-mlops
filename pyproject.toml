@@ -47,6 +47,7 @@ iqa-run-reload = "scripts.run_reload:main"
 iqa-run-replay-lifecycle-cycle = "scripts.run_replay_lifecycle_cycle:main"
 iqa-lineage-summary = "scripts.lineage_summary:main"
 iqa-check-deploy-evidence = "scripts.check_deploy_evidence:main"
+iqa-check-airflow-container-runtime = "scripts.check_airflow_container_runtime:main"
 iqa-demo-phase2 = "scripts.demo_phase2:main"
 
 [project.optional-dependencies]
