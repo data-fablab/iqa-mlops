@@ -47,13 +47,28 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
     monkeypatch.setattr(runner, "resolve_feature_ae_checkpoint", lambda *args, **kwargs: Path("feature.pt"))
     monkeypatch.setattr(
         runner,
+        "load_feature_ae_decision_thresholds",
+        lambda *args, **kwargs: {
+            "method": "calibration_good_quantiles",
+            "threshold_orange": 0.42,
+            "threshold_red": 0.84,
+        },
+    )
+    monkeypatch.setattr(
+        runner,
         "predict_roi_image",
         lambda *args, **kwargs: SimpleNamespace(roi_quality_status="ok", roi_ratio=0.42),
     )
     monkeypatch.setattr(
         runner,
         "predict_feature_ae_image",
-        lambda *args, **kwargs: SimpleNamespace(status="green", score=0.01),
+        lambda *args, **kwargs: SimpleNamespace(
+            status="green",
+            score=0.01,
+            threshold_orange=kwargs["threshold_orange"],
+            threshold_red=kwargs["threshold_red"],
+            threshold_source=kwargs["threshold_source"],
+        ),
     )
 
     def fake_train(config, git_commit):
@@ -90,6 +105,11 @@ def test_decision_only_triggers_natural_without_training(tmp_path: Path, monkeyp
     assert train_calls == []
     lots = (Path(summary["output_dir"]) / "lots.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(lots[0])["conforming_validated_count"] == 50
+    events = (Path(summary["output_dir"]) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    first_event = json.loads(events[0])
+    assert first_event["threshold_orange"] == 0.42
+    assert first_event["threshold_red"] == 0.84
+    assert first_event["threshold_source"] == "manifest:calibration_good_quantiles"
 
 
 def test_train_on_trigger_trains_candidate_once(tmp_path: Path, monkeypatch) -> None:
@@ -118,3 +138,15 @@ def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) ->
     assert summary["trigger_lifecycle"] is True
     assert summary["trigger_reason"] == "drift_confirmed"
     assert summary["candidate_dataset_version"] == "feature_ae_good_v003"
+
+
+def test_runtime_thresholds_fall_back_to_legacy_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(runner, "load_feature_ae_decision_thresholds", lambda *args, **kwargs: None)
+
+    thresholds = runner.resolve_runtime_thresholds("missing_thresholds")
+
+    assert thresholds == {
+        "threshold_orange": 0.02,
+        "threshold_red": 0.05,
+        "threshold_source": "legacy_default",
+    }

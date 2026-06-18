@@ -255,6 +255,37 @@ Le validation set fige est exclu :
 
 Il sert a mesurer la performance et a prendre les decisions de promotion.
 
+## 6.1 Calibration des seuils runtime
+
+Les seuils `green / orange / red` ne sont pas des constantes universelles. Ils
+sont calibres par `model_version` sur `calibration_set_v001`, qui est good-only,
+fige, hors bootstrap, hors replay, hors train et hors validation.
+
+Commande serveur :
+
+```bash
+uv run --extra cu128 iqa-calibrate-feature-ae-thresholds \
+  --model-version rd_feature_ae_gated_v001_bootstrap \
+  --image-root /opt/iqa/iqa-mlops/data/raw/hss-iad \
+  --device cuda \
+  --write-manifest
+```
+
+La commande restaure le ROI et le Feature-AE depuis MinIO, score les images de
+calibration avec le contrat canonique (`functional_surface_prediction`,
+`median3`, `topk_mean`, `topk_fraction=0.005`), puis ecrit les seuils dans le
+manifest modele :
+
+```text
+orange = quantile p95 des scores conformes calibres
+red    = quantile p99 des scores conformes calibres
+```
+
+Le runtime et le runner replay/lifecycle utilisent ensuite ces seuils manifest
+quand ils sont disponibles. Sans seuils calibres, le fallback historique reste
+explicite dans les sorties (`threshold_source = legacy_default`) afin de ne pas
+masquer une calibration manquante.
+
 ## 7. Checkpoints attendus
 
 Le training doit produire :

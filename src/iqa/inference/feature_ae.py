@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
+import torch.nn.functional as F
+from PIL import Image
 
 from iqa.datasets import load_image_tensor
 from iqa.inference.helpers import compute_status, measure_inference_time
@@ -31,6 +34,7 @@ class FeatureAEPrediction:
     latency_ms: float
     roi_status: str | None = None
     heatmap_uri: str | None = None
+    threshold_source: str = "explicit_or_default"
 
     def to_dict(self) -> dict[str, float | str | None]:
         return asdict(self)
@@ -45,6 +49,11 @@ def predict_feature_ae_image(
     preprocessing_mode: str = CANONICAL_FEATURE_AE_PREPROCESSING.preprocessing_mode,
     threshold_orange: float = 0.02,
     threshold_red: float = 0.05,
+    threshold_source: str = "explicit_or_default",
+    roi_mask_path: str | Path | None = None,
+    score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
+    score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
+    topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
     device: str = "cpu",
     pretrained_teacher: bool = False,
     layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
@@ -66,7 +75,14 @@ def predict_feature_ae_image(
             reconstructed = model(image, context_images=context_image)
             anomaly_map = feature_anomaly_map(teacher_features, reconstructed)
 
-    score = float(anomaly_map.mean().detach().cpu())
+    score_map = anomaly_map.squeeze().detach().cpu()
+    score = score_feature_ae_map(
+        score_map,
+        roi_mask_path=roi_mask_path,
+        score_smoothing=score_smoothing,
+        score_image=score_image,
+        topk_fraction=topk_fraction,
+    )
     status = compute_status(score, threshold_orange=threshold_orange, threshold_red=threshold_red)
     return FeatureAEPrediction(
         image_path=str(image_path),
@@ -76,9 +92,74 @@ def predict_feature_ae_image(
         threshold_orange=float(threshold_orange),
         threshold_red=float(threshold_red),
         latency_ms=timing["elapsed_ms"],
-        roi_status=None,
+        roi_status="roi_scored" if roi_mask_path is not None else None,
         heatmap_uri=None,
+        threshold_source=threshold_source,
     )
 
 
-__all__ = ["FeatureAEPrediction", "predict_feature_ae_image"]
+def score_feature_ae_map(
+    score_map: torch.Tensor,
+    *,
+    roi_mask_path: str | Path | None = None,
+    score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
+    score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
+    topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
+) -> float:
+    score_map = score_map.to(dtype=torch.float32)
+    if score_map.ndim != 2:
+        raise ValueError(f"Feature-AE score map must be 2D, got shape={tuple(score_map.shape)}")
+    score_map = smooth_score_map(score_map, score_smoothing)
+    valid_mask = load_roi_mask(roi_mask_path, target_shape=score_map.shape) if roi_mask_path is not None else None
+    if valid_mask is not None:
+        score_map = score_map.masked_fill(~valid_mask, 0.0)
+    return score_image_map(score_map, score_image=score_image, topk_fraction=topk_fraction, valid_mask=valid_mask)
+
+
+def smooth_score_map(score_map: torch.Tensor, mode: str) -> torch.Tensor:
+    if mode == "none":
+        return score_map
+    if mode == "median3":
+        padded = F.pad(score_map.unsqueeze(0).unsqueeze(0), (1, 1, 1, 1), mode="replicate")
+        windows = F.unfold(padded, kernel_size=3).squeeze(0)
+        return windows.median(dim=0).values.reshape_as(score_map)
+    raise ValueError(f"Unsupported Feature-AE score_smoothing: {mode!r}")
+
+
+def score_image_map(
+    score_map: torch.Tensor,
+    *,
+    score_image: str,
+    topk_fraction: float,
+    valid_mask: torch.Tensor | None = None,
+) -> float:
+    values = score_map[valid_mask] if valid_mask is not None else score_map.flatten()
+    if values.numel() == 0:
+        values = score_map.flatten()
+    if score_image == "max":
+        return float(values.max().item())
+    if score_image == "mean":
+        return float(values.mean().item())
+    if score_image != "topk_mean":
+        raise ValueError(f"Unsupported Feature-AE score_image: {score_image!r}")
+    k = max(1, int(np.ceil(values.numel() * float(topk_fraction))))
+    return float(torch.topk(values, min(k, values.numel())).values.mean().item())
+
+
+def load_roi_mask(roi_mask_path: str | Path, *, target_shape: torch.Size | tuple[int, int]) -> torch.Tensor:
+    mask = Image.open(roi_mask_path).convert("L")
+    height, width = int(target_shape[0]), int(target_shape[1])
+    if mask.size != (width, height):
+        mask = mask.resize((width, height), Image.Resampling.NEAREST)
+    array = np.asarray(mask)
+    return torch.from_numpy(array > 0)
+
+
+__all__ = [
+    "FeatureAEPrediction",
+    "load_roi_mask",
+    "predict_feature_ae_image",
+    "score_feature_ae_map",
+    "score_image_map",
+    "smooth_score_map",
+]

@@ -16,6 +16,7 @@ from iqa.inference.segmentation import predict_roi_image
 from iqa.models.artifacts import (
     DEFAULT_FEATURE_AE_MODEL_VERSION,
     DEFAULT_ROI_MODEL_VERSION,
+    load_feature_ae_decision_thresholds,
     resolve_feature_ae_checkpoint,
     resolve_roi_segmenter_checkpoint,
 )
@@ -55,6 +56,9 @@ class CycleEvent:
     score: float
     roi_quality_status: str
     roi_ratio: float
+    threshold_orange: float
+    threshold_red: float
+    threshold_source: str
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -182,6 +186,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
 
     roi_checkpoint = resolve_roi_segmenter_checkpoint(DEFAULT_ROI_MODEL_VERSION, strict_checksum=True)
     feature_checkpoint = resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True)
+    decision_thresholds = resolve_runtime_thresholds(DEFAULT_FEATURE_AE_MODEL_VERSION)
     rows = load_replay_rows(args.scenario_id)
     events_path = state.output_dir / "events.jsonl"
     lots_path = state.output_dir / "lots.jsonl"
@@ -205,6 +210,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 image_root=args.image_root,
                 roi_checkpoint=roi_checkpoint,
                 feature_checkpoint=feature_checkpoint,
+                decision_thresholds=decision_thresholds,
                 output_dir=state.output_dir,
                 device=args.device,
             )
@@ -246,6 +252,7 @@ def process_replay_event(
     image_root: Path,
     roi_checkpoint: Path,
     feature_checkpoint: Path,
+    decision_thresholds: dict[str, Any],
     output_dir: Path,
     device: str,
 ) -> CycleEvent:
@@ -254,7 +261,15 @@ def process_replay_event(
     image_id = first_csv_value(row.get("image_ids") or row.get("image_id") or Path(relative_path).stem)
     mask_path = output_dir / "roi_masks" / f"{row.get('piece_event_id') or row.get('event_id')}_{image_id}_roi.png"
     roi = predict_roi_image(image_path, roi_checkpoint, device=device, output_mask=mask_path)
-    feature = predict_feature_ae_image(image_path, feature_checkpoint, device=device)
+    feature = predict_feature_ae_image(
+        image_path,
+        feature_checkpoint,
+        device=device,
+        roi_mask_path=mask_path,
+        threshold_orange=float(decision_thresholds["threshold_orange"]),
+        threshold_red=float(decision_thresholds["threshold_red"]),
+        threshold_source=str(decision_thresholds["threshold_source"]),
+    )
     return CycleEvent(
         event_id=row.get("event_id") or row.get("simulated_event_id") or "",
         piece_event_id=row.get("piece_event_id") or row.get("simulated_event_id") or row.get("event_id") or "",
@@ -269,7 +284,25 @@ def process_replay_event(
         score=feature.score,
         roi_quality_status=roi.roi_quality_status,
         roi_ratio=roi.roi_ratio,
+        threshold_orange=feature.threshold_orange,
+        threshold_red=feature.threshold_red,
+        threshold_source=feature.threshold_source,
     )
+
+
+def resolve_runtime_thresholds(model_version: str) -> dict[str, Any]:
+    thresholds = load_feature_ae_decision_thresholds(model_version)
+    if thresholds:
+        return {
+            "threshold_orange": float(thresholds["threshold_orange"]),
+            "threshold_red": float(thresholds["threshold_red"]),
+            "threshold_source": f"manifest:{thresholds.get('method', 'decision_thresholds')}",
+        }
+    return {
+        "threshold_orange": 0.02,
+        "threshold_red": 0.05,
+        "threshold_source": "legacy_default",
+    }
 
 
 def first_csv_value(value: str) -> str:

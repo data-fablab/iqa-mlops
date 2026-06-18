@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,20 @@ DEFAULT_FEATURE_AE_MODEL_VERSION = "rd_feature_ae_gated_v001_bootstrap"
 
 def model_manifest_path(model_version: str) -> Path:
     return MODEL_MANIFESTS_DIR / model_version / "model_manifest.json"
+
+
+def load_model_manifest(model_version: str) -> dict[str, Any]:
+    path = model_manifest_path(model_version)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_feature_ae_decision_thresholds(
+    model_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION,
+) -> dict[str, Any] | None:
+    thresholds = load_model_manifest(model_version).get("decision_thresholds")
+    if not isinstance(thresholds, dict):
+        return None
+    return thresholds
 
 
 def resolve_model_checkpoint(
@@ -65,6 +80,8 @@ def resolve_feature_ae_checkpoint(
 __all__ = [
     "DEFAULT_FEATURE_AE_MODEL_VERSION",
     "DEFAULT_ROI_MODEL_VERSION",
+    "load_feature_ae_decision_thresholds",
+    "load_model_manifest",
     "model_manifest_path",
     "resolve_feature_ae_checkpoint",
     "resolve_model_checkpoint",
