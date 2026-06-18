@@ -35,6 +35,19 @@ IQA est un MVP MLOps pour le controle visuel de pieces `Casting`.
 | Produire une preuve lineage Phase 3 | [lineage-evidence.md](lineage-evidence.md) |
 | Prouver le deploiement Phase 3 depuis images publiees | [phase3-deploy-evidence.md](phase3-deploy-evidence.md) |
 
+## Phase 3 Deploiement Et Exploitation
+
+| Besoin | Document |
+| --- | --- |
+| Deployer le serveur (mise en service complete) | [deploy_runbook.md](deploy_runbook.md) |
+| Exploiter au quotidien (supervision, sauvegardes, incidents, MAJ) | [exploitation-runbook.md](exploitation-runbook.md) |
+| Rollback applicatif (par tag d'image) | [rollback-server.md](rollback-server.md) |
+| Rollback modele (MLflow Registry) | [rollback.md](rollback.md) |
+| Stockage objet et politiques de retention | [retention_storage.md](retention_storage.md) |
+| Operer les runs replay (API + Airflow) | [replay-runbook.md](replay-runbook.md) |
+| Versionner les donnees / manifests (DVC) | [dvc-versioning.md](dvc-versioning.md) |
+| Rejouer une demo reproductible from scratch | [deploy_runbook.md](deploy_runbook.md) (section 8.2) |
+
 ## Vocabulaire Minimal
 
 Le dataset Casting sert d'historique rejoue (`historical_replay`). La production
