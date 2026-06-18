@@ -16,14 +16,16 @@ jobs:
         with:
           enable-cache: true
 
+      # Role extras (ADR 0007): fastapi=serving, scikit-learn=ml, psycopg=data.
+      # The full suite imports all three, so install them to collect/run it.
       - name: Sync dependencies
-        run: uv sync --extra cpu
+        run: uv sync --extra cpu --extra serving --extra ml --extra data
 
       - name: Lint
-        run: uv run --extra cpu ruff check src scripts tests
+        run: uv run --extra cpu --extra serving --extra ml --extra data ruff check src scripts tests
 
       - name: Test
-        run: uv run --extra cpu pytest -q
+        run: uv run --extra cpu --extra serving --extra ml --extra data pytest -q
 
   api-and-dag-contracts:
     runs-on: ubuntu-latest
@@ -35,19 +37,20 @@ jobs:
         with:
           enable-cache: true
 
-      # Airflow (mlops extra) so the DAGs are importable instead of skipped.
-      - name: Sync dependencies (cpu + mlops)
-        run: uv sync --extra cpu --extra mlops
+      # Airflow (mlops) so the DAGs are importable instead of skipped; role extras
+      # (serving/ml/data) so the API + lifecycle_tasks imports resolve (ADR 0007).
+      - name: Sync dependencies (cpu + mlops + roles)
+        run: uv sync --extra cpu --extra mlops --extra serving --extra ml --extra data
 
       - name: API contracts
-        run: uv run --extra cpu --extra mlops pytest tests/api tests/contracts -q
+        run: uv run --extra cpu --extra mlops --extra serving --extra ml --extra data pytest tests/api tests/contracts -q
 
       # Real "zero broken DAG" check: parse the DAGs via DagBag (import_errors is
       # populated without a metadata DB). Excludes docker_contract tests, which
       # require a live Airflow runtime + initialized DB (run in the Docker image).
       - name: Import Airflow DAGs (zero broken DAG)
         run: |
-          uv run --extra cpu --extra mlops python - <<'PY'
+          uv run --extra cpu --extra mlops --extra serving --extra ml --extra data python - <<'PY'
           from airflow.models import DagBag
 
           bag = DagBag(dag_folder="airflow/dags", include_examples=False)
@@ -58,7 +61,7 @@ jobs:
           PY
 
       - name: Airflow DAG unit checks
-        run: uv run --extra cpu --extra mlops pytest tests/airflow -q -m "not docker_contract"
+        run: uv run --extra cpu --extra mlops --extra serving --extra ml --extra data pytest tests/airflow -q -m "not docker_contract"
 
   docker-build:
     runs-on: ubuntu-latest
