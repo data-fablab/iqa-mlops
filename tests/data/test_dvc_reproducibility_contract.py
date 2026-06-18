@@ -45,8 +45,8 @@ def test_dvc_reproducibility_script_checks_minio_and_manifests() -> None:
 
     assert 'EXPECTED_REMOTE_NAME = "iqa-minio"' in content
     assert 'EXPECTED_REMOTE_URL = "s3://iqa-dvc"' in content
-    assert '["dvc", "pull", DVC_SOURCE_TARGET]' in content
-    assert '["dvc", "push", DVC_SOURCE_TARGET]' in content
+    assert '["dvc", "pull", dvc_target]' in content
+    assert '["dvc", "push", dvc_target]' in content
     assert "scripts/finalize_data_phase1.py" in content
     assert "git\", \"diff\", \"--quiet\"" in content
     assert "iqa-check-dvc-reproducibility" in pyproject

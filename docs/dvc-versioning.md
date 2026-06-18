@@ -19,7 +19,7 @@ le MVP ; les donnees lourdes et artefacts restent dans MinIO/DVC.
 ```bash
 uv run --extra cpu --extra data dvc pull
 uv run --extra cpu --extra data dvc repro
-uv run --extra cpu --extra data iqa-check-dvc-reproducibility --with-network
+uv run --extra cpu --extra data iqa-check-dvc-reproducibility --with-network true
 uv run --extra cpu pytest -q tests/data tests/datasets/test_candidate_builder.py
 ```
 
@@ -61,7 +61,7 @@ set -a
 source .env
 set +a
 uv run --extra cpu --extra data dvc remote list
-uv run --extra cpu --extra data iqa-check-dvc-reproducibility --with-network
+uv run --extra cpu --extra data iqa-check-dvc-reproducibility --with-network true
 ```
 
 Le script verifie le remote `iqa-minio -> s3://iqa-dvc`, execute `dvc pull`
