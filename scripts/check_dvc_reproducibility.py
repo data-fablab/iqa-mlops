@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.airflow_contracts import str2bool
+
 
 DVC_SOURCE_TARGET = "data/raw/hss-iad.dvc"
 EXPECTED_REMOTE_NAME = "iqa-minio"
@@ -24,15 +26,24 @@ REGENERATED_MANIFESTS = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    # Booleans are passed as values (not store_true flags) so they survive the
+    # templated argv of the containerised task (ADR 0008), like iqa_monitoring.
     parser.add_argument(
         "--with-network",
-        action="store_true",
+        type=str2bool,
+        default=False,
         help="Run DVC pull/push against the configured MinIO remote.",
     )
     parser.add_argument(
         "--skip-regeneration",
-        action="store_true",
+        type=str2bool,
+        default=False,
         help="Skip deterministic metadata regeneration check.",
+    )
+    parser.add_argument(
+        "--dvc-target",
+        default=DVC_SOURCE_TARGET,
+        help="DVC-tracked source target pulled/pushed by the network check.",
     )
     return parser.parse_args()
 
@@ -49,11 +60,11 @@ def _check_dvc_remote() -> None:
         )
 
 
-def _check_dvc_network() -> None:
-    if not Path(DVC_SOURCE_TARGET).exists():
-        raise SystemExit(f"Missing DVC source target: {DVC_SOURCE_TARGET}")
-    _run(["dvc", "pull", DVC_SOURCE_TARGET])
-    _run(["dvc", "push", DVC_SOURCE_TARGET])
+def _check_dvc_network(dvc_target: str) -> None:
+    if not Path(dvc_target).exists():
+        raise SystemExit(f"Missing DVC source target: {dvc_target}")
+    _run(["dvc", "pull", dvc_target])
+    _run(["dvc", "push", dvc_target])
 
 
 def _check_regeneration_is_clean() -> None:
@@ -68,7 +79,7 @@ def main() -> None:
     args = parse_args()
     _check_dvc_remote()
     if args.with_network:
-        _check_dvc_network()
+        _check_dvc_network(args.dvc_target)
     if not args.skip_regeneration:
         _check_regeneration_is_clean()
     print("DVC remote and metadata reproducibility checks passed.")
