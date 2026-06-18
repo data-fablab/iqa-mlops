@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from iqa.dags.operators import _normalise_command, make_container_task
+from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
+from iqa.dags.operators import _normalise_command
 
 DAG_FOLDER = Path(__file__).parents[2] / "airflow" / "dags"
 sys.path.insert(0, str(DAG_FOLDER))
@@ -20,7 +21,78 @@ def _has_docker_provider() -> bool:
         return False
 
 
+def _has_airflow_dag() -> bool:
+    try:
+        from airflow import DAG  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 _HAS_DOCKER_PROVIDER = _has_docker_provider()
+_HAS_AIRFLOW_DAG = _has_airflow_dag()
+
+
+@pytest.mark.unit
+def test_data_image_defaults_and_honours_the_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IQA_IMAGE_DATA", raising=False)
+    assert data_image() == "iqa-data:local"
+    monkeypatch.setenv("IQA_IMAGE_DATA", "registry/iqa-data:1.2.3")
+    assert data_image() == "registry/iqa-data:1.2.3"
+
+
+@pytest.mark.unit
+def test_ml_image_defaults_and_honours_the_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IQA_IMAGE_ML", raising=False)
+    assert ml_image() == "iqa-ml:local"
+    monkeypatch.setenv("IQA_IMAGE_ML", "registry/iqa-ml:1.2.3")
+    assert ml_image() == "registry/iqa-ml:1.2.3"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(_HAS_AIRFLOW_DAG, reason="Airflow installed: the None-resilience path is unreachable")
+def test_build_container_dag_returns_none_without_airflow() -> None:
+    """The DAG module stays importable when Airflow is absent (CI): None, not raise."""
+    called = False
+
+    def _define() -> None:
+        nonlocal called
+        called = True
+
+    dag = build_container_dag(
+        dag_id="iqa_x",
+        define=_define,
+        params={"image": "iqa-data:local"},
+        tags=["iqa"],
+    )
+
+    assert dag is None
+    assert called is False  # never entered the DAG context
+
+
+@pytest.mark.docker_contract
+@pytest.mark.skipif(not _HAS_AIRFLOW_DAG, reason="Airflow not installed")
+def test_build_container_dag_runs_define_inside_the_dag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With Airflow available, define() runs inside the DAG and its id/params stick."""
+    seen: dict[str, object] = {}
+
+    def _define() -> None:
+        from airflow.operators.empty import EmptyOperator
+
+        EmptyOperator(task_id="noop")
+        seen["ran"] = True
+
+    dag = build_container_dag(
+        dag_id="iqa_build_probe",
+        define=_define,
+        params={"image": "iqa-data:local"},
+        tags=["iqa", "probe"],
+    )
+
+    assert seen.get("ran") is True
+    assert dag is not None
+    assert dag.dag_id == "iqa_build_probe"
+    assert {t.task_id for t in dag.tasks} == {"noop"}
 
 
 @pytest.mark.unit
