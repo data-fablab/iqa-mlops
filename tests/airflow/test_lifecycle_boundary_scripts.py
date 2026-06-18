@@ -182,11 +182,11 @@ def test_run_reload_skips_unless_the_target_is_prod(
     assert to_prod["registered_model_name"] == "feature_ae__production_replay_natural"
 
 
-def test_run_dataset_validates_manifest_without_materialising(
+def test_run_dataset_materialises_the_candidate_and_reports_its_uri(
     tmp_path: Path,
     run_boundary_script: Callable[[object, list[str]], dict],
 ) -> None:
-    """The dataset boundary reports the manifest summary but writes nothing (issue 19)."""
+    """The dataset boundary writes the candidate to the object store (issue 19)."""
     manifest = tmp_path / "candidate.csv"
     manifest.write_text(
         "event_id,scenario_id,dataset_version\n"
@@ -199,10 +199,55 @@ def test_run_dataset_validates_manifest_without_materialising(
         ["iqa-run-dataset", "--manifest", str(manifest), "--candidate-version", "v002"],
     )
 
-    assert result["status"] == "validated"
+    assert result["status"] == "materialized"
     assert result["manifest"]["row_count"] == 1
     assert result["candidate_version"] == "v002"
-    assert result["materialized"] is False
+    assert result["materialized"] is True
+    assert result["dataset_uri"].startswith("s3://")
+
+
+def test_materialise_dataset_writes_exact_bytes_to_a_deterministic_key(
+    tmp_path: Path,
+) -> None:
+    """The candidate bytes land verbatim at a scenario/version-derived key."""
+    from iqa.storage import IQA_BUCKETS, parse_s3_uri
+    from iqa.storage.object_store import InMemoryObjectStore
+
+    manifest = tmp_path / "candidate.csv"
+    body = b"event_id,scenario_id\nevt_1,production_replay_natural\n"
+    manifest.write_bytes(body)
+    store = InMemoryObjectStore()
+
+    uri = run_dataset.materialise_dataset(
+        store,
+        manifest=manifest,
+        scenario_id="production_replay_natural",
+        candidate_version="v002",
+    )
+
+    parsed = parse_s3_uri(uri)
+    assert parsed.bucket == IQA_BUCKETS["source_datasets"]
+    assert parsed.key == "model_datasets/production_replay_natural/v002/candidate.csv"
+    assert store.get_bytes(parsed.bucket, parsed.key) == body
+
+
+def test_materialise_dataset_falls_back_to_candidate_segment_without_a_version(
+    tmp_path: Path,
+) -> None:
+    from iqa.storage.object_store import InMemoryObjectStore
+
+    manifest = tmp_path / "candidate.csv"
+    manifest.write_bytes(b"event_id\nevt_1\n")
+    store = InMemoryObjectStore()
+
+    uri = run_dataset.materialise_dataset(
+        store,
+        manifest=manifest,
+        scenario_id="production_replay_natural",
+        candidate_version="",
+    )
+
+    assert uri.endswith("model_datasets/production_replay_natural/candidate/candidate.csv")
 
 
 def test_run_dataset_fails_clearly_for_a_missing_manifest(
