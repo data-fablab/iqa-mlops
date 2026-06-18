@@ -13,10 +13,7 @@ is runtime (data plane), tracked separately.
 
 from __future__ import annotations
 
-try:
-    from iqa.dags import build_container_dag, data_image, make_container_task
-except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
-    build_container_dag = data_image = make_container_task = None
+from iqa.dags import build_container_dag, data_image, make_container_task
 
 
 def _define() -> None:
@@ -31,18 +28,14 @@ def _define() -> None:
     )
 
 
-dag = (
-    build_container_dag(
-        dag_id="iqa_replay",
-        define=_define,
-        schedule=None,
-        tags=["iqa", "replay"],
-        params={
-            "scenario_id": "production_replay_natural",
-            "plan": "data/metadata/casting_flux_replay_plan_natural.csv",
-            "image": data_image(),
-        },
-    )
-    if build_container_dag is not None
-    else None
+dag = build_container_dag(
+    dag_id="iqa_replay",
+    define=_define,
+    schedule=None,
+    tags=["iqa", "replay"],
+    params={
+        "scenario_id": "production_replay_natural",
+        "plan": "data/metadata/casting_flux_replay_plan_natural.csv",
+        "image": data_image(),
+    },
 )

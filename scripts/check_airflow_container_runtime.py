@@ -76,6 +76,8 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
             raise AssertionError(f"{filename} does not use make_container_task")
         if command not in source:
             raise AssertionError(f"{filename} does not call expected command: {command}")
+        if "except ImportError" in source or "build_container_dag is not None" in source:
+            raise AssertionError(f"{filename} hides missing iqa.dags imports instead of surfacing a broken DAG")
         if "PythonOperator(" in source:
             raise AssertionError(f"{filename} still instantiates PythonOperator")
         for forbidden in FORBIDDEN_RUNTIME_IMPORTS:

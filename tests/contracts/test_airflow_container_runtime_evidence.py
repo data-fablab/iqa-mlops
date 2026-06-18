@@ -46,6 +46,8 @@ def test_business_airflow_dags_use_container_factory_without_runtime_imports() -
     for dag_name in business_dags:
         source = (dag_dir / dag_name).read_text(encoding="utf-8")
         assert "make_container_task(" in source
+        assert "except ImportError" not in source
+        assert "build_container_dag is not None" not in source
         assert "PythonOperator(" not in source
         for forbidden in ["from iqa.api", "from iqa.inference", "from iqa.training", "import torch"]:
             assert forbidden not in source

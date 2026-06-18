@@ -16,10 +16,7 @@ by the runtime sister issues 18-22: this slice only converts the orchestration.
 
 from __future__ import annotations
 
-try:
-    from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
-except ImportError:  # pragma: no cover - iqa package absent from the Airflow image.
-    build_container_dag = data_image = make_container_task = ml_image = None
+from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
 
 GPU_POOL = "iqa_gpu"
 
@@ -129,34 +126,30 @@ def _define() -> None:
     op_lifecycle_decision >> op_dataset >> op_train >> op_eval >> op_gates >> op_mlflow >> op_promotion >> op_reload
 
 
-dag = (
-    build_container_dag(
-        dag_id="iqa_lifecycle",
-        define=_define,
-        schedule=None,
-        tags=["iqa", "lifecycle"],
-        params={
-            "regime": "natural",
-            "scenario_id": "production_replay_natural",
-            "conforming_validated_count": 0,
-            "drift_confirmed": False,
-            "roi_fail_rate": 0.0,
-            "target_stage": "test",
-            "manifest": "data/model_datasets/feature_ae_good_v002.csv",
-            "candidate_version": "",
-            "checkpoint": "models/feature_ae/candidate.pt",
-            "validation_set_id": "validation_set_v001",
-            "candidate_recall": 1.0,
-            "candidate_ap": 0.0,
-            "candidate_orange_rate": 0.0,
-            "candidate_latency_ms": 0.0,
-            "gates_config": "configs/promotion_gates.yaml",
-            "run_id": "",
-            "registry_stage": "candidate",
-            "image": data_image(),
-            "ml_image": ml_image(),
-        },
-    )
-    if build_container_dag is not None
-    else None
+dag = build_container_dag(
+    dag_id="iqa_lifecycle",
+    define=_define,
+    schedule=None,
+    tags=["iqa", "lifecycle"],
+    params={
+        "regime": "natural",
+        "scenario_id": "production_replay_natural",
+        "conforming_validated_count": 0,
+        "drift_confirmed": False,
+        "roi_fail_rate": 0.0,
+        "target_stage": "test",
+        "manifest": "data/model_datasets/feature_ae_good_v002.csv",
+        "candidate_version": "",
+        "checkpoint": "models/feature_ae/candidate.pt",
+        "validation_set_id": "validation_set_v001",
+        "candidate_recall": 1.0,
+        "candidate_ap": 0.0,
+        "candidate_orange_rate": 0.0,
+        "candidate_latency_ms": 0.0,
+        "gates_config": "configs/promotion_gates.yaml",
+        "run_id": "",
+        "registry_stage": "candidate",
+        "image": data_image(),
+        "ml_image": ml_image(),
+    },
 )
