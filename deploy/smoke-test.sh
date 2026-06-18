@@ -12,6 +12,8 @@
 #   IQA_PROMETHEUS_URL=http://localhost:9090
 #   IQA_GRAFANA_URL=http://localhost:3000
 #   IQA_MLFLOW_URL=http://localhost:5000
+#   IQA_AIRFLOW_URL=http://localhost:8080
+#   IQA_GATEWAY_URL=http://localhost      (reverse-proxy, port 80)
 set -u
 
 API_URL="${IQA_API_URL:-http://localhost:8000}"
@@ -20,6 +22,8 @@ MINIO_URL="${IQA_MINIO_URL:-http://localhost:9000}"
 PROMETHEUS_URL="${IQA_PROMETHEUS_URL:-http://localhost:9090}"
 GRAFANA_URL="${IQA_GRAFANA_URL:-http://localhost:3000}"
 MLFLOW_URL="${IQA_MLFLOW_URL:-http://localhost:5000}"
+AIRFLOW_URL="${IQA_AIRFLOW_URL:-http://localhost:8080}"
+GATEWAY_URL="${IQA_GATEWAY_URL:-http://localhost}"
 
 fail=0
 
@@ -61,6 +65,18 @@ check "prometheus healthy"      "$PROMETHEUS_URL/-/healthy"
 check "prometheus targets"      "$PROMETHEUS_URL/api/v1/targets" '"status":"success"'
 check "grafana health"          "$GRAFANA_URL/api/health"    '"database"'
 check "mlflow up"               "$MLFLOW_URL/"
+
+# Orchestration & monitoring
+# Airflow expose /health (metadatabase + scheduler). iqa-monitoring est un job
+# batch (profile "batch", sans HTTP) : sa couverture passe par Airflow + les
+# metriques Prometheus (job "airflow" via statsd-exporter) ci-dessus.
+check "airflow health"          "$AIRFLOW_URL/health"        "healthy"
+
+# Gateway (reverse-proxy) : valide le routage de bout en bout sur le port 80.
+check "gateway -> api"          "$GATEWAY_URL/api/health"        '"status":"ok"'
+check "gateway -> grafana"      "$GATEWAY_URL/grafana/api/health" '"database"'
+check "gateway -> airflow"      "$GATEWAY_URL/airflow/health"    "healthy"
+check "gateway -> mlflow"       "$GATEWAY_URL/mlflow/"
 
 echo "===================="
 if [ "$fail" -eq 0 ]; then

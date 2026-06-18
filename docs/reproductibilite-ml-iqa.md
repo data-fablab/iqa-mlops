@@ -78,7 +78,7 @@ Entrainer un Feature-AE minimal depuis le bootstrap :
 uv run --extra cpu iqa-train-feature-ae `
   --manifest data\metadata\feature_ae_bootstrap_events.csv `
   --image-root D:\path\to\hss-iad `
-  --output-checkpoint models\feature_ae\rd_feature_ae_gated.pt `
+  --output-checkpoint .cache\iqa\models\rd_feature_ae_gated_v001_bootstrap\checkpoint.pt `
   --preprocessing-mode tiled_context `
   --image-size 384 `
   --context-size 768 `
@@ -89,7 +89,7 @@ Predire une image :
 ```powershell
 uv run --extra cpu iqa-predict-image `
   --image D:\path\to\hss-iad\Casting_class1\train\good\sample.jpg `
-  --feature-ae-checkpoint models\feature_ae\rd_feature_ae_gated.pt
+  --feature-ae-checkpoint .cache\iqa\models\rd_feature_ae_gated_v001_bootstrap\checkpoint.pt
 ```
 
 ## Stockage
@@ -104,3 +104,5 @@ fichiers lourds.
 Les checkpoints `.pt` ne sont pas versionnes dans Git : Git conserve les
 manifests, les versions, les URI MinIO et les checksums ; MinIO conserve les
 artefacts lourds comme `s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`.
+Les copies locales restaurees par `iqa-restore-model-artifacts` vivent sous
+`.cache/iqa/models/`.

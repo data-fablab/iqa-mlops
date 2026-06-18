@@ -32,6 +32,7 @@ IQA est un MVP MLOps pour le controle visuel de pieces `Casting`.
 | Comprendre les regles de feedback et d'eligibilite train | [feedback_rules.md](feedback_rules.md) |
 | Comprendre la gouvernance securite IA | [ai_security_governance.md](ai_security_governance.md) |
 | Comprendre la chaine d'audit et de tracabilite | [audit_trail.md](audit_trail.md) |
+| Produire une preuve lineage Phase 3 | [lineage-evidence.md](lineage-evidence.md) |
 
 ## Vocabulaire Minimal
 

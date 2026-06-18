@@ -160,6 +160,7 @@ def compute_binary_metrics(
     metrics: dict[str, float | None] = {
         "image_auroc": None,
         "image_ap": None,
+        "pixel_auroc": None,
         "pixel_ap": None,
         "pixel_aupimo_1e-5_1e-3": None,
     }
@@ -173,6 +174,7 @@ def compute_binary_metrics(
         p_true = np.concatenate([labels.reshape(-1) for labels in pixel_labels]).astype(np.int32)
         p_score = np.concatenate([scores.reshape(-1) for scores in pixel_scores]).astype(np.float32)
         if p_true.sum() > 0 and np.unique(p_true).size == 2:
+            metrics["pixel_auroc"] = float(roc_auc_score(p_true, p_score))
             metrics["pixel_ap"] = float(average_precision_score(p_true, p_score))
             metrics["pixel_aupimo_1e-5_1e-3"] = _normalized_low_fpr_auc(p_true, p_score)
     return metrics
@@ -232,7 +234,7 @@ def _normalized_low_fpr_auc(labels: np.ndarray, scores: np.ndarray) -> float:
     low, high = 1e-5, 1e-3
     fpr_grid = np.concatenate(([low], fpr[(fpr >= low) & (fpr <= high)], [high]))
     tpr_grid = np.interp(fpr_grid, fpr, tpr)
-    return float(np.trapz(tpr_grid, fpr_grid) / (high - low))
+    return float(np.trapezoid(tpr_grid, fpr_grid) / (high - low))
 
 
 def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[str, Any]:

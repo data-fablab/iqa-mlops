@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from iqa.training import FeatureAEEvaluationConfig, evaluate_feature_ae_checkpoint
+from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING, assert_canonical_feature_ae_preprocessing
 
 
 def parse_args() -> argparse.Namespace:
@@ -18,9 +19,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--roi-predictions-dir", action="append", type=Path, default=[])
     parser.add_argument("--gt-masks-manifest", type=Path)
     parser.add_argument("--validation-set-id", default="validation_set_v001")
-    parser.add_argument("--image-size", type=int, default=384)
-    parser.add_argument("--context-size", type=int, default=768)
-    parser.add_argument("--tile-stride", type=int, default=192)
+    parser.add_argument("--image-size", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.image_size)
+    parser.add_argument("--context-size", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.context_size)
+    parser.add_argument("--tile-stride", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.tile_stride)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--layers", nargs="+", default=["layer2", "layer3"])
@@ -29,12 +30,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calibration-mode", default="per_layer")
     parser.add_argument("--calibration-stat", default="median_mad")
     parser.add_argument("--calibration-max-images", type=int, default=120)
-    parser.add_argument("--score-region", default="functional_surface_prediction")
-    parser.add_argument("--roi-threshold", type=float, default=0.30)
+    parser.add_argument("--score-region", default=CANONICAL_FEATURE_AE_PREPROCESSING.score_region)
+    parser.add_argument("--roi-threshold", type=float, default=CANONICAL_FEATURE_AE_PREPROCESSING.roi_threshold)
     parser.add_argument("--apply-score-region-to-map", action="store_true")
-    parser.add_argument("--score-smoothing", default="median3")
-    parser.add_argument("--score-image", default="topk_mean")
-    parser.add_argument("--topk-fraction", type=float, default=0.005)
+    parser.add_argument("--score-smoothing", default=CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing)
+    parser.add_argument("--score-image", default=CANONICAL_FEATURE_AE_PREPROCESSING.score_image)
+    parser.add_argument("--topk-fraction", type=float, default=CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction)
+    parser.add_argument(
+        "--allow-noncanonical-preprocessing",
+        action="store_true",
+        help="Only for tests/local dev; comparable evaluations must use the canonical preprocessing contract.",
+    )
     parser.add_argument("--save-score-maps", action="store_true")
     parser.add_argument("--save-previews", action="store_true")
     parser.add_argument("--max-previews", type=int, default=31)
@@ -43,6 +49,20 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    assert_canonical_feature_ae_preprocessing(
+        preprocessing_mode="tiled_context",
+        image_size=args.image_size,
+        context_size=args.context_size,
+        tile_stride=args.tile_stride,
+        tile_train_sampling="all",
+        roi_threshold=args.roi_threshold,
+        min_roi_ratio=CANONICAL_FEATURE_AE_PREPROCESSING.min_roi_ratio,
+        score_region=args.score_region,
+        score_smoothing=args.score_smoothing,
+        score_image=args.score_image,
+        topk_fraction=args.topk_fraction,
+        allow_noncanonical_preprocessing=args.allow_noncanonical_preprocessing,
+    )
     result = evaluate_feature_ae_checkpoint(
         FeatureAEEvaluationConfig(
             checkpoint_path=args.checkpoint,
