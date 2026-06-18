@@ -7,12 +7,14 @@ import json
 from pathlib import Path
 
 from iqa.inference import predict_roi_image
+from iqa.models.artifacts import DEFAULT_ROI_MODEL_VERSION, resolve_roi_segmenter_checkpoint
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", type=Path, required=True)
-    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--roi-model-version", default=DEFAULT_ROI_MODEL_VERSION)
     parser.add_argument("--image-size", type=int)
     parser.add_argument("--context-size", type=int)
     parser.add_argument("--threshold", type=float, default=0.5)
@@ -27,9 +29,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    checkpoint = args.checkpoint or resolve_roi_segmenter_checkpoint(args.roi_model_version)
     prediction = predict_roi_image(
         args.image,
-        args.checkpoint,
+        checkpoint,
         image_size=args.image_size,
         context_size=args.context_size,
         threshold=args.threshold,

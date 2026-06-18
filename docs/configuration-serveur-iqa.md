@@ -415,18 +415,20 @@ docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.ym
 
 Generation ROI bootstrap V0 sur serveur RTX 3060 :
 
-Le checkpoint ROI officiel est versionne par manifest Git et stocke dans MinIO :
-`s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`. La commande
-ci-dessous consomme une copie locale/cache hors Git dans
-`models/roi_segmenter_v001_fixed/checkpoint.pt`, a restaurer depuis MinIO si le
-fichier local est absent.
+Le checkpoint ROI officiel est reference par manifest Git et stocke dans MinIO :
+`s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt`. Les checkpoints lourds
+ne doivent pas etre stockes dans Git ni sous `models/`. Restaurer les artefacts
+dans le cache local controle avant execution :
+
+```bash
+uv run --extra cpu iqa-restore-model-artifacts --model-version roi_segmenter_v001_fixed
+```
 
 ```bash
 cd /opt/iqa/iqa-mlops
 uv run --extra cu128 --extra data iqa-generate-bootstrap-roi \
   --manifest data/metadata/feature_ae_bootstrap_events.csv \
   --image-root data/raw/hss-iad \
-  --checkpoint models/roi_segmenter_v001_fixed/checkpoint.pt \
   --output-dir data/processed/roi/bootstrap_v001 \
   --roi-model-version roi_segmenter_v001_fixed \
   --device cuda

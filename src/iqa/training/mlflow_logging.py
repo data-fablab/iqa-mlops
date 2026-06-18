@@ -13,6 +13,7 @@ except ImportError:
     HAS_MLFLOW = False
 
 from iqa.training.feature_ae import FeatureAETrainingConfig
+from iqa.training.feature_ae_contracts import FEATURE_AE_PREPROCESSING_CONTRACT_VERSION
 from iqa.training.feature_ae_evaluation import EvaluationReport
 
 
@@ -68,6 +69,8 @@ class MLflowRunLogger:
             "lr_patience": config.lr_patience,
             "lr_factor": config.lr_factor,
             "early_stopping_patience": config.early_stopping_patience,
+            "metric_early_stopping_patience": config.metric_early_stopping_patience,
+            "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
             "tile_stride": config.tile_stride,
             "preprocessing_mode": config.preprocessing_mode,
             "loss": config.loss,
