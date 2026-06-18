@@ -119,9 +119,20 @@ Depuis la racine du repo :
 bash deploy/smoke-test.sh
 ```
 
-Verifie sante API/inference, endpoints cles (`/metrics`, `/model/version`,
-`/predictions`, `/lots/summary`), MinIO, Prometheus (+ targets), Grafana et
-MLflow. Code de sortie 0 = tout vert.
+Verifie de bout en bout :
+
+- **Applicatif** : API + inference (`/health`, `/metrics`, `/model/version`,
+  `/predictions`, `/lots/summary`).
+- **Donnees / artefacts** : MinIO (live), MLflow.
+- **Observabilite** : Prometheus (+ targets), Grafana.
+- **Orchestration** : Airflow (`/health`). `iqa-monitoring` est un job batch
+  (sans HTTP) ; sa couverture passe par Airflow + le job Prometheus `airflow`.
+- **Gateway** : routage via le reverse-proxy (port 80) vers api, grafana,
+  airflow, mlflow.
+
+Code de sortie 0 = tout vert. Cibles surchargeables par variables
+d'environnement (`IQA_AIRFLOW_URL`, `IQA_GATEWAY_URL`, etc. ; voir l'en-tete du
+script).
 
 ## 5.1 Gate DVC / data lineage
 
