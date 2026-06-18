@@ -102,6 +102,12 @@ PostgreSQL metadata:
 uv run --extra cpu iqa-init-metadata-db --help
 ```
 
+Model artifacts from MinIO:
+
+```powershell
+uv run --extra cpu iqa-restore-model-artifacts --help
+```
+
 Runtime services:
 
 ```powershell
@@ -145,6 +151,9 @@ PostgreSQL stores metadata facts, statuses, timestamps, versions, URIs, and JSON
 payloads. It never stores images, checkpoints, masks, heatmaps, or other binary
 artifacts. Runtime PostgreSQL write-through remains explicit and opt-in through
 `IQA_METADATA_BACKEND=postgres`.
+
+Model checkpoints are restored from MinIO manifests into `.cache/iqa/models/`;
+the `models/` tree stores manifests only, not binary checkpoints.
 
 ## Data, Replay And Lifecycle
 

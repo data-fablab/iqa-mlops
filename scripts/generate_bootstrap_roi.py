@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from iqa.models.artifacts import DEFAULT_ROI_MODEL_VERSION, resolve_roi_segmenter_checkpoint
 from iqa.roi.bootstrap import generate_bootstrap_roi_predictions
 
 
@@ -13,9 +14,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--image-root", type=Path, required=True)
-    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--roi-model-version", required=True)
+    parser.add_argument("--roi-model-version", default=DEFAULT_ROI_MODEL_VERSION)
     parser.add_argument("--dataset-version", default="bootstrap_v001")
     parser.add_argument("--scenario-id", default="bootstrap_v001")
     parser.add_argument("--device", default="cpu")
@@ -25,10 +26,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    checkpoint = args.checkpoint or resolve_roi_segmenter_checkpoint(args.roi_model_version)
     artifacts = generate_bootstrap_roi_predictions(
         manifest_path=args.manifest,
         image_root=args.image_root,
-        checkpoint_path=args.checkpoint,
+        checkpoint_path=checkpoint,
         output_dir=args.output_dir,
         roi_model_version=args.roi_model_version,
         dataset_version=args.dataset_version,

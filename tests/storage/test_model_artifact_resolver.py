@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from iqa.models import artifacts as model_artifacts
+from iqa.storage.artifacts import (
+    PENDING_CHECKSUM,
+    load_model_artifact_manifest,
+    resolve_model_artifact_from_manifest,
+    resolve_model_artifact_uri,
+    sha256_file,
+)
+
+
+class FakeS3Client:
+    def __init__(self, source: Path):
+        self.source = source
+        self.calls: list[tuple[str, str, str]] = []
+
+    def download_file(self, bucket: str, key: str, filename: str) -> None:
+        self.calls.append((bucket, key, filename))
+        Path(filename).write_bytes(self.source.read_bytes())
+
+
+def _write_manifest(path: Path, *, artifact_uri: str, sha256: str | None = None, model_version: str = "demo") -> None:
+    payload = {"model_version": model_version, "artifact_uri": artifact_uri}
+    if sha256 is not None:
+        payload["sha256"] = sha256
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_load_model_artifact_manifest_requires_artifact_uri(tmp_path: Path) -> None:
+    manifest = tmp_path / "model_manifest.json"
+    manifest.write_text(json.dumps({"model_version": "demo"}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="artifact_uri"):
+        load_model_artifact_manifest(manifest)
+
+
+def test_resolves_local_artifact_and_verifies_checksum(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    manifest = tmp_path / "model_manifest.json"
+    _write_manifest(manifest, artifact_uri=str(checkpoint), sha256=sha256_file(checkpoint))
+
+    resolved = resolve_model_artifact_from_manifest(manifest)
+
+    assert resolved == checkpoint
+
+
+def test_checksum_mismatch_raises(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+
+    with pytest.raises(ValueError, match="Checksum mismatch"):
+        resolve_model_artifact_uri(str(checkpoint), model_version="demo", sha256="0" * 64)
+
+
+def test_strict_checksum_rejects_pending_restore(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+
+    with pytest.raises(ValueError, match="Strict checksum"):
+        resolve_model_artifact_uri(
+            str(checkpoint),
+            model_version="demo",
+            sha256=PENDING_CHECKSUM,
+            strict_checksum=True,
+        )
+
+
+def test_downloads_s3_artifact_to_cache_and_reuses_it(tmp_path: Path) -> None:
+    source = tmp_path / "remote.pt"
+    source.write_bytes(b"remote-checkpoint")
+    client = FakeS3Client(source)
+    cache_root = tmp_path / "cache"
+
+    resolved = resolve_model_artifact_uri(
+        "s3://iqa-models/demo/checkpoint.pt",
+        model_version="demo",
+        sha256=sha256_file(source),
+        cache_root=cache_root,
+        s3_client=client,
+    )
+    resolved_again = resolve_model_artifact_uri(
+        "s3://iqa-models/demo/checkpoint.pt",
+        model_version="demo",
+        sha256=sha256_file(source),
+        cache_root=cache_root,
+        s3_client=client,
+    )
+
+    assert resolved == cache_root / "demo" / "checkpoint.pt"
+    assert resolved.read_bytes() == b"remote-checkpoint"
+    assert resolved_again == resolved
+    assert len(client.calls) == 1
+    assert client.calls[0][0:2] == ("iqa-models", "demo/checkpoint.pt")
+
+
+def test_s3_directory_uri_appends_checkpoint_filename(tmp_path: Path) -> None:
+    source = tmp_path / "checkpoint.pt"
+    source.write_bytes(b"remote-checkpoint")
+    client = FakeS3Client(source)
+
+    resolve_model_artifact_uri(
+        "s3://mlflow-artifacts/run123/artifacts/model",
+        model_version="demo",
+        cache_root=tmp_path / "cache",
+        s3_client=client,
+    )
+
+    assert client.calls[0][0:2] == ("mlflow-artifacts", "run123/artifacts/model/checkpoint.pt")
+
+
+def test_model_helpers_resolve_manifests_with_mocked_s3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "checkpoint.pt"
+    source.write_bytes(b"remote-checkpoint")
+    client = FakeS3Client(source)
+    manifests_dir = tmp_path / "manifests"
+    roi_dir = manifests_dir / model_artifacts.DEFAULT_ROI_MODEL_VERSION
+    feature_dir = manifests_dir / model_artifacts.DEFAULT_FEATURE_AE_MODEL_VERSION
+    roi_dir.mkdir(parents=True)
+    feature_dir.mkdir(parents=True)
+    _write_manifest(
+        roi_dir / "model_manifest.json",
+        artifact_uri="s3://iqa-models/roi/checkpoint.pt",
+        model_version=model_artifacts.DEFAULT_ROI_MODEL_VERSION,
+    )
+    _write_manifest(
+        feature_dir / "model_manifest.json",
+        artifact_uri="s3://iqa-models/feature/checkpoint.pt",
+        model_version=model_artifacts.DEFAULT_FEATURE_AE_MODEL_VERSION,
+    )
+    monkeypatch.setattr(model_artifacts, "MODEL_MANIFESTS_DIR", manifests_dir)
+
+    roi = model_artifacts.resolve_roi_segmenter_checkpoint(cache_root=tmp_path / "cache", s3_client=client)
+    feature = model_artifacts.resolve_feature_ae_checkpoint(cache_root=tmp_path / "cache", s3_client=client)
+
+    assert roi.name == "checkpoint.pt"
+    assert feature.name == "checkpoint.pt"

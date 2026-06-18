@@ -17,6 +17,7 @@ mlruns/
 .pytest_cache/
 .ruff_cache/
 .cache/
+.cache/iqa/models/
 *.db
 *.sqlite3
 /postgres/

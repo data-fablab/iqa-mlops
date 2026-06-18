@@ -151,16 +151,16 @@ class TestResolveAndLoadArtifact:
             with pytest.raises(FileNotFoundError):
                 loader.load()
 
-    def test_s3_uri_downloads_via_mlflow_artifacts(self, tmp_path: Path) -> None:
-        """S3 URI triggers mlflow.artifacts.download_artifacts and returns local checkpoint."""
-        local_dir = tmp_path / "downloaded"
-        local_dir.mkdir()
-        (local_dir / "checkpoint.pt").touch()
+    def test_s3_uri_downloads_via_model_artifact_resolver(self, tmp_path: Path) -> None:
+        """S3 URI delegates download/cache handling to the common artifact resolver."""
+        checkpoint = tmp_path / "downloaded" / "checkpoint.pt"
+        checkpoint.parent.mkdir()
+        checkpoint.touch()
 
         with patch("iqa.inference.model_loader.registered_model_name"), \
              patch("iqa.inference.model_loader.resolve_model_artifacts") as mock_resolve, \
              patch("iqa.inference.model_loader.load_rd_feature_ae_gated") as mock_load, \
-             patch("mlflow.artifacts.download_artifacts", return_value=str(local_dir)) as mock_dl:
+             patch("iqa.inference.model_loader.resolve_model_artifact_uri", return_value=checkpoint) as mock_resolver:
 
             mock_resolve.return_value = {
                 "artifact_uri": "s3://mlflow-artifacts/run123/artifacts",
@@ -171,17 +171,19 @@ class TestResolveAndLoadArtifact:
             loader = ProdModelLoader("production_replay_natural")
             loader.load()
 
-            mock_dl.assert_called_once_with(artifact_uri="s3://mlflow-artifacts/run123/artifacts")
-            mock_load.assert_called_once_with(local_dir / "checkpoint.pt")
+            mock_resolver.assert_called_once_with(
+                "s3://mlflow-artifacts/run123/artifacts",
+                model_version="mlflow_feature_ae",
+                filename="checkpoint.pt",
+            )
+            mock_load.assert_called_once_with(checkpoint)
 
-    def test_s3_uri_raises_file_not_found_when_checkpoint_absent(self, tmp_path: Path) -> None:
-        """S3 download succeeds but checkpoint.pt absent raises FileNotFoundError."""
-        empty_dir = tmp_path / "empty"
-        empty_dir.mkdir()
+    def test_s3_uri_raises_file_not_found_when_checkpoint_absent(self) -> None:
+        """Resolver errors propagate when checkpoint download/cache fails."""
 
         with patch("iqa.inference.model_loader.registered_model_name"), \
              patch("iqa.inference.model_loader.resolve_model_artifacts") as mock_resolve, \
-             patch("mlflow.artifacts.download_artifacts", return_value=str(empty_dir)):
+             patch("iqa.inference.model_loader.resolve_model_artifact_uri", side_effect=FileNotFoundError("missing")):
 
             mock_resolve.return_value = {
                 "artifact_uri": "s3://mlflow-artifacts/run123/artifacts",

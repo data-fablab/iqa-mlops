@@ -10,6 +10,7 @@ from typing import Any
 from iqa.models.feature_ae import load_rd_feature_ae_gated
 from iqa.promotion import resolve_model_artifacts
 from iqa.registry.mlflow_registry import registered_model_name
+from iqa.storage.artifacts import resolve_model_artifact_uri
 
 
 @dataclass(frozen=True)
@@ -123,29 +124,17 @@ class ProdModelLoader:
     def _resolve_checkpoint_path(artifact_uri: str) -> Path:
         """Resolve artifact URI to local checkpoint path.
 
-        For now, this is a placeholder that assumes the URI is already a local path
-        (as returned by local MLflow setup). In production with S3, this would
-        download from MinIO.
-
         Args:
             artifact_uri: S3 URI or local path
 
         Returns:
             Path to checkpoint file
         """
-        if artifact_uri.startswith("s3://"):
-            import mlflow.artifacts
-            local_dir = mlflow.artifacts.download_artifacts(artifact_uri=artifact_uri)
-            checkpoint = Path(local_dir) / "checkpoint.pt"
-            if not checkpoint.exists():
-                raise FileNotFoundError(f"Checkpoint not found at {checkpoint}")
-            return checkpoint
-
-        uri_path = Path(artifact_uri)
-        checkpoint = uri_path / "checkpoint.pt"
-        if not checkpoint.exists():
-            raise FileNotFoundError(f"Checkpoint not found at {checkpoint}")
-        return checkpoint
+        return resolve_model_artifact_uri(
+            artifact_uri,
+            model_version="mlflow_feature_ae",
+            filename="checkpoint.pt",
+        )
 
 
 __all__ = ["LoadedModel", "ProdModelLoader"]
