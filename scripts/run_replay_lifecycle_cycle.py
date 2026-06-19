@@ -22,6 +22,13 @@ from iqa.models.artifacts import (
 )
 from iqa.monitoring import LifecycleDecision, LifecycleSignal, evaluate_lifecycle_signal
 from iqa.runtime import gpu_lock
+from iqa.storage.object_store import ObjectStore
+from iqa.storage.visual_artifacts import (
+    VisualArtifactContext,
+    create_visual_object_store,
+    publish_heatmap,
+    publish_roi_mask,
+)
 from iqa.training.bootstrap import upload_checkpoint_to_s3
 from iqa.training.feature_ae import FeatureAETrainingConfig
 from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
@@ -59,6 +66,10 @@ class CycleEvent:
     threshold_orange: float
     threshold_red: float
     threshold_source: str
+    roi_mask_path: str
+    roi_mask_uri: str | None
+    heatmap_path: str
+    heatmap_uri: str | None
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -187,6 +198,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     roi_checkpoint = resolve_roi_segmenter_checkpoint(DEFAULT_ROI_MODEL_VERSION, strict_checksum=True)
     feature_checkpoint = resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True)
     decision_thresholds = resolve_runtime_thresholds(DEFAULT_FEATURE_AE_MODEL_VERSION)
+    visual_store = create_visual_object_store()
     rows = load_replay_rows(args.scenario_id)
     events_path = state.output_dir / "events.jsonl"
     lots_path = state.output_dir / "lots.jsonl"
@@ -213,6 +225,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 decision_thresholds=decision_thresholds,
                 output_dir=state.output_dir,
                 device=args.device,
+                visual_store=visual_store,
             )
             current_lot.add(event)
             state.events_processed += 1
@@ -255,26 +268,41 @@ def process_replay_event(
     decision_thresholds: dict[str, Any],
     output_dir: Path,
     device: str,
+    visual_store: ObjectStore | None = None,
 ) -> CycleEvent:
     relative_path = first_csv_value(row.get("relative_paths") or row.get("relative_path") or "")
     image_path = image_root / relative_path
     image_id = first_csv_value(row.get("image_ids") or row.get("image_id") or Path(relative_path).stem)
-    mask_path = output_dir / "roi_masks" / f"{row.get('piece_event_id') or row.get('event_id')}_{image_id}_roi.png"
+    event_id = row.get("event_id") or row.get("simulated_event_id") or ""
+    piece_event_id = row.get("piece_event_id") or row.get("simulated_event_id") or row.get("event_id") or ""
+    lot_id = row.get("lot_id") or "unknown_lot"
+    scenario_id = row.get("scenario_id") or ""
+    mask_path = output_dir / "roi_masks" / f"{piece_event_id}_{image_id}_roi.png"
+    heatmap_path = output_dir / "heatmaps" / f"{piece_event_id}_{image_id}_heatmap.png"
+    context = VisualArtifactContext(
+        scenario_id=scenario_id,
+        lot_id=lot_id,
+        piece_event_id=piece_event_id,
+        image_id=image_id,
+    )
     roi = predict_roi_image(image_path, roi_checkpoint, device=device, output_mask=mask_path)
+    roi_mask_uri = publish_roi_mask(mask_path, context, store=visual_store) if mask_path.exists() else None
     feature = predict_feature_ae_image(
         image_path,
         feature_checkpoint,
         device=device,
         roi_mask_path=mask_path,
+        heatmap_output_path=heatmap_path,
         threshold_orange=float(decision_thresholds["threshold_orange"]),
         threshold_red=float(decision_thresholds["threshold_red"]),
         threshold_source=str(decision_thresholds["threshold_source"]),
     )
+    heatmap_uri = publish_heatmap(heatmap_path, context, store=visual_store) if heatmap_path.exists() else None
     return CycleEvent(
-        event_id=row.get("event_id") or row.get("simulated_event_id") or "",
-        piece_event_id=row.get("piece_event_id") or row.get("simulated_event_id") or row.get("event_id") or "",
-        lot_id=row.get("lot_id") or "unknown_lot",
-        scenario_id=row.get("scenario_id") or "",
+        event_id=event_id,
+        piece_event_id=piece_event_id,
+        lot_id=lot_id,
+        scenario_id=scenario_id,
         source_class=row.get("source_class") or "",
         dataset_version=row.get("dataset_version") or "",
         relative_path=relative_path,
@@ -287,6 +315,10 @@ def process_replay_event(
         threshold_orange=feature.threshold_orange,
         threshold_red=feature.threshold_red,
         threshold_source=feature.threshold_source,
+        roi_mask_path=str(mask_path),
+        roi_mask_uri=roi_mask_uri,
+        heatmap_path=str(heatmap_path),
+        heatmap_uri=heatmap_uri,
     )
 
 

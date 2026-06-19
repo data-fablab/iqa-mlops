@@ -20,6 +20,7 @@ iqa-ingested-images
 mlflow-artifacts
 iqa-roi-masks
 iqa-heatmaps
+iqa-gt-masks
 iqa-models
 iqa-backups
 ```
@@ -37,6 +38,7 @@ src/iqa/storage/
 - MLflow stocke ses artefacts dans `s3://mlflow-artifacts`.
 - Les masques ROI produits par le segmenteur fige sont stockes dans `s3://iqa-roi-masks`.
 - Les heatmaps sont stockees dans `s3://iqa-heatmaps`.
+- Les masques GT/oracle sont stockes dans `s3://iqa-gt-masks`.
 - Les modeles promus et candidats archives sont stockes dans `s3://iqa-models`.
 - Les credentials MinIO restent dans `.env` et ne sont jamais commites.
 - **Important** : MinIO est un stockage passif. La decision de promotion (stage `prod`) est portee par MLflow Registry, pas par une convention S3. Voir ADR 0006 et [docs/mlflow-registry.md](../mlflow-registry.md).

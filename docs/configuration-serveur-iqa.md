@@ -201,6 +201,7 @@ iqa-ingested-images
 mlflow-artifacts
 iqa-roi-masks
 iqa-heatmaps
+iqa-gt-masks
 iqa-models
 iqa-backups
 ```
@@ -221,6 +222,7 @@ Le SSD de 500 Go est suffisant pour le MVP, mais impose une discipline de retent
 | Modeles | bucket `iqa-models`, artefacts candidats, promus et archives ; statut prod dans MLflow |
 | Masques ROI | bucket `iqa-roi-masks`, masques produits par le segmenteur ROI fige |
 | Heatmaps | bucket `iqa-heatmaps`, expiration automatique des lots, retention curated |
+| Masques GT/oracle | bucket `iqa-gt-masks`, preuve feedback et calibration |
 | Logs applicatifs | Rotation automatique |
 | Prometheus | Retention courte a moyenne pour MVP |
 

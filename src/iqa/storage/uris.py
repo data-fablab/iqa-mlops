@@ -12,6 +12,7 @@ IQA_BUCKETS = {
     "mlflow": "mlflow-artifacts",
     "roi_masks": "iqa-roi-masks",
     "heatmaps": "iqa-heatmaps",
+    "gt_masks": "iqa-gt-masks",
     "models": "iqa-models",
     "backups": "iqa-backups",
 }

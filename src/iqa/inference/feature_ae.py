@@ -54,6 +54,8 @@ def predict_feature_ae_image(
     score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
     score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
     topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
+    heatmap_output_path: str | Path | None = None,
+    heatmap_uri: str | None = None,
     device: str = "cpu",
     pretrained_teacher: bool = False,
     layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
@@ -76,6 +78,13 @@ def predict_feature_ae_image(
             anomaly_map = feature_anomaly_map(teacher_features, reconstructed)
 
     score_map = anomaly_map.squeeze().detach().cpu()
+    visual_score_map = prepare_feature_ae_score_map(
+        score_map,
+        roi_mask_path=roi_mask_path,
+        score_smoothing=score_smoothing,
+    )
+    if heatmap_output_path is not None:
+        save_feature_ae_heatmap_overlay(image_path, visual_score_map, heatmap_output_path)
     score = score_feature_ae_map(
         score_map,
         roi_mask_path=roi_mask_path,
@@ -93,7 +102,7 @@ def predict_feature_ae_image(
         threshold_red=float(threshold_red),
         latency_ms=timing["elapsed_ms"],
         roi_status="roi_scored" if roi_mask_path is not None else None,
-        heatmap_uri=None,
+        heatmap_uri=heatmap_uri or (str(heatmap_output_path) if heatmap_output_path is not None else None),
         threshold_source=threshold_source,
     )
 
@@ -106,6 +115,21 @@ def score_feature_ae_map(
     score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
     topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
 ) -> float:
+    score_map = prepare_feature_ae_score_map(
+        score_map,
+        roi_mask_path=roi_mask_path,
+        score_smoothing=score_smoothing,
+    )
+    valid_mask = load_roi_mask(roi_mask_path, target_shape=score_map.shape) if roi_mask_path is not None else None
+    return score_image_map(score_map, score_image=score_image, topk_fraction=topk_fraction, valid_mask=valid_mask)
+
+
+def prepare_feature_ae_score_map(
+    score_map: torch.Tensor,
+    *,
+    roi_mask_path: str | Path | None = None,
+    score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
+) -> torch.Tensor:
     score_map = score_map.to(dtype=torch.float32)
     if score_map.ndim != 2:
         raise ValueError(f"Feature-AE score map must be 2D, got shape={tuple(score_map.shape)}")
@@ -113,7 +137,7 @@ def score_feature_ae_map(
     valid_mask = load_roi_mask(roi_mask_path, target_shape=score_map.shape) if roi_mask_path is not None else None
     if valid_mask is not None:
         score_map = score_map.masked_fill(~valid_mask, 0.0)
-    return score_image_map(score_map, score_image=score_image, topk_fraction=topk_fraction, valid_mask=valid_mask)
+    return score_map
 
 
 def smooth_score_map(score_map: torch.Tensor, mode: str) -> torch.Tensor:
@@ -155,10 +179,37 @@ def load_roi_mask(roi_mask_path: str | Path, *, target_shape: torch.Size | tuple
     return torch.from_numpy(array > 0)
 
 
+def save_feature_ae_heatmap_overlay(image_path: str | Path, score_map: torch.Tensor, output_path: str | Path) -> None:
+    """Save a red anomaly overlay PNG for operator review."""
+
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    score_array = score_map.detach().cpu().numpy().astype(np.float32)
+    positive = score_array[score_array > 0]
+    if positive.size:
+        low = float(np.percentile(positive, 5))
+        high = float(np.percentile(positive, 99))
+        if high <= low:
+            high = float(positive.max() or 1.0)
+        normalized = np.clip((score_array - low) / max(high - low, 1e-6), 0.0, 1.0)
+    else:
+        normalized = np.zeros_like(score_array, dtype=np.float32)
+
+    base = Image.open(image_path).convert("RGB").resize((score_array.shape[1], score_array.shape[0]))
+    base_array = np.asarray(base, dtype=np.float32)
+    red = np.zeros_like(base_array)
+    red[..., 0] = 255.0
+    alpha = (normalized[..., None] * 0.55).astype(np.float32)
+    overlay = (base_array * (1.0 - alpha) + red * alpha).clip(0, 255).astype(np.uint8)
+    Image.fromarray(overlay, mode="RGB").save(output)
+
+
 __all__ = [
     "FeatureAEPrediction",
     "load_roi_mask",
+    "prepare_feature_ae_score_map",
     "predict_feature_ae_image",
+    "save_feature_ae_heatmap_overlay",
     "score_feature_ae_map",
     "score_image_map",
     "smooth_score_map",

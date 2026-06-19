@@ -12,6 +12,7 @@ def test_paths_yaml_defines_all_required_buckets() -> None:
         "source_datasets_bucket",
         "ingested_images_bucket",
         "dvc_bucket",
+        "gt_masks_bucket",
         "heatmaps_bucket",
         "models_bucket",
         "mlflow_bucket",
