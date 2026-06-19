@@ -45,6 +45,7 @@ CANDIDATE_DATASETS = {
     DRIFT_SCENARIO_ID: "feature_ae_good_v003",
 }
 VALIDATION_MANIFEST = Path("data/validation/validation_set_v001.csv")
+VALIDATION_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/replay_lifecycle")
 Mode = Literal["decision-only", "train-on-trigger", "progressive-decision", "progressive-train"]
 PROGRESSIVE_MODES = {"progressive-decision", "progressive-train"}
@@ -717,6 +718,7 @@ def train_progressive_candidate(
         epochs=args.epochs,
         max_steps=args.max_steps,
         metric_eval_manifest_path=VALIDATION_MANIFEST,
+        gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
         metric_eval_device=args.device,
         metric_eval_every_epochs=1,
         metric_eval_start_epoch=1,
@@ -750,6 +752,7 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         epochs=args.epochs,
         max_steps=args.max_steps,
         metric_eval_manifest_path=VALIDATION_MANIFEST,
+        gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
         metric_eval_device=args.device,
         metric_eval_every_epochs=1,
         metric_eval_start_epoch=1,

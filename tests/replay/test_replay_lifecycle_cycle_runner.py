@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -126,6 +127,16 @@ def test_natural_replay_active_plan_has_regular_defects() -> None:
     assert max(b - a for a, b in zip(defect_positions, defect_positions[1:])) <= 35
 
 
+def test_validation_gt_masks_manifest_supports_pixel_metrics() -> None:
+    rows = list(csv.DictReader(runner.VALIDATION_GT_MASKS_MANIFEST.open(encoding="utf-8")))
+
+    assert len(rows) >= 30
+    assert {"image_id", "relative_path", "gt_mask_path"}.issubset(rows[0])
+    assert all(row["image_id"] for row in rows)
+    assert all(row["gt_mask_path"].startswith("../raw/hss-iad/") for row in rows)
+    assert all(row["gt_mask_path"].endswith("_mask.png") for row in rows)
+
+
 def test_decision_only_triggers_natural_without_training(tmp_path: Path, monkeypatch) -> None:
     plan = tmp_path / "natural.csv"
     _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
@@ -216,6 +227,7 @@ def test_progressive_train_promotes_multiple_test_models(tmp_path: Path, monkeyp
     assert len(train_calls) == 2
     assert train_calls[0].candidate_version == "rd_feature_ae_gated_natural_cycle_001"
     assert train_calls[0].dataset_version == "feature_ae_natural_cycle_001"
+    assert train_calls[0].gt_masks_manifest == runner.VALIDATION_GT_MASKS_MANIFEST
     snapshot = Path(train_calls[0].manifest_path)
     assert snapshot.exists()
     assert "oracle_gt_seen_lots" in snapshot.read_text(encoding="utf-8")
