@@ -14,6 +14,8 @@ def test_sophie_review_station_mentions_replay_visual_artifacts() -> None:
         "heatmap_path",
         "heatmap_uri",
         "roi_mask_uri",
+        "Defaut suivant",
+        "Conforme suivant",
         "human_sophie",
         "display-only",
         "Exporter feedback Sophie JSONL",

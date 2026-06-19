@@ -132,4 +132,7 @@ def test_save_feature_ae_heatmap_overlay_uses_decision_thresholds(tmp_path: Path
 
     with Image.open(heatmap_path) as image:
         pixel = image.convert("RGB").getpixel((8, 8))
-    assert pixel == (120, 120, 120)
+    assert pixel[0] > 120
+    assert pixel[0] < 170
+    assert pixel[1] < 120
+    assert pixel[2] < 120

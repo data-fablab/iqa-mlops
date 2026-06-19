@@ -200,12 +200,8 @@ def save_feature_ae_heatmap_overlay(
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     score_array = score_map.detach().cpu().numpy().astype(np.float32)
-    if threshold_orange is not None and threshold_red is not None and float(threshold_red) > float(threshold_orange):
-        normalized = np.clip(
-            (score_array - float(threshold_orange)) / max(float(threshold_red) - float(threshold_orange), 1e-6),
-            0.0,
-            1.0,
-        )
+    if threshold_red is not None and float(threshold_red) > 0.0:
+        normalized = np.sqrt(np.clip(score_array / max(float(threshold_red), 1e-6), 0.0, 1.0))
     else:
         positive = score_array[score_array > 0]
         if positive.size:

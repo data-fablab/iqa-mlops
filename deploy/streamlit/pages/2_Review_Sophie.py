@@ -63,6 +63,14 @@ def _feedback_jsonl() -> str:
     return "\n".join(json.dumps(row, sort_keys=True) for row in rows) + ("\n" if rows else "")
 
 
+def _next_event_index(events: list[dict[str, Any]], start: int, *, oracle_verdict: str) -> int | None:
+    for offset in range(1, len(events) + 1):
+        candidate = (start + offset) % len(events)
+        if events[candidate].get("oracle_verdict") == oracle_verdict:
+            return candidate
+    return None
+
+
 if "sophie_index" not in st.session_state:
     st.session_state["sophie_index"] = 0
 if "sophie_feedback" not in st.session_state:
@@ -82,16 +90,28 @@ with tab_replay:
     else:
         st.session_state["sophie_index"] = min(st.session_state["sophie_index"], len(events) - 1)
         current = events[st.session_state["sophie_index"]]
+        conforming_count = sum(1 for event in events if event.get("oracle_verdict") == "conforme")
+        defective_count = sum(1 for event in events if event.get("oracle_verdict") == "defective")
 
-        nav_a, nav_b, nav_c, nav_d = st.columns([1, 1, 2, 2])
+        nav_a, nav_b, nav_c, nav_d, nav_e, nav_f = st.columns([1, 1, 1.2, 1.2, 2, 2])
         if nav_a.button("Precedente", disabled=st.session_state["sophie_index"] <= 0):
             st.session_state["sophie_index"] -= 1
             st.rerun()
         if nav_b.button("Suivante", disabled=st.session_state["sophie_index"] >= len(events) - 1):
             st.session_state["sophie_index"] += 1
             st.rerun()
-        nav_c.metric("Piece", f"{st.session_state['sophie_index'] + 1}/{len(events)}")
-        nav_d.metric("Decision", _decision_label(current.get("decision")))
+        if nav_c.button("Defaut suivant", disabled=defective_count == 0):
+            next_index = _next_event_index(events, st.session_state["sophie_index"], oracle_verdict="defective")
+            if next_index is not None:
+                st.session_state["sophie_index"] = next_index
+                st.rerun()
+        if nav_d.button("Conforme suivant", disabled=conforming_count == 0):
+            next_index = _next_event_index(events, st.session_state["sophie_index"], oracle_verdict="conforme")
+            if next_index is not None:
+                st.session_state["sophie_index"] = next_index
+                st.rerun()
+        nav_e.metric("Piece", f"{st.session_state['sophie_index'] + 1}/{len(events)}", f"{defective_count} defaut(s)")
+        nav_f.metric("Decision", _decision_label(current.get("decision")))
 
         raw_col, heatmap_col, info_col = st.columns([1.2, 1.2, 0.9])
         with raw_col:
