@@ -54,7 +54,7 @@ check "api /health"             "$API_URL/health"            '"status":"ok"'
 check "inference /health"       "$INFERENCE_URL/health"      '"status":"ok"'
 check "api /metrics"            "$API_URL/metrics"           "iqa_api_up 1"
 check "inference /metrics"      "$INFERENCE_URL/metrics"     "iqa_inference_up 1"
-check "api /model/version"      "$API_URL/model/version"     "feature_ae"
+check "api /model/version"      "$API_URL/model/version?scenario_id=production_replay_natural" "feature_ae"
 check "api /replay-scenarios"   "$API_URL/replay-scenarios"
 check "api /predictions"        "$API_URL/predictions"
 check "api /lots/summary"       "$API_URL/lots/summary"
