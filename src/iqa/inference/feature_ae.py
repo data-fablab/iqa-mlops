@@ -84,7 +84,14 @@ def predict_feature_ae_image(
         score_smoothing=score_smoothing,
     )
     if heatmap_output_path is not None:
-        save_feature_ae_heatmap_overlay(image_path, visual_score_map, heatmap_output_path)
+        save_feature_ae_heatmap_overlay(
+            image_path,
+            visual_score_map,
+            heatmap_output_path,
+            roi_mask_path=roi_mask_path,
+            threshold_orange=threshold_orange,
+            threshold_red=threshold_red,
+        )
     score = score_feature_ae_map(
         score_map,
         roi_mask_path=roi_mask_path,
@@ -179,27 +186,45 @@ def load_roi_mask(roi_mask_path: str | Path, *, target_shape: torch.Size | tuple
     return torch.from_numpy(array > 0)
 
 
-def save_feature_ae_heatmap_overlay(image_path: str | Path, score_map: torch.Tensor, output_path: str | Path) -> None:
+def save_feature_ae_heatmap_overlay(
+    image_path: str | Path,
+    score_map: torch.Tensor,
+    output_path: str | Path,
+    *,
+    roi_mask_path: str | Path | None = None,
+    threshold_orange: float | None = None,
+    threshold_red: float | None = None,
+) -> None:
     """Save a red anomaly overlay PNG for operator review."""
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     score_array = score_map.detach().cpu().numpy().astype(np.float32)
-    positive = score_array[score_array > 0]
-    if positive.size:
-        low = float(np.percentile(positive, 5))
-        high = float(np.percentile(positive, 99))
-        if high <= low:
-            high = float(positive.max() or 1.0)
-        normalized = np.clip((score_array - low) / max(high - low, 1e-6), 0.0, 1.0)
+    if threshold_orange is not None and threshold_red is not None and float(threshold_red) > float(threshold_orange):
+        normalized = np.clip(
+            (score_array - float(threshold_orange)) / max(float(threshold_red) - float(threshold_orange), 1e-6),
+            0.0,
+            1.0,
+        )
     else:
-        normalized = np.zeros_like(score_array, dtype=np.float32)
+        positive = score_array[score_array > 0]
+        if positive.size:
+            low = float(np.percentile(positive, 50))
+            high = float(np.percentile(positive, 99))
+            if high <= low:
+                high = float(positive.max() or 1.0)
+            normalized = np.clip((score_array - low) / max(high - low, 1e-6), 0.0, 1.0)
+        else:
+            normalized = np.zeros_like(score_array, dtype=np.float32)
 
     base = Image.open(image_path).convert("RGB")
     if base.size != (score_array.shape[1], score_array.shape[0]):
         alpha_image = Image.fromarray((normalized * 255.0).astype(np.uint8), mode="L")
         alpha_image = alpha_image.resize(base.size, Image.Resampling.BILINEAR)
         normalized = np.asarray(alpha_image, dtype=np.float32) / 255.0
+    if roi_mask_path is not None:
+        roi_mask = Image.open(roi_mask_path).convert("L").resize(base.size, Image.Resampling.NEAREST)
+        normalized = normalized * (np.asarray(roi_mask, dtype=np.float32) > 0)
     base_array = np.asarray(base, dtype=np.float32)
     red = np.zeros_like(base_array)
     red[..., 0] = 255.0
