@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scripts import run_replay_lifecycle_cycle as runner
+from iqa.storage.object_store import InMemoryObjectStore
 
 
 def _args(tmp_path: Path, *, scenario_id: str, mode: str = "decision-only", max_events: int | None = None) -> argparse.Namespace:
@@ -45,6 +46,7 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
     train_calls: list[argparse.Namespace] = []
     monkeypatch.setattr(runner, "resolve_roi_segmenter_checkpoint", lambda *args, **kwargs: Path("roi.pt"))
     monkeypatch.setattr(runner, "resolve_feature_ae_checkpoint", lambda *args, **kwargs: Path("feature.pt"))
+    monkeypatch.setattr(runner, "create_visual_object_store", lambda: InMemoryObjectStore())
     monkeypatch.setattr(
         runner,
         "load_feature_ae_decision_thresholds",
@@ -110,6 +112,10 @@ def test_decision_only_triggers_natural_without_training(tmp_path: Path, monkeyp
     assert first_event["threshold_orange"] == 0.42
     assert first_event["threshold_red"] == 0.84
     assert first_event["threshold_source"] == "manifest:calibration_good_quantiles"
+    assert first_event["roi_mask_path"].endswith("_roi.png")
+    assert first_event["heatmap_path"].endswith("_heatmap.png")
+    assert "roi_mask_uri" in first_event
+    assert "heatmap_uri" in first_event
 
 
 def test_train_on_trigger_trains_candidate_once(tmp_path: Path, monkeypatch) -> None:

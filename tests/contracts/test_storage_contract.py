@@ -18,9 +18,17 @@ def test_iqa_minio_bucket_names() -> None:
         "mlflow": "mlflow-artifacts",
         "roi_masks": "iqa-roi-masks",
         "heatmaps": "iqa-heatmaps",
+        "gt_masks": "iqa-gt-masks",
         "models": "iqa-models",
         "backups": "iqa-backups",
     }
+
+
+def test_minio_init_creates_visual_artifact_buckets() -> None:
+    content = (ROOT / "deploy" / "minio" / "init-buckets.sh").read_text(encoding="utf-8")
+
+    for bucket in ["iqa-roi-masks", "iqa-heatmaps", "iqa-gt-masks"]:
+        assert bucket in content
 
 
 def test_parse_s3_uri() -> None:

@@ -32,9 +32,11 @@ services:
     env_file: ../.env
     environment:
       IQA_API_URL: http://iqa-api:8000
+      IQA_REPO_ROOT: /workspace
     ports: ["8501:8501"]
     volumes:
       - ./streamlit:/app:ro
+      - ..:/workspace:ro
     depends_on: [iqa-api]
 
   iqa-ingestion:

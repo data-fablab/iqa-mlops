@@ -404,6 +404,8 @@ def predict(request: PredictRequest) -> dict[str, Any]:
     prediction = inference_result.to_dict()
     prediction["prediction_id"] = prediction_id
     prediction["image_uri"] = request.image_uri
+    if request.heatmap_uri:
+        prediction["heatmap_uri"] = request.heatmap_uri
     prediction["sha256"] = request.sha256
     prediction["lot_id"] = request.lot_id
     prediction["source_class"] = request.source_class
@@ -418,6 +420,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
         "piece_event_id": request.piece_event_id,
         "scenario_id": request.scenario_id,
         "image_uri": request.image_uri,
+        "heatmap_uri": prediction.get("heatmap_uri"),
         "sha256": request.sha256,
         "lot_id": request.lot_id,
         "source_class": request.source_class,
@@ -466,6 +469,7 @@ def predict_piece_event(event_id: str, request: PieceEventPredictRequest) -> dic
             piece_event_id=event_id,
             scenario_id=request.scenario_id,
             image_uri=request.image_uri,
+            heatmap_uri=request.heatmap_uri,
             sha256=request.sha256,
             lot_id=request.lot_id,
             source_class=request.source_class,
@@ -606,6 +610,7 @@ def _prediction_audit_trail(
             "lot_id": record.get("lot_id"),
             "source_class": record.get("source_class"),
             "sha256": record.get("sha256"),
+            "heatmap_uri": record.get("heatmap_uri"),
             **{field: record.get(field) for field in OPTIONAL_METADATA_TRACEABILITY_FIELDS},
             "dataset_version": record.get("dataset_version"),
             "model_version": record.get("model_version"),
@@ -832,6 +837,7 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "lot_id": record.get("lot_id"),
                 "source_class": record.get("source_class"),
                 "sha256": record.get("sha256"),
+                "heatmap_uri": record.get("heatmap_uri"),
                 "dataset_version": record.get("dataset_version"),
                 **{field: record.get(field) for field in OPTIONAL_METADATA_TRACEABILITY_FIELDS},
                 "decision": decision,

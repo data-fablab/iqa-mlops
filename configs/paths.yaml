@@ -11,5 +11,6 @@ storage:
   dvc_bucket: "iqa-dvc"
   roi_masks_bucket: "iqa-roi-masks"
   heatmaps_bucket: "iqa-heatmaps"
+  gt_masks_bucket: "iqa-gt-masks"
   models_bucket: "iqa-models"
   mlflow_bucket: "mlflow-artifacts"

@@ -15,6 +15,7 @@ for bucket in \
     mlflow-artifacts \
     iqa-roi-masks \
     iqa-heatmaps \
+    iqa-gt-masks \
     iqa-models \
     iqa-backups
 do

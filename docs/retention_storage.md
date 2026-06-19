@@ -25,6 +25,7 @@ Crees par `deploy/minio/init-buckets.sh` :
 | `mlflow-artifacts` | artefacts MLflow (runs, modeles) | lie au cycle de vie des runs |
 | `iqa-roi-masks` | masques ROI du segmenteur fige | long terme |
 | `iqa-heatmaps` | heatmaps et overlays | mixte (voir section 3) |
+| `iqa-gt-masks` | masques GT/oracle | long terme (preuve feedback) |
 | `iqa-models` | modeles candidats, promus, archives | conserver (audit promotion) |
 | `iqa-backups` | sauvegardes applicatives | rotation hors site |
 
@@ -73,7 +74,7 @@ la persistance PostgreSQL runtime est la cible.
 ## 7. Recapitulatif retention
 
 ```text
-immutable / conserver : iqa-source-datasets, iqa-models, iqa-roi-masks
+immutable / conserver : iqa-source-datasets, iqa-models, iqa-roi-masks, iqa-gt-masks
 gere par outil         : iqa-dvc (DVC), mlflow-artifacts (MLflow)
 expiration partielle   : iqa-heatmaps (lots/ = 30j, curated/ = garde)
 long terme tracabilite : iqa-ingested-images, iqa_metadata (PostgreSQL)

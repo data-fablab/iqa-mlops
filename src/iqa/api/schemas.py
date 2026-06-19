@@ -105,6 +105,7 @@ class PredictRequest(IQABaseModel):
     piece_event_id: str
     scenario_id: str
     image_uri: str = Field(..., description="S3, DVC or local URI for the primary image.")
+    heatmap_uri: str | None = Field(default=None, description="Optional Feature-AE heatmap URI for review display.")
     sha256: str | None = None
     lot_id: str | None = None
     source_class: str | None = None
@@ -121,6 +122,7 @@ class PredictRequest(IQABaseModel):
 class PieceEventPredictRequest(IQABaseModel):
     scenario_id: str
     image_uri: str = Field(..., description="S3, DVC or local URI for the primary image.")
+    heatmap_uri: str | None = Field(default=None, description="Optional Feature-AE heatmap URI for review display.")
     sha256: str | None = None
     lot_id: str | None = None
     source_class: str | None = None
@@ -152,6 +154,7 @@ class PredictionResponse(IQABaseModel):
     piece_score: float | None = None
     piece_status: PieceStatus | None = None
     decision_reasons: list[str] = Field(default_factory=list)
+    heatmap_uri: str | None = None
     sha256: str | None = None
     latency_ms: float | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -319,6 +322,7 @@ class AuditTrailPredictionContext(IQABaseModel):
     model_version: str | None = None
     roi_model_version: str | None = None
     decision: str | None = None
+    heatmap_uri: str | None = None
 
 
 class AuditTrailFeedbackContext(IQABaseModel):
@@ -353,6 +357,7 @@ class PredictionHistoryRow(IQABaseModel):
     validation_id: str | None = None
     scenario_version: str | None = None
     decision: str | None = None
+    heatmap_uri: str | None = None
     model_version: str | None = None
     roi_model_version: str | None = None
     created_at: str | None = None

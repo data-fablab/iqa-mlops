@@ -42,7 +42,7 @@ st.divider()
 st.subheader("Par lot (scenario_id)")
 st.dataframe(
     lots,
-    use_container_width=True,
+    width="stretch",
     column_config={
         "scenario_id": "Lot",
         "total": "Volume",

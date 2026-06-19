@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import torch
+from PIL import Image
+
 from iqa.inference import FeatureAEPrediction, predict_feature_ae_image
+from iqa.inference.feature_ae import save_feature_ae_heatmap_overlay
 
 
 def _predict(image_path: Path, checkpoint_path: Path) -> FeatureAEPrediction:
@@ -99,3 +103,36 @@ class TestPredictImage:
 
         assert prediction.latency_ms > 0.0
         assert isinstance(prediction.latency_ms, float)
+
+
+def test_save_feature_ae_heatmap_overlay_writes_png(tmp_path: Path) -> None:
+    image_path = tmp_path / "piece.jpg"
+    heatmap_path = tmp_path / "heatmap.png"
+    Image.new("RGB", (16, 16), color=(120, 120, 120)).save(image_path)
+
+    save_feature_ae_heatmap_overlay(image_path, torch.rand(8, 8), heatmap_path)
+
+    assert heatmap_path.exists()
+    with Image.open(heatmap_path) as image:
+        assert image.size == (16, 16)
+
+
+def test_save_feature_ae_heatmap_overlay_uses_decision_thresholds(tmp_path: Path) -> None:
+    image_path = tmp_path / "piece.jpg"
+    heatmap_path = tmp_path / "heatmap.png"
+    Image.new("RGB", (16, 16), color=(120, 120, 120)).save(image_path)
+
+    save_feature_ae_heatmap_overlay(
+        image_path,
+        torch.ones(8, 8),
+        heatmap_path,
+        threshold_orange=100.0,
+        threshold_red=200.0,
+    )
+
+    with Image.open(heatmap_path) as image:
+        pixel = image.convert("RGB").getpixel((8, 8))
+    assert pixel[0] > 120
+    assert pixel[0] < 170
+    assert pixel[1] < 120
+    assert pixel[2] < 120

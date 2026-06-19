@@ -29,6 +29,23 @@ def _predict(piece: str, lot: str) -> str:
     return response["prediction"]["prediction_id"]
 
 
+def test_predictions_expose_heatmap_uri_for_sophie_review() -> None:
+    heatmap_uri = "s3://iqa-heatmaps/lots/demo/lot-1/piece-1_heatmap.png"
+
+    response = predict(
+        PredictRequest(
+            piece_event_id="piece-heatmap",
+            scenario_id="lotA",
+            image_uri="s3://b/k.png",
+            heatmap_uri=heatmap_uri,
+        )
+    )
+    rows = list_predictions()
+
+    assert response["prediction"]["heatmap_uri"] == heatmap_uri
+    assert rows[0]["heatmap_uri"] == heatmap_uri
+
+
 def test_predictions_route_is_registered() -> None:
     from iqa.api.main import app
 
