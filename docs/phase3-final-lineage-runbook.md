@@ -42,6 +42,22 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up
 bash deploy/smoke-test.sh
 ```
 
+When the smoke test is launched from the server host shell, force host-visible
+URLs. This avoids reusing container-internal URLs such as `iqa-inference:8100`
+from the environment:
+
+```bash
+IQA_API_URL=http://localhost:8000 \
+IQA_INFERENCE_URL=http://localhost:8100 \
+IQA_MINIO_URL=http://localhost:9000 \
+IQA_PROMETHEUS_URL=http://localhost:9090 \
+IQA_GRAFANA_URL=http://localhost:3000 \
+IQA_MLFLOW_URL=http://localhost:5000 \
+IQA_AIRFLOW_URL=http://localhost:8080 \
+IQA_GATEWAY_URL=http://localhost \
+bash deploy/smoke-test.sh
+```
+
 Expected result:
 
 ```text

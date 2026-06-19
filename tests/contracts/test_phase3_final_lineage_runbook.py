@@ -12,6 +12,8 @@ def test_phase3_final_lineage_runbook_covers_final_demo_evidence() -> None:
         "docker login",
         "IQA_IMAGE_TAG=sha-<commit>",
         "IQA_DOCKER_GID",
+        "IQA_API_URL=http://localhost:8000",
+        "IQA_INFERENCE_URL=http://localhost:8100",
         "deploy/smoke-test.sh",
         "iqa_dvc_reproducibility",
         "iqa_gpu",
