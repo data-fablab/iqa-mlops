@@ -14,9 +14,12 @@ def _args(tmp_path: Path, *, scenario_id: str, mode: str = "decision-only", max_
         scenario_id=scenario_id,
         image_root=tmp_path / "images",
         stage="test",
+        target_stage="test",
         mode=mode,
         max_events=max_events,
         max_lots=None,
+        max_cycles=None,
+        lifecycle_interval=50,
         publish_minio=False,
         wait_for_gpu=False,
         no_gpu_lock=True,
@@ -87,15 +90,31 @@ def test_replay_lifecycle_cycle_selects_plan_by_scenario(tmp_path: Path, monkeyp
     _write_replay(natural, scenario_id=runner.NATURAL_SCENARIO_ID, rows=1)
     _write_replay(drift, scenario_id=runner.DRIFT_SCENARIO_ID, rows=1)
     monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: natural, runner.DRIFT_SCENARIO_ID: drift})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
 
     assert runner.load_replay_rows(runner.NATURAL_SCENARIO_ID)[0]["scenario_id"] == runner.NATURAL_SCENARIO_ID
     assert runner.load_replay_rows(runner.DRIFT_SCENARIO_ID)[0]["scenario_id"] == runner.DRIFT_SCENARIO_ID
+
+
+def test_natural_replay_active_plan_has_regular_defects() -> None:
+    rows = runner.load_replay_rows(runner.NATURAL_SCENARIO_ID)
+    defect_positions = [
+        index
+        for index, row in enumerate(rows, start=1)
+        if str(row.get("is_defective", "")).lower() == "true"
+    ]
+
+    assert rows[0]["dataset_version"] == "production_replay_natural_v002"
+    assert defect_positions[0] <= 60
+    assert len(defect_positions) == 26
+    assert max(b - a for a, b in zip(defect_positions, defect_positions[1:])) <= 35
 
 
 def test_decision_only_triggers_natural_without_training(tmp_path: Path, monkeypatch) -> None:
     plan = tmp_path / "natural.csv"
     _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
     monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
     train_calls = _mock_runtime(monkeypatch)
 
     summary = runner.run_cycle(_args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="decision-only"))
@@ -122,6 +141,7 @@ def test_train_on_trigger_trains_candidate_once(tmp_path: Path, monkeypatch) -> 
     plan = tmp_path / "natural.csv"
     _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
     monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
     train_calls = _mock_runtime(monkeypatch)
 
     summary = runner.run_cycle(_args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="train-on-trigger"))
@@ -133,10 +153,63 @@ def test_train_on_trigger_trains_candidate_once(tmp_path: Path, monkeypatch) -> 
     assert train_calls[0].dataset_version == "feature_ae_good_v002"
 
 
+def test_progressive_decision_records_multiple_cycles(tmp_path: Path, monkeypatch) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=120)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    train_calls = _mock_runtime(monkeypatch)
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-decision")
+    args.max_cycles = 2
+
+    summary = runner.run_cycle(args)
+
+    assert summary["cycles_completed"] == 2
+    assert summary["models_promoted"] == []
+    assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
+    assert train_calls == []
+    cycles = (Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(cycles) == 2
+    first_cycle = json.loads(cycles[0])
+    assert first_cycle["candidate_version"] == "rd_feature_ae_gated_natural_cycle_001"
+    assert first_cycle["promotion_status"] == "simulated"
+
+
+def test_progressive_train_promotes_multiple_test_models(tmp_path: Path, monkeypatch) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=120)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    train_calls = _mock_runtime(monkeypatch)
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    args.max_cycles = 2
+
+    summary = runner.run_cycle(args)
+
+    assert summary["status"] == "trained"
+    assert summary["cycles_completed"] == 2
+    assert summary["models_promoted"] == [
+        "rd_feature_ae_gated_natural_cycle_001",
+        "rd_feature_ae_gated_natural_cycle_002",
+    ]
+    assert summary["promotion_chain"] == [
+        runner.DEFAULT_FEATURE_AE_MODEL_VERSION,
+        "rd_feature_ae_gated_natural_cycle_001",
+        "rd_feature_ae_gated_natural_cycle_002",
+    ]
+    assert len(train_calls) == 2
+    assert train_calls[0].candidate_version == "rd_feature_ae_gated_natural_cycle_001"
+    assert train_calls[0].dataset_version == "feature_ae_natural_cycle_001"
+    snapshot = Path(train_calls[0].manifest_path)
+    assert snapshot.exists()
+    assert "oracle_gt_seen_lots" in snapshot.read_text(encoding="utf-8")
+
+
 def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) -> None:
     plan = tmp_path / "drift.csv"
     _write_replay(plan, scenario_id=runner.DRIFT_SCENARIO_ID, rows=1)
     monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.DRIFT_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
     _mock_runtime(monkeypatch)
 
     summary = runner.run_cycle(_args(tmp_path, scenario_id=runner.DRIFT_SCENARIO_ID, mode="decision-only"))
