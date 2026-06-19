@@ -117,6 +117,7 @@ def test_smoke_test_covers_gateway_core_services_and_observability() -> None:
         "api /health",
         "inference /health",
         "minio live",
+        "model/version?scenario_id=production_replay_natural",
         "mlflow up",
         "grafana health",
         "airflow health",
