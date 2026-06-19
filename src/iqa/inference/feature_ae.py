@@ -195,7 +195,11 @@ def save_feature_ae_heatmap_overlay(image_path: str | Path, score_map: torch.Ten
     else:
         normalized = np.zeros_like(score_array, dtype=np.float32)
 
-    base = Image.open(image_path).convert("RGB").resize((score_array.shape[1], score_array.shape[0]))
+    base = Image.open(image_path).convert("RGB")
+    if base.size != (score_array.shape[1], score_array.shape[0]):
+        alpha_image = Image.fromarray((normalized * 255.0).astype(np.uint8), mode="L")
+        alpha_image = alpha_image.resize(base.size, Image.Resampling.BILINEAR)
+        normalized = np.asarray(alpha_image, dtype=np.float32) / 255.0
     base_array = np.asarray(base, dtype=np.float32)
     red = np.zeros_like(base_array)
     red[..., 0] = 255.0

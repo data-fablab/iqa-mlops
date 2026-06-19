@@ -114,4 +114,4 @@ def test_save_feature_ae_heatmap_overlay_writes_png(tmp_path: Path) -> None:
 
     assert heatmap_path.exists()
     with Image.open(heatmap_path) as image:
-        assert image.size == (8, 8)
+        assert image.size == (16, 16)
