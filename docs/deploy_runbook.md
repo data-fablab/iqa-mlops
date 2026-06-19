@@ -220,18 +220,47 @@ MLflow Registry (source de verite), pas par redeploiement de conteneur.
 
 La CI (`publish-images`) builde et pousse les images par role vers Docker Hub
 avec des tags **immuables** (SHA git pour chaque push ; tag de version `vX.Y.Z`
-sur un tag git `v*`). Jamais de `latest`. Activation : variable repo
-`IQA_PUBLISH_IMAGES=true` + secrets `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`.
-Les images publiees couvrent `iqa-serving`, `iqa-ml`, `iqa-data` et l'image
-custom `iqa-airflow`.
+sur un tag git `v*`). Jamais de `latest`. Le tag recommande pour la preuve
+serveur Phase 3 est le tag SHA CI : `IQA_IMAGE_TAG=sha-<commit>`.
+
+Le job est opt-in. Avant de compter sur Docker Hub, verifier/configurer les
+prerequis GitHub Actions :
+
+```bash
+gh variable list
+gh secret list
+gh variable set IQA_PUBLISH_IMAGES --body true
+gh variable set IQA_IMAGE_REGISTRY --body <namespace-dockerhub>
+gh secret set DOCKERHUB_USERNAME --body <user>
+gh secret set DOCKERHUB_TOKEN
+```
+
+`DOCKERHUB_TOKEN` doit etre un access token Docker Hub avec droit `write`.
+Les images publiees couvrent `iqa-serving`, `iqa-ml`, `iqa-data`,
+`iqa-dvc-gate` et l'image custom `iqa-airflow`.
 
 Sur le serveur, l'overlay `docker-compose.prod.yml` tire les images du registre au
 lieu de builder localement. Figer la version a deployer dans `.env` :
 
 ```bash
 # .env
-IQA_IMAGE_REGISTRY=data-fablab
-IQA_IMAGE_TAG=v0.1.0           # tag immuable publie par la CI ; jamais latest
+IQA_IMAGE_REGISTRY=<namespace-dockerhub>
+IQA_IMAGE_TAG=sha-<commit>     # tag immuable publie par la CI ; jamais latest
+IQA_DOCKER_GID=<gid-du-socket-docker>
+```
+
+Le serveur s'authentifie sur Docker Hub avec `docker login`, puis tire les
+images en HTTPS. SSH ne sert pas a connecter Docker Hub au serveur ; SSH ne
+serait utile que pour un futur deploiement distant automatise depuis GitHub
+Actions.
+
+```bash
+docker login
+docker pull <namespace-dockerhub>/iqa-airflow:sha-<commit>
+docker pull <namespace-dockerhub>/iqa-serving:sha-<commit>
+docker pull <namespace-dockerhub>/iqa-ml:sha-<commit>
+docker pull <namespace-dockerhub>/iqa-data:sha-<commit>
+docker pull <namespace-dockerhub>/iqa-dvc-gate:sha-<commit>
 
 cd deploy
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull

@@ -19,9 +19,11 @@ def test_phase3_deploy_evidence_static_checks_pass() -> None:
     assert evidence["status"] == "validated"
     assert evidence["image_tag_source"] == "IQA_IMAGE_TAG"
     assert evidence["registry_source"] == "IQA_IMAGE_REGISTRY"
+    assert evidence["recommended_tag_strategy"] == "ci_sha"
     assert set(evidence["published_services"]) >= {
         "iqa-api",
         "iqa-inference",
+        "iqa-dvc-gate",
         "iqa-trainer",
         "airflow-webserver",
         "airflow-scheduler",
@@ -39,6 +41,7 @@ def test_prod_compose_uses_tagged_registry_images_without_latest_or_build_fallba
         "iqa-replay",
         "iqa-trainer",
         "iqa-monitoring",
+        "iqa-dvc-gate",
         "airflow-init",
         "airflow-webserver",
         "airflow-scheduler",
@@ -54,6 +57,7 @@ def test_prod_compose_uses_tagged_registry_images_without_latest_or_build_fallba
         "iqa-replay",
         "iqa-trainer",
         "iqa-monitoring",
+        "iqa-dvc-gate",
         "airflow-init",
     ]
     for service in services_with_base_build:
@@ -67,9 +71,11 @@ def test_prod_compose_uses_tagged_registry_images_without_latest_or_build_fallba
 def test_ci_publish_images_covers_role_and_airflow_images_without_latest() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
-    for expected in ["iqa-serving", "iqa-ml", "iqa-data", "iqa-airflow"]:
+    for expected in ["iqa-serving", "iqa-ml", "iqa-data", "iqa-dvc-gate", "iqa-airflow"]:
         assert expected in workflow
     assert "flavor: latest=false" in workflow
+    assert "IQA_PUBLISH_IMAGES" in workflow
+    assert "IQA_IMAGE_REGISTRY" in workflow
     assert "DOCKERHUB_USERNAME" in workflow
     assert "DOCKERHUB_TOKEN" in workflow
 
@@ -86,7 +92,16 @@ def test_deploy_docs_cover_pull_up_smoke_gateway_and_registry_boundaries() -> No
         "docker compose -f docker-compose.yml -f docker-compose.prod.yml pull",
         "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
         "Docker Hub",
+        "IQA_PUBLISH_IMAGES",
+        "IQA_IMAGE_REGISTRY",
         "IQA_IMAGE_TAG",
+        "IQA_IMAGE_TAG=sha-<commit>",
+        "DOCKERHUB_USERNAME",
+        "DOCKERHUB_TOKEN",
+        "gh variable set",
+        "gh secret set",
+        "docker login",
+        "iqa-dvc-gate",
         "Kong",
         "Nginx",
         "MLflow Registry",

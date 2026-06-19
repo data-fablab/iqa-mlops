@@ -15,14 +15,17 @@ bash ../deploy/smoke-test.sh
 ```
 
 The prod overlay uses `IQA_IMAGE_REGISTRY` and `IQA_IMAGE_TAG` for every IQA
-application image. `IQA_IMAGE_TAG` must be immutable, such as a Git SHA tag or a
-release tag published by CI. It must never be `latest`.
+application image. The recommended proof tag is the immutable GitHub Actions
+SHA tag, for example `IQA_IMAGE_TAG=sha-<commit>`. Release tags such as
+`v0.1.0` are valid only after a matching Git tag has been pushed and published
+by CI. `IQA_IMAGE_TAG` must never be `latest`.
 
 Published images:
 
 - `iqa-serving` for `iqa-api`;
 - `iqa-ml` for `iqa-inference` and `iqa-trainer`;
 - `iqa-data` for ingestion, replay and monitoring jobs;
+- `iqa-dvc-gate` for the Airflow/DVC reproducibility gate;
 - `iqa-airflow` for Airflow webserver, scheduler and init.
 
 The prod overlay explicitly disables inherited `build:` fallbacks for these
@@ -47,12 +50,56 @@ The two are not the same responsibility:
 ## CI Evidence
 
 The GitHub Actions `publish-images` job builds and pushes immutable Docker Hub
-images. It is opt-in through `IQA_PUBLISH_IMAGES=true` plus Docker Hub secrets.
+images. It is opt-in: if the repository variables/secrets below are missing,
+the job is skipped and the server will not be able to pull IQA images.
+
+Repository variables:
+
+```bash
+IQA_PUBLISH_IMAGES=true
+IQA_IMAGE_REGISTRY=<namespace-dockerhub>
+```
+
+Repository secrets:
+
+```bash
+DOCKERHUB_USERNAME
+DOCKERHUB_TOKEN
+```
+
+`DOCKERHUB_TOKEN` must be a Docker Hub access token with write permission.
 The workflow explicitly disables floating `latest` tags.
+
+If you have repository admin rights, the prerequisites can be set with:
+
+```bash
+gh variable list
+gh secret list
+gh variable set IQA_PUBLISH_IMAGES --body true
+gh variable set IQA_IMAGE_REGISTRY --body <namespace-dockerhub>
+gh secret set DOCKERHUB_USERNAME --body <user>
+gh secret set DOCKERHUB_TOKEN
+```
 
 The published image set covers application roles and the custom Airflow image,
 so the server deployment path can be `pull -> up -d -> smoke` without rebuilding
 IQA services locally.
+
+Docker Hub is accessed by the server with `docker login` and HTTPS registry
+pulls. SSH is not part of Docker Hub authentication; SSH is only needed later if
+GitHub Actions is extended to trigger a remote deployment command on the server.
+
+Before running the full compose deployment, the server proof should validate the
+five IQA image pulls explicitly:
+
+```bash
+docker login
+docker pull <namespace-dockerhub>/iqa-airflow:sha-<commit>
+docker pull <namespace-dockerhub>/iqa-serving:sha-<commit>
+docker pull <namespace-dockerhub>/iqa-ml:sha-<commit>
+docker pull <namespace-dockerhub>/iqa-data:sha-<commit>
+docker pull <namespace-dockerhub>/iqa-dvc-gate:sha-<commit>
+```
 
 ## Smoke Coverage
 
