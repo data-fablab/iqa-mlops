@@ -36,6 +36,7 @@ IQA est un MVP MLOps pour le controle visuel de pieces `Casting`.
 | Prouver le deploiement Phase 3 depuis images publiees | [phase3-deploy-evidence.md](phase3-deploy-evidence.md) |
 | Prouver Airflow comme orchestrateur de conteneurs | [airflow-container-runtime-evidence.md](airflow-container-runtime-evidence.md) |
 | Derouler la preuve finale soutenance / handover | [phase3-final-lineage-runbook.md](phase3-final-lineage-runbook.md) |
+| Presenter le notebook lineage de soutenance | [../notebooks/README.md](../notebooks/README.md) (`phase3_lineage_evidence.ipynb`) |
 
 ## Phase 3 Deploiement Et Exploitation
 
