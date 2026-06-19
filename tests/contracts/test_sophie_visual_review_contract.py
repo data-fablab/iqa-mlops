@@ -7,6 +7,7 @@ def test_sophie_review_station_mentions_replay_visual_artifacts() -> None:
     page = Path("deploy/streamlit/pages/2_Review_Sophie.py").read_text(encoding="utf-8")
 
     for expected in [
+        "DEFAULT_REPO_ROOT",
         "IQA_SOPHIE_REPLAY_RUN_DIR",
         "events.jsonl",
         "image_path",

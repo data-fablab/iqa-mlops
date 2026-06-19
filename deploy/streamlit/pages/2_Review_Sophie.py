@@ -16,7 +16,8 @@ st.title("Poste Sophie - controle qualite")
 st.caption(f"iqa-api: {API_URL}")
 st.info("Feedback Sophie display-only : l'oracle GT reste souverain pour fermer le feedback et entrainer.")
 
-REPO_ROOT = Path(os.environ.get("IQA_REPO_ROOT", ".")).resolve()
+DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(os.environ.get("IQA_REPO_ROOT", DEFAULT_REPO_ROOT)).resolve()
 DEFAULT_RUN_DIR = os.environ.get("IQA_SOPHIE_REPLAY_RUN_DIR", "")
 
 
