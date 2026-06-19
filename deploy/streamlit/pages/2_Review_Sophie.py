@@ -98,7 +98,7 @@ with tab_replay:
             st.subheader("Image brute")
             image_path = _resolve_path(current.get("image_path"))
             if image_path.exists():
-                st.image(str(image_path), use_container_width=True)
+                st.image(str(image_path), width="stretch")
             else:
                 st.code(current.get("image_path") or current.get("image_uri") or "image indisponible")
 
@@ -106,7 +106,7 @@ with tab_replay:
             st.subheader("Overlay heatmap")
             heatmap_path = _resolve_path(current.get("heatmap_path"))
             if heatmap_path.exists():
-                st.image(str(heatmap_path), use_container_width=True)
+                st.image(str(heatmap_path), width="stretch")
             elif current.get("heatmap_uri"):
                 st.code(current["heatmap_uri"])
             else:
@@ -191,7 +191,7 @@ with tab_api:
                 }
                 for row in rows
             ],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         st.subheader("Envoyer feedback Sophie display-only via API")
