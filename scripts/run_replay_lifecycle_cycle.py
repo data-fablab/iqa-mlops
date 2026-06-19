@@ -31,6 +31,7 @@ from iqa.storage.visual_artifacts import (
 )
 from iqa.training.bootstrap import upload_checkpoint_to_s3
 from iqa.training.feature_ae import FeatureAETrainingConfig
+from iqa.training.feature_ae_contracts import FEATURE_AE_BUSINESS_METRIC_PRIORITY
 from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
 
 NATURAL_SCENARIO_ID = "production_replay_natural"
@@ -177,6 +178,25 @@ class CycleState:
                     ],
                     "promotion_chain": self.promotion_chain,
                     "registry_stage": self.cycles[-1]["registry_stage"] if self.cycles else "",
+                    "metric_history": [
+                        {
+                            "cycle_id": cycle.get("cycle_id"),
+                            "candidate_version": cycle.get("candidate_version"),
+                            "selected_metric": cycle.get("selected_metric"),
+                            "selected_metric_value": cycle.get("selected_metric_value"),
+                            "gate_decision": cycle.get("gate_decision"),
+                            "promotion_status": cycle.get("promotion_status"),
+                        }
+                        for cycle in self.cycles
+                    ],
+                    "best_cycle": _best_cycle_id(self.cycles),
+                    "best_metric": _best_metric_name(self.cycles),
+                    "best_metric_value": _best_metric_value(self.cycles),
+                    "rejected_candidates": [
+                        str(cycle["candidate_version"])
+                        for cycle in self.cycles
+                        if cycle.get("promotion_status") == "rejected"
+                    ],
                 }
             )
         return payload
@@ -460,6 +480,8 @@ def handle_lifecycle_decision(args: argparse.Namespace, state: CycleState, decis
         state.candidate_checkpoint = str(cycle_result.get("candidate_checkpoint") or "")
         state.mlflow_run_id = str(cycle_result.get("mlflow_run_id") or "")
         state.status = "trained" if args.mode == "progressive-train" else "validated"
+    elif args.mode == "progressive-train":
+        state.status = "rejected"
     return reached_max_cycles(args, state)
 
 
@@ -495,14 +517,30 @@ def build_progressive_cycle(
         "seen_defective": sum(1 for event in state.seen_events if event.oracle_verdict == "defective"),
         "trigger_reason": decision.trigger_reason,
         "registry_stage": args.target_stage,
-        "promotion_status": "promoted" if args.mode == "progressive-train" else "simulated",
-        "gate_decision": "passed" if args.mode == "progressive-train" else "not_run",
+        "promotion_status": "simulated",
+        "gate_decision": "not_run",
+        "gate_reason": "decision_only",
+        "metrics": {},
+        "selected_metric": None,
+        "selected_metric_value": None,
+        "selected_epoch": None,
+        "selected_checkpoint": None,
+        "val_loss": None,
     }
     if args.mode == "progressive-train":
         train_result = train_progressive_candidate(args, candidate_version, manifest_path, dataset_snapshot_id)
         result["candidate_checkpoint"] = str(train_result.get("checkpoint") or "")
         result["mlflow_run_id"] = str(train_result.get("run_id") or "")
-        if args.publish_minio and result["candidate_checkpoint"]:
+        result.update(metric_evidence_from_training_result(train_result))
+        if result["selected_metric"]:
+            result["promotion_status"] = "promoted"
+            result["gate_decision"] = "passed"
+            result["gate_reason"] = "business_metric_available"
+        else:
+            result["promotion_status"] = "rejected"
+            result["gate_decision"] = "rejected"
+            result["gate_reason"] = "missing_business_metric"
+        if args.publish_minio and result["candidate_checkpoint"] and result["promotion_status"] == "promoted":
             upload_checkpoint_to_s3(
                 str(result["candidate_checkpoint"]),
                 f"s3://iqa-models/{candidate_version}/checkpoint.pt",
@@ -511,6 +549,90 @@ def build_progressive_cycle(
         result["candidate_checkpoint"] = None
         result["mlflow_run_id"] = None
     return result
+
+
+def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[str, Any]:
+    run_dir_value = train_result.get("run_dir")
+    checkpoint_value = train_result.get("checkpoint")
+    candidates: list[Path] = []
+    if run_dir_value:
+        run_dir = Path(str(run_dir_value))
+        candidates.extend([run_dir / "metric_eval_best.json", run_dir / "bootstrap_run" / "metric_eval_best.json"])
+    if checkpoint_value:
+        checkpoint_dir = Path(str(checkpoint_value)).parent
+        candidates.extend([checkpoint_dir / "metric_eval_best.json", checkpoint_dir / "bootstrap_run" / "metric_eval_best.json"])
+
+    best_path = next((path for path in candidates if path.is_file()), None)
+    best = json.loads(best_path.read_text(encoding="utf-8")) if best_path else {}
+    metrics = {
+        metric: float(record["value"])
+        for metric, record in best.items()
+        if isinstance(record, dict)
+        and record.get("value") is not None
+        and metric in {*FEATURE_AE_BUSINESS_METRIC_PRIORITY, "pixel_auroc"}
+    }
+    selected_metric = None
+    selected_record: dict[str, Any] | None = None
+    for metric in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
+        record = best.get(metric)
+        if isinstance(record, dict) and record.get("value") is not None:
+            selected_metric = metric
+            selected_record = record
+            break
+
+    val_loss = None
+    if selected_record and run_dir_value:
+        val_loss = _val_loss_for_epoch(Path(str(run_dir_value)) / "loss_history.csv", int(selected_record.get("epoch") or 0))
+
+    return {
+        "metrics": metrics,
+        "metric_eval_best_path": str(best_path) if best_path else None,
+        "selected_metric": selected_metric,
+        "selected_metric_value": float(selected_record["value"]) if selected_record else None,
+        "selected_epoch": int(selected_record.get("epoch") or 0) if selected_record else None,
+        "selected_checkpoint": str(selected_record.get("checkpoint") or "") if selected_record else None,
+        "val_loss": val_loss,
+    }
+
+
+def _val_loss_for_epoch(path: Path, epoch: int) -> float | None:
+    if not path.is_file() or epoch <= 0:
+        return None
+    with path.open(newline="", encoding="utf-8") as file:
+        for row in csv.DictReader(file):
+            if int(row.get("epoch") or 0) == epoch and row.get("val_loss"):
+                return float(row["val_loss"])
+    return None
+
+
+def _metric_sort_key(cycle: dict[str, Any]) -> tuple[int, float]:
+    metric = cycle.get("selected_metric")
+    if metric not in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
+        return (-1, float("-inf"))
+    return (
+        len(FEATURE_AE_BUSINESS_METRIC_PRIORITY) - FEATURE_AE_BUSINESS_METRIC_PRIORITY.index(str(metric)),
+        float(cycle.get("selected_metric_value") or float("-inf")),
+    )
+
+
+def _best_cycle(cycles: list[dict[str, Any]]) -> dict[str, Any] | None:
+    promoted = [cycle for cycle in cycles if cycle.get("promotion_status") == "promoted"]
+    return max(promoted, key=_metric_sort_key) if promoted else None
+
+
+def _best_cycle_id(cycles: list[dict[str, Any]]) -> str | None:
+    cycle = _best_cycle(cycles)
+    return str(cycle.get("cycle_id")) if cycle else None
+
+
+def _best_metric_name(cycles: list[dict[str, Any]]) -> str | None:
+    cycle = _best_cycle(cycles)
+    return str(cycle.get("selected_metric")) if cycle else None
+
+
+def _best_metric_value(cycles: list[dict[str, Any]]) -> float | None:
+    cycle = _best_cycle(cycles)
+    return float(cycle["selected_metric_value"]) if cycle and cycle.get("selected_metric_value") is not None else None
 
 
 def write_seen_dataset_snapshot(

@@ -78,7 +78,23 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
 
     def fake_train(config, git_commit):
         train_calls.append(config)
-        return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001"}
+        run_dir = config.output_checkpoint.parent
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "metric_eval_best.json").write_text(
+            json.dumps(
+                {
+                    "image_ap": {"value": 0.91, "epoch": 1, "checkpoint": "checkpoint_best_image_ap.pt"},
+                    "pixel_aupimo_1e-5_1e-3": {
+                        "value": 0.42,
+                        "epoch": 1,
+                        "checkpoint": "checkpoint_best_pixel_aupimo_1e-5_1e-3.pt",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (run_dir / "loss_history.csv").write_text("epoch,train_loss,val_loss,lr\n1,0.2,0.3,0.001\n", encoding="utf-8")
+        return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001", "run_dir": str(run_dir)}
 
     monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train)
     return train_calls
@@ -203,6 +219,44 @@ def test_progressive_train_promotes_multiple_test_models(tmp_path: Path, monkeyp
     snapshot = Path(train_calls[0].manifest_path)
     assert snapshot.exists()
     assert "oracle_gt_seen_lots" in snapshot.read_text(encoding="utf-8")
+    cycles = [json.loads(line) for line in (Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert cycles[0]["selected_metric"] == "pixel_aupimo_1e-5_1e-3"
+    assert cycles[0]["selected_metric_value"] == 0.42
+    assert cycles[0]["val_loss"] == 0.3
+    assert cycles[0]["gate_decision"] == "passed"
+    assert summary["metric_history"][0]["selected_metric"] == "pixel_aupimo_1e-5_1e-3"
+    assert summary["best_cycle"] == "cycle_001"
+    assert summary["rejected_candidates"] == []
+
+
+def test_progressive_train_rejects_candidate_without_business_metrics(tmp_path: Path, monkeypatch) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    _mock_runtime(monkeypatch)
+
+    def fake_train_without_metrics(config, git_commit):
+        run_dir = config.output_checkpoint.parent
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "metric_eval_best.json").unlink(missing_ok=True)
+        (run_dir / "loss_history.csv").write_text("epoch,train_loss,val_loss,lr\n1,0.1,0.01,0.001\n", encoding="utf-8")
+        return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001", "run_dir": str(run_dir)}
+
+    monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train_without_metrics)
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    args.max_cycles = 1
+
+    summary = runner.run_cycle(args)
+
+    cycle = json.loads((Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8"))
+    assert cycle["gate_decision"] == "rejected"
+    assert cycle["gate_reason"] == "missing_business_metric"
+    assert cycle["promotion_status"] == "rejected"
+    assert cycle["selected_metric"] is None
+    assert summary["models_promoted"] == []
+    assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
+    assert summary["rejected_candidates"] == ["rd_feature_ae_gated_natural_cycle_001"]
 
 
 def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) -> None:
