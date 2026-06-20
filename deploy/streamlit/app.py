@@ -3,7 +3,7 @@
 Talks to the `iqa-api` FastAPI gateway. The two operational views are in the
 ``pages/`` folder:
 
-- Dashboard Marc : supervision par lot (volumes, taux Orange, Rouges).
+- Dashboard Marc : pilotage production (conformite lots, alertes, lifecycle).
 - Review Sophie : revue en lecture seule des decisions vs oracle GT.
 
 This Accueil page keeps the predict + oracle GT feedback demo used to feed the
@@ -22,7 +22,7 @@ st.set_page_config(page_title="IQA - Accueil", layout="wide")
 st.title("Industrial Quality Assistant")
 st.caption(f"iqa-api: {API_URL}")
 st.markdown(
-    "Utilise le menu de gauche : **Dashboard Marc** (supervision par lot) et "
+    "Utilise le menu de gauche : **Dashboard Marc** (production, lots, lifecycle) et "
     "**Review Sophie** (revue lecture seule, divergence oracle). Cette page sert "
     "a generer des predictions et a fermer le feedback oracle GT."
 )
