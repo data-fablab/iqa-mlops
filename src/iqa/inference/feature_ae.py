@@ -276,39 +276,83 @@ def save_feature_ae_heatmap_overlay(
     roi_mask_path: str | Path | None = None,
     threshold_orange: float | None = None,
     threshold_red: float | None = None,
+    display_low_percentile: float = 85.0,
+    display_high_percentile: float = 99.8,
+    display_gamma: float = 1.4,
+    display_threshold: float = 0.60,
+    overlay_alpha: float = 0.72,
 ) -> None:
-    """Save a red anomaly overlay PNG for operator review."""
+    """Save an operator anomaly overlay PNG.
+
+    Decision thresholds are kept in the signature for traceability, but the
+    visual overlay uses the champion preview contract: ROI-local percentile
+    normalization plus a display threshold. This keeps low calibrated decision
+    thresholds from painting the whole ROI red.
+    """
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     score_array = score_map.detach().cpu().numpy().astype(np.float32)
-    if threshold_red is not None and float(threshold_red) > 0.0:
-        normalized = np.sqrt(np.clip(score_array / max(float(threshold_red), 1e-6), 0.0, 1.0))
-    else:
-        positive = score_array[score_array > 0]
-        if positive.size:
-            low = float(np.percentile(positive, 50))
-            high = float(np.percentile(positive, 99))
-            if high <= low:
-                high = float(positive.max() or 1.0)
-            normalized = np.clip((score_array - low) / max(high - low, 1e-6), 0.0, 1.0)
-        else:
-            normalized = np.zeros_like(score_array, dtype=np.float32)
-
     base = Image.open(image_path).convert("RGB")
+    roi_mask_array: np.ndarray | None = None
+    if roi_mask_path is not None:
+        roi_mask = Image.open(roi_mask_path).convert("L")
+        if roi_mask.size != (score_array.shape[1], score_array.shape[0]):
+            roi_mask = roi_mask.resize((score_array.shape[1], score_array.shape[0]), Image.Resampling.NEAREST)
+        roi_mask_array = np.asarray(roi_mask, dtype=np.float32) > 0
+    normalized = normalize_feature_ae_display_map(
+        score_array,
+        roi_mask=roi_mask_array,
+        low_percentile=display_low_percentile,
+        high_percentile=display_high_percentile,
+        gamma=display_gamma,
+        display_threshold=display_threshold,
+    )
     if base.size != (score_array.shape[1], score_array.shape[0]):
         alpha_image = Image.fromarray((normalized * 255.0).astype(np.uint8), mode="L")
         alpha_image = alpha_image.resize(base.size, Image.Resampling.BILINEAR)
         normalized = np.asarray(alpha_image, dtype=np.float32) / 255.0
-    if roi_mask_path is not None:
-        roi_mask = Image.open(roi_mask_path).convert("L").resize(base.size, Image.Resampling.NEAREST)
-        normalized = normalized * (np.asarray(roi_mask, dtype=np.float32) > 0)
     base_array = np.asarray(base, dtype=np.float32)
-    red = np.zeros_like(base_array)
-    red[..., 0] = 255.0
-    alpha = (normalized[..., None] * 0.55).astype(np.float32)
-    overlay = (base_array * (1.0 - alpha) + red * alpha).clip(0, 255).astype(np.uint8)
+    heat = np.zeros_like(base_array)
+    heat[..., 0] = 255.0
+    heat[..., 1] = np.clip(np.sqrt(normalized) * 199.0, 0.0, 199.0)
+    heat[..., 2] = 5.0
+    alpha = (normalized[..., None] * float(overlay_alpha)).astype(np.float32)
+    overlay = (base_array * (1.0 - alpha) + heat * alpha).clip(0, 255).astype(np.uint8)
     Image.fromarray(overlay, mode="RGB").save(output)
+
+
+def normalize_feature_ae_display_map(
+    score_map: np.ndarray,
+    *,
+    roi_mask: np.ndarray | None = None,
+    low_percentile: float = 85.0,
+    high_percentile: float = 99.8,
+    gamma: float = 1.4,
+    display_threshold: float = 0.60,
+) -> np.ndarray:
+    """Normalize a Feature-AE map for display without changing decision scores."""
+
+    score = np.asarray(score_map, dtype=np.float32)
+    finite = np.isfinite(score)
+    if roi_mask is not None:
+        valid = finite & (np.asarray(roi_mask) > 0)
+    else:
+        valid = finite
+    values = score[valid]
+    if values.size == 0:
+        return np.zeros_like(score, dtype=np.float32)
+    low = float(np.percentile(values, float(low_percentile))) if float(low_percentile) > 0 else 0.0
+    high = float(np.percentile(values, float(high_percentile)))
+    if high <= low:
+        high = low + 1e-6
+    normalized = np.clip((score - low) / (high - low), 0.0, 1.0)
+    if float(gamma) > 0.0 and float(gamma) != 1.0:
+        normalized = np.power(normalized, float(gamma))
+    if roi_mask is not None:
+        normalized = np.where(np.asarray(roi_mask) > 0, normalized, 0.0)
+    normalized[normalized < float(display_threshold)] = 0.0
+    return normalized.astype(np.float32, copy=False)
 
 
 __all__ = [
@@ -316,6 +360,7 @@ __all__ = [
     "FeatureAEScoreMaps",
     "compute_feature_ae_score_maps",
     "load_roi_mask",
+    "normalize_feature_ae_display_map",
     "prepare_feature_ae_score_map",
     "predict_feature_ae_image",
     "save_feature_ae_heatmap_overlay",
