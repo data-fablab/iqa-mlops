@@ -19,6 +19,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
 
 from iqa.datasets import FEATURE_AE_CONTEXT_SIZE, FEATURE_AE_TILE_SIZE, TiledFeatureAEDataset
 from iqa.models.feature_ae import (
+    CHAMPION_FEATURE_AE_CONTRACT,
     DEFAULT_FEATURE_LAYERS,
     ResNetTeacherFeatures,
     feature_anomaly_map,
@@ -51,7 +52,8 @@ class FeatureAEEvaluationConfig:
     batch_size: int = 8
     device: str = "cpu"
     layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS
-    pretrained_teacher: bool = False
+    pretrained_teacher: bool = True
+    layer_weights: dict[str, float] | None = None
     calibrate_normal: bool = False
     calibration_mode: str = "per_layer"
     calibration_stat: str = "median_mad"
@@ -264,7 +266,11 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             images = torch.stack([item["image"] for item in items]).to(device)
             contexts = torch.stack([item["context_image"] for item in items]).to(device)
             start = time.perf_counter()
-            maps = feature_anomaly_map(teacher(images), model(images, context_images=contexts))
+            maps = feature_anomaly_map(
+                teacher(images),
+                model(images, context_images=contexts),
+                layer_weights=config.layer_weights or CHAMPION_FEATURE_AE_CONTRACT.normalized_layer_weights(),
+            )
             maps = F.interpolate(maps, size=(config.image_size, config.image_size), mode="bilinear", align_corners=False)
             tile_latency_ms = (time.perf_counter() - start) * 1000.0 / max(len(items), 1)
             for item, score_tensor in zip(items, maps.cpu(), strict=True):

@@ -51,6 +51,7 @@ def predict_roi_image(
     mask_mode: str = "argmax",
     device: str | torch.device = "cpu",
     output_mask: str | Path | None = None,
+    output_probability_map: str | Path | None = None,
 ) -> RoiSegmentationPrediction:
     image_path = Path(image_path)
     checkpoint_path = Path(checkpoint_path)
@@ -60,6 +61,7 @@ def predict_roi_image(
     resolved_context_size = int(context_size or checkpoint.get("context_size", resolved_image_size))
     num_classes = int(checkpoint.get("num_classes", 1))
     model = load_roi_segmenter(checkpoint_path, map_location=torch_device).to(torch_device)
+    original_size = Image.open(image_path).size
     image = _load_rgb_tensor(image_path, image_size=resolved_image_size).to(torch_device)
     global_image = _load_rgb_tensor(image_path, image_size=resolved_context_size).to(torch_device)
     crop_box_mask = _full_crop_box_mask(resolved_context_size).to(dtype=image.dtype, device=torch_device)
@@ -67,6 +69,7 @@ def predict_roi_image(
     with torch.no_grad():
         output = model(image, global_image=global_image, crop_box_mask=crop_box_mask)
         logits = mask_logits_from_output(output)
+        probability = surface_probability_from_logits(logits, surface_class=surface_class)
         mask = _surface_mask_from_logits(
             logits,
             surface_class=surface_class,
@@ -77,7 +80,9 @@ def predict_roi_image(
 
     roi_ratio = float(mask.float().mean().item())
     if output_mask is not None:
-        _save_mask(mask, Path(output_mask))
+        _save_mask(mask, Path(output_mask), original_size=original_size)
+    if output_probability_map is not None:
+        _save_probability_map(probability, Path(output_probability_map), original_size=original_size)
     return RoiSegmentationPrediction(
         model_type=str(getattr(model, "model_type", "functional_unet_resnet18_det1_context2b")),
         checkpoint_path=str(checkpoint_path),
@@ -136,10 +141,35 @@ def _surface_mask_from_logits(
     raise ValueError(f"Unsupported ROI mask_mode: {mask_mode!r}")
 
 
-def _save_mask(mask: torch.Tensor, path: Path) -> None:
+def _save_mask(mask: torch.Tensor, path: Path, *, original_size: tuple[int, int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     array = mask.squeeze().to(dtype=torch.uint8, device="cpu") * 255
-    Image.fromarray(array.numpy(), mode="L").save(path)
+    image = Image.fromarray(array.numpy(), mode="L")
+    _restore_letterboxed_image(image, original_size, resample=Image.Resampling.NEAREST).save(path)
+
+
+def _save_probability_map(probability: torch.Tensor, path: Path, *, original_size: tuple[int, int]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    array = (probability.squeeze().detach().cpu().clamp(0.0, 1.0).numpy() * 255.0).astype("uint8")
+    image = Image.fromarray(array, mode="L")
+    _restore_letterboxed_image(image, original_size, resample=Image.Resampling.BILINEAR).save(path)
+
+
+def _restore_letterboxed_image(
+    image: Image.Image,
+    original_size: tuple[int, int],
+    *,
+    resample: Image.Resampling,
+) -> Image.Image:
+    original_width, original_height = original_size
+    canvas_size = image.size[0]
+    scale = canvas_size / max(original_width, original_height)
+    resized_width = max(1, int(round(original_width * scale)))
+    resized_height = max(1, int(round(original_height * scale)))
+    left = (canvas_size - resized_width) // 2
+    top = (canvas_size - resized_height) // 2
+    content = image.crop((left, top, left + resized_width, top + resized_height))
+    return content.resize(original_size, resample)
 
 
 def _roi_status(roi_ratio: float, *, min_roi_ratio: float, max_roi_ratio: float) -> str:

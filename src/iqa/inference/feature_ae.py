@@ -10,15 +10,21 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-from iqa.datasets import load_image_tensor
 from iqa.inference.helpers import compute_status, measure_inference_time
 from iqa.models.feature_ae import (
+    CHAMPION_FEATURE_AE_CONTRACT,
+    FeatureAEChampionContract,
     DEFAULT_FEATURE_LAYERS,
     FEATURE_AE_MODEL_TYPE,
     ResNetTeacherFeatures,
-    feature_anomaly_map,
+    apply_champion_roi,
+    fuse_numpy_layer_maps,
+    load_roi_probability_map,
     load_rd_feature_ae_gated,
     normalize_feature_layers,
+    reconstruct_tiled_feature_maps,
+    score_numpy_map_topk,
+    smooth_numpy_score_map,
 )
 from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING
 
@@ -35,9 +41,20 @@ class FeatureAEPrediction:
     roi_status: str | None = None
     heatmap_uri: str | None = None
     threshold_source: str = "explicit_or_default"
+    score_contract_version: str = CHAMPION_FEATURE_AE_CONTRACT.version
 
     def to_dict(self) -> dict[str, float | str | None]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class FeatureAEScoreMaps:
+    layer_maps: dict[str, np.ndarray]
+    fused_map: np.ndarray
+    score_map: np.ndarray
+    roi_probability: np.ndarray | None
+    score: float
+    contract: FeatureAEChampionContract
 
 
 def predict_feature_ae_image(
@@ -51,54 +68,45 @@ def predict_feature_ae_image(
     threshold_red: float = 0.05,
     threshold_source: str = "explicit_or_default",
     roi_mask_path: str | Path | None = None,
+    roi_probability_path: str | Path | None = None,
     score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
     score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
     topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
     heatmap_output_path: str | Path | None = None,
     heatmap_uri: str | None = None,
     device: str = "cpu",
-    pretrained_teacher: bool = False,
+    pretrained_teacher: bool = True,
     layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
+    champion_contract: FeatureAEChampionContract = CHAMPION_FEATURE_AE_CONTRACT,
 ) -> FeatureAEPrediction:
-    layers = normalize_feature_layers(layers)
-    torch_device = torch.device(device)
-    image = load_image_tensor(image_path, image_size=image_size).unsqueeze(0).to(torch_device)
-    context_image_size = context_size if preprocessing_mode == "tiled_context" else image_size
-    context_image = load_image_tensor(image_path, image_size=context_image_size).unsqueeze(0).to(torch_device)
-
-    model = load_rd_feature_ae_gated(checkpoint_path, layers=layers, map_location=torch_device).to(torch_device)
-    teacher = ResNetTeacherFeatures(layers=layers, pretrained=pretrained_teacher).to(torch_device)
-    model.eval()
-    teacher.eval()
-
-    with torch.no_grad():
-        with measure_inference_time() as timing:
-            teacher_features = teacher(image)
-            reconstructed = model(image, context_images=context_image)
-            anomaly_map = feature_anomaly_map(teacher_features, reconstructed)
-
-    score_map = anomaly_map.squeeze().detach().cpu()
-    visual_score_map = prepare_feature_ae_score_map(
-        score_map,
-        roi_mask_path=roi_mask_path,
-        score_smoothing=score_smoothing,
-    )
+    with measure_inference_time() as timing:
+        maps = compute_feature_ae_score_maps(
+            image_path,
+            checkpoint_path,
+            image_size=image_size,
+            context_size=context_size,
+            preprocessing_mode=preprocessing_mode,
+            roi_mask_path=roi_mask_path,
+            roi_probability_path=roi_probability_path,
+            score_smoothing=score_smoothing,
+            score_image=score_image,
+            topk_fraction=topk_fraction,
+            device=device,
+            pretrained_teacher=pretrained_teacher,
+            layers=layers,
+            champion_contract=champion_contract,
+        )
+    score_map_array = maps.score_map
     if heatmap_output_path is not None:
         save_feature_ae_heatmap_overlay(
             image_path,
-            visual_score_map,
+            torch.from_numpy(score_map_array),
             heatmap_output_path,
             roi_mask_path=roi_mask_path,
             threshold_orange=threshold_orange,
             threshold_red=threshold_red,
         )
-    score = score_feature_ae_map(
-        score_map,
-        roi_mask_path=roi_mask_path,
-        score_smoothing=score_smoothing,
-        score_image=score_image,
-        topk_fraction=topk_fraction,
-    )
+    score = maps.score
     status = compute_status(score, threshold_orange=threshold_orange, threshold_red=threshold_red)
     return FeatureAEPrediction(
         image_path=str(image_path),
@@ -111,6 +119,80 @@ def predict_feature_ae_image(
         roi_status="roi_scored" if roi_mask_path is not None else None,
         heatmap_uri=heatmap_uri or (str(heatmap_output_path) if heatmap_output_path is not None else None),
         threshold_source=threshold_source,
+        score_contract_version=maps.contract.version,
+    )
+
+
+def compute_feature_ae_score_maps(
+    image_path: str | Path,
+    checkpoint_path: str | Path,
+    *,
+    image_size: int = CANONICAL_FEATURE_AE_PREPROCESSING.image_size,
+    context_size: int = CANONICAL_FEATURE_AE_PREPROCESSING.context_size,
+    preprocessing_mode: str = CANONICAL_FEATURE_AE_PREPROCESSING.preprocessing_mode,
+    roi_mask_path: str | Path | None = None,
+    roi_probability_path: str | Path | None = None,
+    score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
+    score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
+    topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
+    device: str = "cpu",
+    pretrained_teacher: bool = True,
+    layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
+    champion_contract: FeatureAEChampionContract = CHAMPION_FEATURE_AE_CONTRACT,
+) -> FeatureAEScoreMaps:
+    layers = normalize_feature_layers(layers)
+    torch_device = torch.device(device)
+    model = load_rd_feature_ae_gated(checkpoint_path, layers=layers, map_location=torch_device).to(torch_device)
+    teacher = ResNetTeacherFeatures(layers=layers, pretrained=pretrained_teacher).to(torch_device)
+    model.eval()
+    teacher.eval()
+    contract = FeatureAEChampionContract(
+        version=champion_contract.version,
+        teacher_weights=champion_contract.teacher_weights,
+        tile_size=int(image_size),
+        context_size=int(context_size if preprocessing_mode == "tiled_context" else image_size),
+        tile_stride=champion_contract.tile_stride,
+        layers=layers,
+        layer_weights=champion_contract.normalized_layer_weights(),
+        score_smoothing=score_smoothing,
+        roi_mode=champion_contract.roi_mode,
+        roi_threshold=champion_contract.roi_threshold,
+        score_image=score_image,
+        topk_fraction=topk_fraction,
+    )
+    layer_maps = reconstruct_tiled_feature_maps(
+        image_path=image_path,
+        model=model,
+        teacher=teacher,
+        device=torch_device,
+        contract=contract,
+    )
+    fused_map = fuse_numpy_layer_maps(layer_maps, layer_weights=contract.normalized_layer_weights())
+    smoothed_map = smooth_numpy_score_map(fused_map, score_smoothing)
+    roi_source = roi_probability_path or roi_mask_path
+    roi_probability = load_roi_probability_map(
+        roi_source,
+        target_shape=smoothed_map.shape,
+        threshold=contract.roi_threshold,
+    )
+    score_map_array = apply_champion_roi(
+        smoothed_map,
+        roi_probability=roi_probability,
+        roi_mode=contract.roi_mode,
+    )
+    score = score_numpy_map_topk(
+        score_map_array,
+        roi_probability=roi_probability,
+        score_image=score_image,
+        topk_fraction=topk_fraction,
+    )
+    return FeatureAEScoreMaps(
+        layer_maps=layer_maps,
+        fused_map=fused_map,
+        score_map=score_map_array,
+        roi_probability=roi_probability,
+        score=score,
+        contract=contract,
     )
 
 
@@ -231,6 +313,8 @@ def save_feature_ae_heatmap_overlay(
 
 __all__ = [
     "FeatureAEPrediction",
+    "FeatureAEScoreMaps",
+    "compute_feature_ae_score_maps",
     "load_roi_mask",
     "prepare_feature_ae_score_map",
     "predict_feature_ae_image",

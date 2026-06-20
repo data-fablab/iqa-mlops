@@ -56,12 +56,17 @@ Le mode historique `tile_256_overlap` n'est pas conserve. Il correspondait a une
 Mode IQA retenu :
 
 ```text
-preprocessing_contract_version = feature_ae_preprocessing_v001
+preprocessing_contract_version = feature_ae_champion_v001
 preprocessing_mode = tiled_context
 image_size         = 384
 context_size       = 768
-tile_stride        = 192
+tile_stride        = 384
 normalization      = imagenet
+teacher_weights    = IMAGENET1K_V1
+layers             = layer2, layer3
+layer_weights      = layer2=0.65, layer3=0.35
+roi_mode           = soft_map
+roi_threshold      = 0.5
 sampling           = all
 augmentation       = none
 ```
@@ -82,6 +87,13 @@ inference, bootstrap et lifecycle. Les parametres sont centralises dans
 checkpoint. Les commandes champion/bootstrap/lifecycle refusent les overrides
 non canoniques, sauf avec le flag explicite de test local
 `--allow-noncanonical-preprocessing`.
+
+Le chemin runtime de demonstration et de production n'utilise plus le letterbox
+image entiere. Le contrat champion reconstruit une score map pleine resolution
+par tuiles 384 avec contexte 768, fusionne `layer2/layer3`, applique le ROI
+soft-map puis calcule le score `topk_mean` sur la surface fonctionnelle. Tout
+chemin letterbox restant est un chemin legacy de test et ne doit pas alimenter
+Replay, API, Sophie, Marc ou le lifecycle progressif.
 
 ## 4. Separation ROI et GT defaut
 
@@ -239,11 +251,14 @@ checkpoint, et elle ne doit pas arreter le bootstrap avant la patience metier.
 Scoring cible :
 
 ```text
-score_region     = functional_surface_prediction
+score_contract   = feature_ae_champion_v001
+teacher_weights  = IMAGENET1K_V1
+layer_weights    = layer2=0.65, layer3=0.35
+roi_mode         = soft_map
+roi_threshold    = 0.5
 smoothing        = median3
 image_score      = topk_mean
 topk_fraction    = 0.005
-calibration      = per_layer / median_mad
 validation_set   = validation_set_v001
 ```
 
@@ -258,28 +273,44 @@ Il sert a mesurer la performance et a prendre les decisions de promotion.
 ## 6.1 Calibration des seuils runtime
 
 Les seuils `green / orange / red` ne sont pas des constantes universelles. Ils
-sont calibres par `model_version` sur `calibration_set_v001`, qui est good-only,
-fige, hors bootstrap, hors replay, hors train et hors validation.
+sont calibres par `model_version` avec le meme contrat champion que
+l'inference, et les metriques metier sont calculees sur `validation_set_v001`
+avec les masques GT defauts.
 
 Commande serveur :
 
 ```bash
-uv run --extra cu128 iqa-calibrate-feature-ae-thresholds \
+uv run --extra cu128 iqa-calibrate-feature-ae-champion \
   --model-version rd_feature_ae_gated_v001_bootstrap \
   --image-root /opt/iqa/iqa-mlops/data/raw/hss-iad \
+  --validation-manifest data/validation/validation_set_v001.csv \
+  --gt-masks-manifest data/validation/validation_gt_masks_v001.csv \
+  --roi-mode soft_map \
+  --layer-weights layer2=0.65 layer3=0.35 \
+  --topk-fraction 0.005 \
   --device cuda \
   --write-manifest
 ```
 
-La commande restaure le ROI et le Feature-AE depuis MinIO, score les images de
-calibration avec le contrat canonique (`functional_surface_prediction`,
-`median3`, `topk_mean`, `topk_fraction=0.005`), puis ecrit les seuils dans le
-manifest modele :
+La commande restaure le Feature-AE depuis MinIO, score les images avec le
+contrat champion, materialise `predictions.npz`, `calibration_matrix.csv` et
+`calibration_summary.json`, puis ecrit les seuils dans le manifest modele :
 
 ```text
 orange = quantile p95 des scores conformes calibres
 red    = quantile p99 des scores conformes calibres
 ```
+
+La configuration retenue est selectionnee par priorite metier :
+
+```text
+pixel_aupimo_1e-5_1e-3
+-> pixel_ap
+-> image_ap
+-> image_auroc
+```
+
+`val_loss` reste informative et ne peut jamais promouvoir seule un modele.
 
 Le runtime et le runner replay/lifecycle utilisent ensuite ces seuils manifest
 quand ils sont disponibles. Sans seuils calibres, le fallback historique reste

@@ -9,7 +9,13 @@
     "orange_quantile": 0.95,
     "red_quantile": 0.99,
     "sample_count": 102,
-    "score_contract_version": "feature_ae_preprocessing_v001",
+    "layer_weights": {
+      "layer2": 0.65,
+      "layer3": 0.35
+    },
+    "roi_mode": "soft_map",
+    "roi_threshold": 0.5,
+    "score_contract_version": "feature_ae_champion_v001",
     "score_image": "topk_mean",
     "score_max": 292.6936340332031,
     "score_median": 2.961828827857971,
@@ -22,23 +28,49 @@
   },
   "model_type": "reverse_distill_resnet18_dual_context_gated",
   "model_version": "rd_feature_ae_gated_v001_bootstrap",
+  "feature_ae_champion_contract": {
+    "context_size": 768,
+    "layer_weights": {
+      "layer2": 0.65,
+      "layer3": 0.35
+    },
+    "layers": [
+      "layer2",
+      "layer3"
+    ],
+    "roi_mode": "soft_map",
+    "roi_threshold": 0.5,
+    "score_image": "topk_mean",
+    "score_smoothing": "median3",
+    "teacher_weights": "IMAGENET1K_V1",
+    "tile_size": 384,
+    "tile_stride": 384,
+    "topk_fraction": 0.005,
+    "version": "feature_ae_champion_v001"
+  },
   "preprocessing_contract": {
     "augmentation_profile": "none",
     "context_size": 768,
     "image_size": 384,
+    "layer_weights": {
+      "layer2": 0.65,
+      "layer3": 0.35
+    },
     "min_roi_ratio": 0.03,
     "normalization": "imagenet",
     "preprocessing_mode": "tiled_context",
-    "roi_threshold": 0.3,
+    "roi_mode": "soft_map",
+    "roi_threshold": 0.5,
     "score_image": "topk_mean",
     "score_region": "functional_surface_prediction",
     "score_smoothing": "median3",
-    "tile_stride": 192,
+    "teacher_weights": "IMAGENET1K_V1",
+    "tile_stride": 384,
     "tile_train_sampling": "all",
     "topk_fraction": 0.005,
-    "version": "feature_ae_preprocessing_v001"
+    "version": "feature_ae_champion_v001"
   },
-  "preprocessing_contract_version": "feature_ae_preprocessing_v001",
+  "preprocessing_contract_version": "feature_ae_champion_v001",
   "roi_model_version": "roi_segmenter_v001_fixed",
   "runtime": {
     "loader": "load_rd_feature_ae_gated",

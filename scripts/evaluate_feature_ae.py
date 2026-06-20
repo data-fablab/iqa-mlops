@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--layers", nargs="+", default=["layer2", "layer3"])
-    parser.add_argument("--pretrained-teacher", action="store_true")
+    parser.add_argument("--no-pretrained-teacher", action="store_true")
     parser.add_argument("--calibrate-normal", action="store_true")
     parser.add_argument("--calibration-mode", default="per_layer")
     parser.add_argument("--calibration-stat", default="median_mad")
@@ -78,7 +78,7 @@ def main() -> None:
             batch_size=args.batch_size,
             device=args.device,
             layers=tuple(args.layers),
-            pretrained_teacher=args.pretrained_teacher,
+            pretrained_teacher=not args.no_pretrained_teacher,
             calibrate_normal=args.calibrate_normal,
             calibration_mode=args.calibration_mode,
             calibration_stat=args.calibration_stat,

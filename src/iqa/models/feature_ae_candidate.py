@@ -120,7 +120,7 @@ class FeatureAECandidate:
         threshold_orange = kwargs.pop('threshold_orange', 0.02)
         threshold_red = kwargs.pop('threshold_red', 0.05)
         device = kwargs.pop('device', 'cpu')
-        pretrained_teacher = kwargs.pop('pretrained_teacher', False)
+        pretrained_teacher = kwargs.pop('pretrained_teacher', True)
         layers = kwargs.pop('layers', DEFAULT_FEATURE_LAYERS)
 
         layers = normalize_feature_layers(layers)
