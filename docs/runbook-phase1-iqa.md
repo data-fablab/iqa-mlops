@@ -144,8 +144,12 @@ Ouvre `http://localhost:8501`. L'app est multipage (`deploy/streamlit/`) :
 - **Accueil** : modele actif (`/model/version`), lots (`/replay-scenarios`),
   statut piece (`/piece-events/{id}/predict`) et feedback `oracle_gt`
   (`/feedback`). Sert a generer l'historique lu par les deux vues.
-- **Dashboard Marc** : supervision par lot via `/lots/summary` (volumes, taux
-  Orange, Rouges, divergences) + distribution Vert/Orange/Rouge.
+- **Dashboard Marc** : pilotage production. L'onglet **Run lifecycle** lit un
+  dossier `.cache/iqa/replay_lifecycle/.../<run_id>` via
+  `IQA_MARC_REPLAY_RUN_DIR` pour afficher conformite des lots, defauts GT,
+  decisions Vert/Orange/Rouge, lifecycle Feature-AE, `pixel_aupimo_1e-5_1e-3`,
+  `pixel_ap`, MLflow, MinIO et DVC. L'onglet **Historique API** conserve la
+  supervision par lot via `/lots/summary`.
 - **Review Sophie** : revue en **lecture seule** via `/predictions`, mettant en
   evidence les divergences modele vs oracle GT (`faux_negatif`, `faux_positif`,
   `orange_a_revoir`). Aucune action d'ecriture : l'oracle GT reste souverain,
@@ -153,6 +157,17 @@ Ouvre `http://localhost:8501`. L'app est multipage (`deploy/streamlit/`) :
 
 C'est une vitrine MVP : l'historique est en memoire dans l'API (pas encore de
 persistance PostgreSQL en Phase 1).
+
+Pour ouvrir Marc sur un run progressif deja genere :
+
+```bash
+export IQA_MARC_REPLAY_RUN_DIR=".cache/iqa/replay_lifecycle/production_replay_natural/<run_id>"
+export IQA_API_URL="http://localhost:8000"
+cd deploy/streamlit
+uv run --extra cpu --with streamlit --with requests streamlit run app.py \
+  --server.address 127.0.0.1 \
+  --server.port 8502
+```
 
 ## 9. CI
 
