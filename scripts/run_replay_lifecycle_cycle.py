@@ -31,6 +31,7 @@ from iqa.storage.visual_artifacts import (
 )
 from iqa.training.bootstrap import upload_checkpoint_to_s3
 from iqa.training.feature_ae import FeatureAETrainingConfig
+from iqa.training.feature_ae_contracts import FEATURE_AE_BUSINESS_METRIC_PRIORITY
 from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
 
 NATURAL_SCENARIO_ID = "production_replay_natural"
@@ -44,8 +45,11 @@ CANDIDATE_DATASETS = {
     DRIFT_SCENARIO_ID: "feature_ae_good_v003",
 }
 VALIDATION_MANIFEST = Path("data/validation/validation_set_v001.csv")
+VALIDATION_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/replay_lifecycle")
-Mode = Literal["decision-only", "train-on-trigger"]
+Mode = Literal["decision-only", "train-on-trigger", "progressive-decision", "progressive-train"]
+PROGRESSIVE_MODES = {"progressive-decision", "progressive-train"}
+ACTIVE_REPLAY_SCENARIOS = Path("data/metadata/replay_scenarios.csv")
 
 
 @dataclass
@@ -133,13 +137,20 @@ class CycleState:
     events_processed: int = 0
     lots_processed: int = 0
     total_conforming_validated_count: int = 0
+    last_cycle_conforming_validated_count: int = 0
     trigger_decision: LifecycleDecision | None = None
     candidate_checkpoint: str | None = None
     mlflow_run_id: str | None = None
     status: str = "validated"
+    active_model_initial: str = DEFAULT_FEATURE_AE_MODEL_VERSION
+    active_model_final: str = DEFAULT_FEATURE_AE_MODEL_VERSION
+    cycles_requested: int = 0
+    cycles: list[dict[str, Any]] = field(default_factory=list)
+    promotion_chain: list[str] = field(default_factory=lambda: [DEFAULT_FEATURE_AE_MODEL_VERSION])
+    seen_events: list[CycleEvent] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
-        return {
+        payload = {
             "scenario_id": self.scenario_id,
             "mode": self.mode,
             "run_id": self.run_id,
@@ -154,6 +165,42 @@ class CycleState:
             "status": self.status,
             "output_dir": str(self.output_dir),
         }
+        if self.mode in PROGRESSIVE_MODES:
+            payload.update(
+                {
+                    "active_model_initial": self.active_model_initial,
+                    "active_model_final": self.active_model_final,
+                    "cycles_requested": self.cycles_requested,
+                    "cycles_completed": len(self.cycles),
+                    "models_promoted": [
+                        str(cycle["candidate_version"])
+                        for cycle in self.cycles
+                        if cycle.get("promotion_status") == "promoted"
+                    ],
+                    "promotion_chain": self.promotion_chain,
+                    "registry_stage": self.cycles[-1]["registry_stage"] if self.cycles else "",
+                    "metric_history": [
+                        {
+                            "cycle_id": cycle.get("cycle_id"),
+                            "candidate_version": cycle.get("candidate_version"),
+                            "selected_metric": cycle.get("selected_metric"),
+                            "selected_metric_value": cycle.get("selected_metric_value"),
+                            "gate_decision": cycle.get("gate_decision"),
+                            "promotion_status": cycle.get("promotion_status"),
+                        }
+                        for cycle in self.cycles
+                    ],
+                    "best_cycle": _best_cycle_id(self.cycles),
+                    "best_metric": _best_metric_name(self.cycles),
+                    "best_metric_value": _best_metric_value(self.cycles),
+                    "rejected_candidates": [
+                        str(cycle["candidate_version"])
+                        for cycle in self.cycles
+                        if cycle.get("promotion_status") == "rejected"
+                    ],
+                }
+            )
+        return payload
 
 
 def parse_args() -> argparse.Namespace:
@@ -161,7 +208,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario-id", choices=sorted(REPLAY_PLANS), default=NATURAL_SCENARIO_ID)
     parser.add_argument("--image-root", type=Path, required=True)
     parser.add_argument("--stage", default="test")
-    parser.add_argument("--mode", choices=["decision-only", "train-on-trigger"], default="decision-only")
+    parser.add_argument(
+        "--mode",
+        choices=["decision-only", "train-on-trigger", "progressive-decision", "progressive-train"],
+        default="decision-only",
+    )
     parser.add_argument("--max-events", type=int)
     parser.add_argument("--max-lots", type=int)
     parser.add_argument("--publish-minio", action="store_true")
@@ -172,6 +223,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=14)
     parser.add_argument("--max-steps", type=int)
+    parser.add_argument("--lifecycle-interval", type=int, default=50)
+    parser.add_argument("--max-cycles", type=int)
+    parser.add_argument("--target-stage", default="test")
     return parser.parse_args()
 
 
@@ -191,6 +245,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
         mode=args.mode,
         run_id=f"replay_lifecycle_{uuid4().hex}",
         output_dir=args.output_root / args.scenario_id,
+        cycles_requested=args.max_cycles or 0,
     )
     state.output_dir = state.output_dir / state.run_id
     state.output_dir.mkdir(parents=True, exist_ok=True)
@@ -202,6 +257,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     rows = load_replay_rows(args.scenario_id)
     events_path = state.output_dir / "events.jsonl"
     lots_path = state.output_dir / "lots.jsonl"
+    cycles_path = state.output_dir / "cycles.jsonl"
 
     current_lot: LotAccumulator | None = None
     with events_path.open("w", encoding="utf-8") as events_file, lots_path.open("w", encoding="utf-8") as lots_file:
@@ -210,8 +266,11 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 break
             lot_id = row.get("lot_id") or "unknown_lot"
             if current_lot is not None and current_lot.lot_id != lot_id:
-                if _finalize_lot(current_lot, args=args, state=state, lots_file=lots_file):
+                decision = _finalize_lot(current_lot, args=args, state=state, lots_file=lots_file)
+                if handle_lifecycle_decision(args, state, decision):
                     break
+                if args.mode == "progressive-train" and state.candidate_checkpoint:
+                    feature_checkpoint = Path(state.candidate_checkpoint)
                 if args.max_lots is not None and state.lots_processed >= args.max_lots:
                     break
             if current_lot is None or current_lot.lot_id != lot_id:
@@ -228,11 +287,15 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 visual_store=visual_store,
             )
             current_lot.add(event)
+            state.seen_events.append(event)
             state.events_processed += 1
             events_file.write(json.dumps(event.to_dict(), sort_keys=True) + "\n")
 
-        if current_lot is not None and not state.trigger_decision:
-            _finalize_lot(current_lot, args=args, state=state, lots_file=lots_file)
+        if current_lot is not None and should_finalize_last_lot(args, state):
+            decision = _finalize_lot(current_lot, args=args, state=state, lots_file=lots_file)
+            handle_lifecycle_decision(args, state, decision)
+            if args.mode == "progressive-train" and state.candidate_checkpoint:
+                feature_checkpoint = Path(state.candidate_checkpoint)
 
     if state.trigger_decision and state.trigger_decision.trigger_lifecycle and args.mode == "train-on-trigger":
         train_result = train_candidate_on_trigger(args, state.trigger_decision)
@@ -245,18 +308,38 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 f"s3://iqa-models/{state.trigger_decision.candidate_dataset_version}/checkpoint.pt",
             )
 
+    if state.cycles:
+        cycles_path.write_text(
+            "".join(json.dumps(cycle, sort_keys=True) + "\n" for cycle in state.cycles),
+            encoding="utf-8",
+        )
+
     summary = state.summary()
     (state.output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary
 
 
 def load_replay_rows(scenario_id: str) -> list[dict[str, str]]:
-    plan = REPLAY_PLANS[scenario_id]
+    plan = resolve_replay_plan(scenario_id)
     with plan.open(newline="", encoding="utf-8") as file:
         rows = [row for row in csv.DictReader(file) if row.get("scenario_id") == scenario_id]
     if not rows:
         raise ValueError(f"replay plan has no rows for scenario_id={scenario_id}: {plan}")
     return rows
+
+
+def resolve_replay_plan(scenario_id: str) -> Path:
+    if ACTIVE_REPLAY_SCENARIOS.exists():
+        with ACTIVE_REPLAY_SCENARIOS.open(newline="", encoding="utf-8") as file:
+            for row in csv.DictReader(file):
+                if row.get("scenario_id") == scenario_id and row.get("output_path"):
+                    configured = Path(row["output_path"])
+                    if configured.exists():
+                        return configured
+                    repo_relative = Path("data/metadata") / configured.name
+                    if repo_relative.exists():
+                        return repo_relative
+    return REPLAY_PLANS[scenario_id]
 
 
 def process_replay_event(
@@ -349,15 +432,16 @@ def oracle_verdict(row: dict[str, str]) -> str:
     return "conforme"
 
 
-def lifecycle_decision_for_lot(state: CycleState, lot: LotAccumulator) -> LifecycleDecision:
+def lifecycle_decision_for_lot(state: CycleState, lot: LotAccumulator, *, interval: int = 50) -> LifecycleDecision:
     state.total_conforming_validated_count += lot.conforming_validated_count
+    conforming_since_cycle = state.total_conforming_validated_count - state.last_cycle_conforming_validated_count
     signal = LifecycleSignal(
         scenario_id=state.scenario_id,
-        conforming_validated_count=state.total_conforming_validated_count,
+        conforming_validated_count=conforming_since_cycle,
         drift_confirmed=state.scenario_id == DRIFT_SCENARIO_ID,
         roi_fail_rate=lot.roi_fail_rate,
     )
-    return evaluate_lifecycle_signal(signal)
+    return evaluate_lifecycle_signal(signal, min_natural_conforming=interval)
 
 
 def _finalize_lot(
@@ -366,14 +450,283 @@ def _finalize_lot(
     args: argparse.Namespace,
     state: CycleState,
     lots_file: Any,
-) -> bool:
-    decision = lifecycle_decision_for_lot(state, lot)
+) -> LifecycleDecision:
+    decision = lifecycle_decision_for_lot(state, lot, interval=args.lifecycle_interval)
     state.lots_processed += 1
     lots_file.write(json.dumps(lot.to_dict(lifecycle_decision=decision), sort_keys=True) + "\n")
-    if decision.trigger_lifecycle:
-        state.trigger_decision = decision
+    return decision
+
+
+def should_finalize_last_lot(args: argparse.Namespace, state: CycleState) -> bool:
+    if state.trigger_decision is None:
         return True
-    return False
+    return args.mode in PROGRESSIVE_MODES and not reached_max_cycles(args, state)
+
+
+def handle_lifecycle_decision(args: argparse.Namespace, state: CycleState, decision: LifecycleDecision) -> bool:
+    if not decision.trigger_lifecycle:
+        return False
+    state.trigger_decision = decision
+    if args.mode not in PROGRESSIVE_MODES:
+        return True
+
+    cycle_number = len(state.cycles) + 1
+    cycle_result = build_progressive_cycle(args, state, decision, cycle_number)
+    state.cycles.append(cycle_result)
+    state.last_cycle_conforming_validated_count = state.total_conforming_validated_count
+    if cycle_result.get("promotion_status") == "promoted":
+        promoted = str(cycle_result["candidate_version"])
+        state.active_model_final = promoted
+        state.promotion_chain.append(promoted)
+        state.candidate_checkpoint = str(cycle_result.get("candidate_checkpoint") or "")
+        state.mlflow_run_id = str(cycle_result.get("mlflow_run_id") or "")
+        state.status = "trained" if args.mode == "progressive-train" else "validated"
+    elif args.mode == "progressive-train":
+        state.status = "rejected"
+    return reached_max_cycles(args, state)
+
+
+def reached_max_cycles(args: argparse.Namespace, state: CycleState) -> bool:
+    return args.max_cycles is not None and len(state.cycles) >= args.max_cycles
+
+
+def build_progressive_cycle(
+    args: argparse.Namespace,
+    state: CycleState,
+    decision: LifecycleDecision,
+    cycle_number: int,
+) -> dict[str, Any]:
+    candidate_version = f"rd_feature_ae_gated_natural_cycle_{cycle_number:03d}"
+    dataset_snapshot_id = f"feature_ae_natural_cycle_{cycle_number:03d}"
+    calibration_set_id = f"calibration_natural_cycle_{cycle_number:03d}"
+    cycle_dir = state.output_dir / "cycles" / f"cycle_{cycle_number:03d}"
+    cycle_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = write_seen_dataset_snapshot(
+        state.seen_events,
+        cycle_dir / f"{dataset_snapshot_id}.csv",
+        dataset_snapshot_id=dataset_snapshot_id,
+        scenario_id=state.scenario_id,
+    )
+    result: dict[str, Any] = {
+        "cycle_id": f"cycle_{cycle_number:03d}",
+        "candidate_version": candidate_version,
+        "dataset_snapshot_id": dataset_snapshot_id,
+        "dataset_snapshot_path": str(manifest_path),
+        "calibration_set_id": calibration_set_id,
+        "seen_events": len(state.seen_events),
+        "seen_conforming": sum(1 for event in state.seen_events if event.oracle_verdict == "conforme"),
+        "seen_defective": sum(1 for event in state.seen_events if event.oracle_verdict == "defective"),
+        "trigger_reason": decision.trigger_reason,
+        "registry_stage": args.target_stage,
+        "promotion_status": "simulated",
+        "gate_decision": "not_run",
+        "gate_reason": "decision_only",
+        "metrics": {},
+        "selected_metric": None,
+        "selected_metric_value": None,
+        "selected_epoch": None,
+        "selected_checkpoint": None,
+        "val_loss": None,
+    }
+    if args.mode == "progressive-train":
+        train_result = train_progressive_candidate(args, candidate_version, manifest_path, dataset_snapshot_id)
+        result["candidate_checkpoint"] = str(train_result.get("checkpoint") or "")
+        result["mlflow_run_id"] = str(train_result.get("run_id") or "")
+        result.update(metric_evidence_from_training_result(train_result))
+        if result["selected_metric"]:
+            result["promotion_status"] = "promoted"
+            result["gate_decision"] = "passed"
+            result["gate_reason"] = "business_metric_available"
+        else:
+            result["promotion_status"] = "rejected"
+            result["gate_decision"] = "rejected"
+            result["gate_reason"] = "missing_business_metric"
+        if args.publish_minio and result["candidate_checkpoint"] and result["promotion_status"] == "promoted":
+            upload_checkpoint_to_s3(
+                str(result["candidate_checkpoint"]),
+                f"s3://iqa-models/{candidate_version}/checkpoint.pt",
+            )
+    else:
+        result["candidate_checkpoint"] = None
+        result["mlflow_run_id"] = None
+    return result
+
+
+def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[str, Any]:
+    run_dir_value = train_result.get("run_dir")
+    checkpoint_value = train_result.get("checkpoint")
+    candidates: list[Path] = []
+    if run_dir_value:
+        run_dir = Path(str(run_dir_value))
+        candidates.extend([run_dir / "metric_eval_best.json", run_dir / "bootstrap_run" / "metric_eval_best.json"])
+    if checkpoint_value:
+        checkpoint_dir = Path(str(checkpoint_value)).parent
+        candidates.extend([checkpoint_dir / "metric_eval_best.json", checkpoint_dir / "bootstrap_run" / "metric_eval_best.json"])
+
+    best_path = next((path for path in candidates if path.is_file()), None)
+    best = json.loads(best_path.read_text(encoding="utf-8")) if best_path else {}
+    metrics = {
+        metric: float(record["value"])
+        for metric, record in best.items()
+        if isinstance(record, dict)
+        and record.get("value") is not None
+        and metric in {*FEATURE_AE_BUSINESS_METRIC_PRIORITY, "pixel_auroc"}
+    }
+    selected_metric = None
+    selected_record: dict[str, Any] | None = None
+    for metric in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
+        record = best.get(metric)
+        if isinstance(record, dict) and record.get("value") is not None:
+            selected_metric = metric
+            selected_record = record
+            break
+
+    val_loss = None
+    if selected_record and run_dir_value:
+        val_loss = _val_loss_for_epoch(Path(str(run_dir_value)) / "loss_history.csv", int(selected_record.get("epoch") or 0))
+
+    return {
+        "metrics": metrics,
+        "metric_eval_best_path": str(best_path) if best_path else None,
+        "selected_metric": selected_metric,
+        "selected_metric_value": float(selected_record["value"]) if selected_record else None,
+        "selected_epoch": int(selected_record.get("epoch") or 0) if selected_record else None,
+        "selected_checkpoint": str(selected_record.get("checkpoint") or "") if selected_record else None,
+        "val_loss": val_loss,
+    }
+
+
+def _val_loss_for_epoch(path: Path, epoch: int) -> float | None:
+    if not path.is_file() or epoch <= 0:
+        return None
+    with path.open(newline="", encoding="utf-8") as file:
+        for row in csv.DictReader(file):
+            if int(row.get("epoch") or 0) == epoch and row.get("val_loss"):
+                return float(row["val_loss"])
+    return None
+
+
+def _metric_sort_key(cycle: dict[str, Any]) -> tuple[int, float]:
+    metric = cycle.get("selected_metric")
+    if metric not in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
+        return (-1, float("-inf"))
+    return (
+        len(FEATURE_AE_BUSINESS_METRIC_PRIORITY) - FEATURE_AE_BUSINESS_METRIC_PRIORITY.index(str(metric)),
+        float(cycle.get("selected_metric_value") or float("-inf")),
+    )
+
+
+def _best_cycle(cycles: list[dict[str, Any]]) -> dict[str, Any] | None:
+    promoted = [cycle for cycle in cycles if cycle.get("promotion_status") == "promoted"]
+    return max(promoted, key=_metric_sort_key) if promoted else None
+
+
+def _best_cycle_id(cycles: list[dict[str, Any]]) -> str | None:
+    cycle = _best_cycle(cycles)
+    return str(cycle.get("cycle_id")) if cycle else None
+
+
+def _best_metric_name(cycles: list[dict[str, Any]]) -> str | None:
+    cycle = _best_cycle(cycles)
+    return str(cycle.get("selected_metric")) if cycle else None
+
+
+def _best_metric_value(cycles: list[dict[str, Any]]) -> float | None:
+    cycle = _best_cycle(cycles)
+    return float(cycle["selected_metric_value"]) if cycle and cycle.get("selected_metric_value") is not None else None
+
+
+def write_seen_dataset_snapshot(
+    events: list[CycleEvent],
+    output_path: Path,
+    *,
+    dataset_snapshot_id: str,
+    scenario_id: str,
+) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "image_id",
+        "image_ids",
+        "relative_path",
+        "relative_paths",
+        "event_id",
+        "source_class",
+        "split_set",
+        "label",
+        "is_defective",
+        "scenario_id",
+        "dataset_version",
+        "manifest_version",
+        "gt_mask_path",
+        "oracle_verdict",
+        "train_eligible",
+        "train_eligibility_source",
+        "quarantine_reason",
+    ]
+    with output_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for event in events:
+            if event.oracle_verdict != "conforme":
+                continue
+            image_id = Path(event.relative_path).stem
+            writer.writerow(
+                {
+                    "image_id": image_id,
+                    "image_ids": image_id,
+                    "relative_path": event.relative_path,
+                    "relative_paths": event.relative_path,
+                    "event_id": event.event_id,
+                    "source_class": event.source_class,
+                    "split_set": scenario_id,
+                    "label": "good",
+                    "is_defective": "False",
+                    "scenario_id": scenario_id,
+                    "dataset_version": dataset_snapshot_id,
+                    "manifest_version": f"{dataset_snapshot_id}_manifest_v001",
+                    "gt_mask_path": "",
+                    "oracle_verdict": "conforme",
+                    "train_eligible": "true",
+                    "train_eligibility_source": "oracle_gt_seen_lots",
+                    "quarantine_reason": "",
+                }
+            )
+    return output_path
+
+
+def train_progressive_candidate(
+    args: argparse.Namespace,
+    candidate_version: str,
+    manifest_path: Path,
+    dataset_snapshot_id: str,
+) -> dict[str, Any]:
+    run_dir = Path(".cache/iqa/models") / candidate_version
+    run_dir.mkdir(parents=True, exist_ok=True)
+    config = FeatureAETrainingConfig(
+        manifest_path=manifest_path,
+        image_root=args.image_root,
+        output_checkpoint=run_dir / "checkpoint.pt",
+        scenario_id=args.scenario_id,
+        dataset_version=dataset_snapshot_id,
+        manifest_version=f"{dataset_snapshot_id}_manifest_v001",
+        candidate_version=candidate_version,
+        roi_model_version=DEFAULT_ROI_MODEL_VERSION,
+        feature_ae_version=DEFAULT_FEATURE_AE_MODEL_VERSION,
+        run_name=f"{candidate_version}_{args.target_stage}",
+        device=args.device,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        max_steps=args.max_steps,
+        metric_eval_manifest_path=VALIDATION_MANIFEST,
+        gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
+        metric_eval_device=args.device,
+        metric_eval_every_epochs=1,
+        metric_eval_start_epoch=1,
+        metric_eval_calibrate_normal=True,
+        metric_eval_apply_score_region_to_map=True,
+        require_business_metric_for_early_stopping=True,
+    )
+    return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
 
 
 def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDecision) -> dict[str, Any]:
@@ -399,6 +752,7 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         epochs=args.epochs,
         max_steps=args.max_steps,
         metric_eval_manifest_path=VALIDATION_MANIFEST,
+        gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
         metric_eval_device=args.device,
         metric_eval_every_epochs=1,
         metric_eval_start_epoch=1,

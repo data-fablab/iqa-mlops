@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,9 +15,12 @@ def _args(tmp_path: Path, *, scenario_id: str, mode: str = "decision-only", max_
         scenario_id=scenario_id,
         image_root=tmp_path / "images",
         stage="test",
+        target_stage="test",
         mode=mode,
         max_events=max_events,
         max_lots=None,
+        max_cycles=None,
+        lifecycle_interval=50,
         publish_minio=False,
         wait_for_gpu=False,
         no_gpu_lock=True,
@@ -75,7 +79,23 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
 
     def fake_train(config, git_commit):
         train_calls.append(config)
-        return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001"}
+        run_dir = config.output_checkpoint.parent
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "metric_eval_best.json").write_text(
+            json.dumps(
+                {
+                    "image_ap": {"value": 0.91, "epoch": 1, "checkpoint": "checkpoint_best_image_ap.pt"},
+                    "pixel_aupimo_1e-5_1e-3": {
+                        "value": 0.42,
+                        "epoch": 1,
+                        "checkpoint": "checkpoint_best_pixel_aupimo_1e-5_1e-3.pt",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (run_dir / "loss_history.csv").write_text("epoch,train_loss,val_loss,lr\n1,0.2,0.3,0.001\n", encoding="utf-8")
+        return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001", "run_dir": str(run_dir)}
 
     monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train)
     return train_calls
@@ -87,15 +107,41 @@ def test_replay_lifecycle_cycle_selects_plan_by_scenario(tmp_path: Path, monkeyp
     _write_replay(natural, scenario_id=runner.NATURAL_SCENARIO_ID, rows=1)
     _write_replay(drift, scenario_id=runner.DRIFT_SCENARIO_ID, rows=1)
     monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: natural, runner.DRIFT_SCENARIO_ID: drift})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
 
     assert runner.load_replay_rows(runner.NATURAL_SCENARIO_ID)[0]["scenario_id"] == runner.NATURAL_SCENARIO_ID
     assert runner.load_replay_rows(runner.DRIFT_SCENARIO_ID)[0]["scenario_id"] == runner.DRIFT_SCENARIO_ID
+
+
+def test_natural_replay_active_plan_has_regular_defects() -> None:
+    rows = runner.load_replay_rows(runner.NATURAL_SCENARIO_ID)
+    defect_positions = [
+        index
+        for index, row in enumerate(rows, start=1)
+        if str(row.get("is_defective", "")).lower() == "true"
+    ]
+
+    assert rows[0]["dataset_version"] == "production_replay_natural_v002"
+    assert defect_positions[0] <= 60
+    assert len(defect_positions) == 26
+    assert max(b - a for a, b in zip(defect_positions, defect_positions[1:])) <= 35
+
+
+def test_validation_gt_masks_manifest_supports_pixel_metrics() -> None:
+    rows = list(csv.DictReader(runner.VALIDATION_GT_MASKS_MANIFEST.open(encoding="utf-8")))
+
+    assert len(rows) >= 30
+    assert {"image_id", "relative_path", "gt_mask_path"}.issubset(rows[0])
+    assert all(row["image_id"] for row in rows)
+    assert all(row["gt_mask_path"].startswith("../raw/hss-iad/") for row in rows)
+    assert all(row["gt_mask_path"].endswith("_mask.png") for row in rows)
 
 
 def test_decision_only_triggers_natural_without_training(tmp_path: Path, monkeypatch) -> None:
     plan = tmp_path / "natural.csv"
     _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
     monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
     train_calls = _mock_runtime(monkeypatch)
 
     summary = runner.run_cycle(_args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="decision-only"))
@@ -122,6 +168,7 @@ def test_train_on_trigger_trains_candidate_once(tmp_path: Path, monkeypatch) -> 
     plan = tmp_path / "natural.csv"
     _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
     monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
     train_calls = _mock_runtime(monkeypatch)
 
     summary = runner.run_cycle(_args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="train-on-trigger"))
@@ -133,10 +180,102 @@ def test_train_on_trigger_trains_candidate_once(tmp_path: Path, monkeypatch) -> 
     assert train_calls[0].dataset_version == "feature_ae_good_v002"
 
 
+def test_progressive_decision_records_multiple_cycles(tmp_path: Path, monkeypatch) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=120)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    train_calls = _mock_runtime(monkeypatch)
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-decision")
+    args.max_cycles = 2
+
+    summary = runner.run_cycle(args)
+
+    assert summary["cycles_completed"] == 2
+    assert summary["models_promoted"] == []
+    assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
+    assert train_calls == []
+    cycles = (Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(cycles) == 2
+    first_cycle = json.loads(cycles[0])
+    assert first_cycle["candidate_version"] == "rd_feature_ae_gated_natural_cycle_001"
+    assert first_cycle["promotion_status"] == "simulated"
+
+
+def test_progressive_train_promotes_multiple_test_models(tmp_path: Path, monkeypatch) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=120)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    train_calls = _mock_runtime(monkeypatch)
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    args.max_cycles = 2
+
+    summary = runner.run_cycle(args)
+
+    assert summary["status"] == "trained"
+    assert summary["cycles_completed"] == 2
+    assert summary["models_promoted"] == [
+        "rd_feature_ae_gated_natural_cycle_001",
+        "rd_feature_ae_gated_natural_cycle_002",
+    ]
+    assert summary["promotion_chain"] == [
+        runner.DEFAULT_FEATURE_AE_MODEL_VERSION,
+        "rd_feature_ae_gated_natural_cycle_001",
+        "rd_feature_ae_gated_natural_cycle_002",
+    ]
+    assert len(train_calls) == 2
+    assert train_calls[0].candidate_version == "rd_feature_ae_gated_natural_cycle_001"
+    assert train_calls[0].dataset_version == "feature_ae_natural_cycle_001"
+    assert train_calls[0].gt_masks_manifest == runner.VALIDATION_GT_MASKS_MANIFEST
+    snapshot = Path(train_calls[0].manifest_path)
+    assert snapshot.exists()
+    assert "oracle_gt_seen_lots" in snapshot.read_text(encoding="utf-8")
+    cycles = [json.loads(line) for line in (Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert cycles[0]["selected_metric"] == "pixel_aupimo_1e-5_1e-3"
+    assert cycles[0]["selected_metric_value"] == 0.42
+    assert cycles[0]["val_loss"] == 0.3
+    assert cycles[0]["gate_decision"] == "passed"
+    assert summary["metric_history"][0]["selected_metric"] == "pixel_aupimo_1e-5_1e-3"
+    assert summary["best_cycle"] == "cycle_001"
+    assert summary["rejected_candidates"] == []
+
+
+def test_progressive_train_rejects_candidate_without_business_metrics(tmp_path: Path, monkeypatch) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    _mock_runtime(monkeypatch)
+
+    def fake_train_without_metrics(config, git_commit):
+        run_dir = config.output_checkpoint.parent
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "metric_eval_best.json").unlink(missing_ok=True)
+        (run_dir / "loss_history.csv").write_text("epoch,train_loss,val_loss,lr\n1,0.1,0.01,0.001\n", encoding="utf-8")
+        return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001", "run_dir": str(run_dir)}
+
+    monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train_without_metrics)
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    args.max_cycles = 1
+
+    summary = runner.run_cycle(args)
+
+    cycle = json.loads((Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8"))
+    assert cycle["gate_decision"] == "rejected"
+    assert cycle["gate_reason"] == "missing_business_metric"
+    assert cycle["promotion_status"] == "rejected"
+    assert cycle["selected_metric"] is None
+    assert summary["models_promoted"] == []
+    assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
+    assert summary["rejected_candidates"] == ["rd_feature_ae_gated_natural_cycle_001"]
+
+
 def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) -> None:
     plan = tmp_path / "drift.csv"
     _write_replay(plan, scenario_id=runner.DRIFT_SCENARIO_ID, rows=1)
     monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.DRIFT_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
     _mock_runtime(monkeypatch)
 
     summary = runner.run_cycle(_args(tmp_path, scenario_id=runner.DRIFT_SCENARIO_ID, mode="decision-only"))
