@@ -13,6 +13,7 @@ from iqa.training.bootstrap import (
     BOOTSTRAP_MODEL_VERSION,
     materialize_bootstrap_checkpoint,
     select_bootstrap_champion,
+    sync_bootstrap_runtime_cache,
     update_bootstrap_manifest,
     upload_checkpoint_to_s3,
 )
@@ -76,6 +77,7 @@ def main() -> None:
 
     champion = select_bootstrap_champion(run_dir)
     canonical_checkpoint = materialize_bootstrap_checkpoint(champion, run_dir / "checkpoint.pt")
+    runtime_cache_checkpoint = sync_bootstrap_runtime_cache(canonical_checkpoint)
     if args.publish_minio:
         upload_checkpoint_to_s3(canonical_checkpoint, args.artifact_uri)
     manifest = update_bootstrap_manifest(
@@ -94,6 +96,7 @@ def main() -> None:
                 "manifest": str(args.manifest_output),
                 "model_version": BOOTSTRAP_MODEL_VERSION,
                 "published_minio": bool(args.publish_minio),
+                "runtime_cache_checkpoint": str(runtime_cache_checkpoint),
                 "selected_epoch": champion.selected_epoch,
                 "selected_metric": champion.selected_metric,
                 "selected_metric_value": champion.selected_metric_value,
