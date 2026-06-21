@@ -132,7 +132,12 @@ def iter_manifest_image_samples(manifest_path: str | Path) -> list[CastingImageS
         for row in csv.DictReader(file):
             image_ids = _split_pipe(row.get("image_ids") or row.get("image_id"))
             relative_paths = _split_pipe(row.get("relative_paths") or row.get("relative_path"))
-            gt_paths = _split_pipe(row.get("gt_mask_paths") or row.get("mask_paths") or row.get("mask_path"))
+            gt_paths = _split_pipe(
+                row.get("gt_mask_paths")
+                or row.get("gt_mask_path")
+                or row.get("mask_paths")
+                or row.get("mask_path")
+            )
             for index, relative_path in enumerate(relative_paths):
                 image_id = _resolve_indexed(image_ids, index) or Path(relative_path).stem
                 samples.append(

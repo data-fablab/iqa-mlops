@@ -65,6 +65,27 @@ def test_tiled_dataset_keeps_roi_and_gt_masks_separate(tmp_path: Path) -> None:
     assert item["gt_mask"].sum() > 0
 
 
+def test_manifest_parser_accepts_singular_gt_mask_path_for_progressive_eval(tmp_path: Path) -> None:
+    manifest = tmp_path / "evaluation_set.csv"
+    _write_manifest(
+        manifest,
+        [
+            {
+                "image_id": "img_defect",
+                "relative_path": "Casting_class1/test/defective/part.jpg",
+                "split_set": "progressive_eval",
+                "label": "defective",
+                "is_defective": "true",
+                "gt_mask_path": "Casting_class1/test/defective/part_mask.png",
+            }
+        ],
+    )
+
+    sample = iter_manifest_image_samples(manifest)[0]
+
+    assert sample.gt_mask_path == "Casting_class1/test/defective/part_mask.png"
+
+
 def test_train_normal_without_gt_uses_empty_defect_mask(tmp_path: Path) -> None:
     image_root = tmp_path / "images"
     image_path = image_root / "Casting_class1" / "train" / "good" / "part.jpg"
@@ -246,7 +267,17 @@ def test_metric_early_stopping_uses_business_metrics(tmp_path: Path, monkeypatch
 
 
 def _write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
-    fieldnames = ["image_ids", "relative_paths", "split_set", "label", "is_defective", "mask_path"]
+    fieldnames = [
+        "image_ids",
+        "image_id",
+        "relative_paths",
+        "relative_path",
+        "split_set",
+        "label",
+        "is_defective",
+        "mask_path",
+        "gt_mask_path",
+    ]
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
