@@ -20,7 +20,7 @@ CONTAINER_DAGS = {
     "iqa_ingestion.py": "iqa-run-ingestion",
     "iqa_replay.py": "iqa-run-replay",
     "iqa_monitoring.py": "iqa-run-monitoring",
-    "iqa_lifecycle.py": "iqa-run-train",
+    "iqa_lifecycle.py": "iqa-run-replay-lifecycle-cycle",
     "iqa_lifecycle_trigger.py": "iqa-run-lifecycle-decision",
 }
 EXPECTED_DAG_IDS = {
@@ -133,8 +133,26 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         raise AssertionError("compose does not define stable iqa_net network")
 
     lifecycle = dag_sources["iqa_lifecycle.py"]
+    for term in [
+        "run_application_lifecycle",
+        "--mode",
+        "progressive-train",
+        "--max-cycles",
+        "--lifecycle-interval",
+        "--promotion-min-delta",
+        "--publish-minio",
+        "--wait-for-gpu",
+        "max_active_runs=1",
+        "execution_timeout",
+        "retries=0",
+    ]:
+        if term not in lifecycle:
+            raise AssertionError(f"application lifecycle DAG misses: {term}")
+    for legacy_command in ["iqa-run-train", "iqa-run-eval", "iqa-run-gates", "iqa-run-promotion"]:
+        if legacy_command in lifecycle:
+            raise AssertionError(f"application lifecycle DAG still calls legacy command: {legacy_command}")
     if 'pool=GPU_POOL' not in lifecycle or 'gpu_lock=True' not in lifecycle:
-        raise AssertionError("lifecycle train/eval tasks are not protected by GPU pool and lock")
+        raise AssertionError("application lifecycle task is not protected by GPU pool and lock")
 
     docs = AIRFLOW_DOC.read_text(encoding="utf-8") + "\n" + DEPLOY_RUNBOOK.read_text(encoding="utf-8")
     for term in [
@@ -145,6 +163,9 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "airflow dags unpause iqa_lifecycle_trigger",
         "airflow dags trigger iqa_dvc_reproducibility",
         "airflow dags trigger iqa_lifecycle_trigger",
+        "iqa-run-replay-lifecycle-cycle",
+        "pipeline applicatif Feature-AE",
+        "Docker Compose orchestre les services longs",
         "/var/run/docker.sock",
         "Kubernetes reste Phase 4",
         "pas de training via CI",
@@ -157,7 +178,11 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "container_dags": sorted(name.removesuffix(".py") for name in CONTAINER_DAGS),
         "dvc_gate": "iqa_dvc_reproducibility",
         "gpu_pool": "iqa_gpu",
+        "lifecycle_command": "iqa-run-replay-lifecycle-cycle",
+        "lifecycle_mode": "progressive-train",
         "network": "iqa_net",
+        "promotion_policy": "candidate_must_improve_active_on_same_eval_set",
+        "registry_stage": "test",
         "server_commands": [
             "airflow dags list",
             "airflow dags list-import-errors",

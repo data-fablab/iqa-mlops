@@ -1,155 +1,66 @@
-"""IQA Feature-AE lifecycle DAG.
+"""IQA Feature-AE application lifecycle DAG.
 
-Pipeline stages:
-  lifecycle_decision → dataset → train → eval → gates → mlflow → promotion → reload
-
-Issue 11 completes the conversion: every stage now runs as a container via the
-operator factory, so the Airflow scheduler never imports ``iqa`` (ADR 0008 fully
-resolved -- no ``PythonOperator`` left). Runtime params (scenario_id, stages,
-manifest) are passed as templated argv -- no shell, no quoting.
-
-The container stdout is each task's XCom (references only, no payloads). The real
-runtime behind these boundaries (dataset materialisation, train/eval, MLflow
-registration, the Registry transition and the inference HTTP reload) is tracked
-by the runtime sister issues 18-22: this slice only converts the orchestration.
+Airflow orchestrates the application lifecycle as a containerised workflow. This
+is the pipeline applicatif Feature-AE de reference. The metier logic lives in
+``iqa-run-replay-lifecycle-cycle``: replay window, progressive training, fair
+active-vs-candidate evaluation, MLflow evidence and test-stage promotion. The
+scheduler imports only the lightweight DAG factory and never imports the IQA
+runtime (ADR 0008).
 """
 
 from __future__ import annotations
 
-from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
+from datetime import timedelta
+
+from iqa.dags import build_container_dag, make_container_task, ml_image
 
 GPU_POOL = "iqa_gpu"
 
 
 def _define() -> None:
-    op_lifecycle_decision = make_container_task(
-        task_id="lifecycle_decision",
-        image="{{ params.image }}",
-        command=[
-            "iqa-run-lifecycle-decision",
-            "--scenario-id", "{{ params.scenario_id }}",
-            "--conforming-validated-count", "{{ params.conforming_validated_count }}",
-            "--drift-confirmed", "{{ params.drift_confirmed }}",
-            "--roi-fail-rate", "{{ params.roi_fail_rate }}",
-        ],
-    )
-
-    op_dataset = make_container_task(
-        task_id="dataset",
-        image="{{ params.image }}",
-        command=[
-            "iqa-run-dataset",
-            "--manifest", "{{ params.manifest }}",
-            "--scenario-id", "{{ params.scenario_id }}",
-            "--candidate-version", "{{ params.candidate_version }}",
-        ],
-    )
-
-    op_train = make_container_task(
-        task_id="train",
+    make_container_task(
+        task_id="run_application_lifecycle",
         image="{{ params.ml_image }}",
-        command=[
-            "iqa-run-train",
-            "--scenario-id", "{{ params.scenario_id }}",
-            "--dataset-version", "{{ params.candidate_version }}",
-            # XCom from the dataset task: the s3:// URI of the materialised
-            # candidate (its last stdout line), so train resolves it by URI.
-            "--dataset-uri", "{{ ti.xcom_pull(task_ids='dataset') }}",
-            "--output-checkpoint", "{{ params.checkpoint }}",
-            "--wait-for-gpu",
-        ],
+        command=(
+            "iqa-run-replay-lifecycle-cycle "
+            "--scenario-id {{ params.scenario_id }} "
+            "--image-root {{ params.image_root }} "
+            "--mode {{ params.mode }} "
+            "--max-events {{ params.max_events }} "
+            "--lifecycle-interval {{ params.lifecycle_interval }} "
+            "--max-cycles {{ params.max_cycles }} "
+            "--epochs {{ params.epochs }} "
+            "--target-stage {{ params.target_stage }} "
+            "--promotion-min-delta {{ params.promotion_min_delta }} "
+            "--publish-minio "
+            "--wait-for-gpu"
+            "{% if params.require_mlflow_registry %} --require-mlflow-registry{% endif %}"
+        ),
         pool=GPU_POOL,
         gpu_lock=True,
+        retries=0,
+        execution_timeout=timedelta(hours=6),
     )
-
-    op_eval = make_container_task(
-        task_id="eval",
-        image="{{ params.ml_image }}",
-        command=[
-            "iqa-run-eval",
-            "--scenario-id", "{{ params.scenario_id }}",
-            "--checkpoint", "{{ params.checkpoint }}",
-            "--validation-set-id", "{{ params.validation_set_id }}",
-            "--wait-for-gpu",
-        ],
-        pool=GPU_POOL,
-        gpu_lock=True,
-    )
-
-    op_gates = make_container_task(
-        task_id="gates",
-        image="{{ params.image }}",
-        command=[
-            "iqa-run-gates",
-            "--scenario-id", "{{ params.scenario_id }}",
-            "--recall", "{{ params.candidate_recall }}",
-            "--ap", "{{ params.candidate_ap }}",
-            "--orange-rate", "{{ params.candidate_orange_rate }}",
-            "--latency-ms", "{{ params.candidate_latency_ms }}",
-            "--gates-config", "{{ params.gates_config }}",
-        ],
-    )
-
-    op_mlflow = make_container_task(
-        task_id="mlflow",
-        image="{{ params.ml_image }}",
-        command=[
-            "iqa-run-mlflow",
-            "--scenario-id", "{{ params.scenario_id }}",
-            "--run-id", "{{ params.run_id }}",
-            "--stage", "{{ params.registry_stage }}",
-        ],
-    )
-
-    op_promotion = make_container_task(
-        task_id="promotion",
-        image="{{ params.ml_image }}",
-        command=[
-            "iqa-run-promotion",
-            "--scenario-id", "{{ params.scenario_id }}",
-            "--source-stage", "{{ params.registry_stage }}",
-            "--target-stage", "{{ params.target_stage }}",
-        ],
-    )
-
-    op_reload = make_container_task(
-        task_id="reload",
-        image="{{ params.image }}",
-        command=[
-            "iqa-run-reload",
-            "--scenario-id", "{{ params.scenario_id }}",
-            "--target-stage", "{{ params.target_stage }}",
-        ],
-    )
-
-    # Linear chain: lifecycle_decision -> dataset -> train -> eval -> gates -> mlflow -> promotion -> reload
-    op_lifecycle_decision >> op_dataset >> op_train >> op_eval >> op_gates >> op_mlflow >> op_promotion >> op_reload
 
 
 dag = build_container_dag(
     dag_id="iqa_lifecycle",
     define=_define,
     schedule=None,
-    tags=["iqa", "lifecycle"],
+    tags=["iqa", "lifecycle", "feature-ae"],
+    max_active_runs=1,
+    catchup=False,
     params={
-        "regime": "natural",
         "scenario_id": "production_replay_natural",
-        "conforming_validated_count": 0,
-        "drift_confirmed": False,
-        "roi_fail_rate": 0.0,
+        "image_root": "/opt/iqa/iqa-mlops/data/raw/hss-iad",
+        "mode": "progressive-train",
+        "max_events": 260,
+        "lifecycle_interval": 50,
+        "max_cycles": 3,
+        "epochs": 10,
         "target_stage": "test",
-        "manifest": "data/model_datasets/feature_ae_good_v002.csv",
-        "candidate_version": "",
-        "checkpoint": "models/feature_ae/candidate.pt",
-        "validation_set_id": "validation_set_v001",
-        "candidate_recall": 1.0,
-        "candidate_ap": 0.0,
-        "candidate_orange_rate": 0.0,
-        "candidate_latency_ms": 0.0,
-        "gates_config": "configs/promotion_gates.yaml",
-        "run_id": "",
-        "registry_stage": "candidate",
-        "image": data_image(),
+        "promotion_min_delta": 0.0,
+        "require_mlflow_registry": False,
         "ml_image": ml_image(),
     },
 )

@@ -1,8 +1,14 @@
 # Airflow Container Runtime Evidence
 
-This document captures the Phase 3 evidence that Airflow orchestrates IQA tasks
-as containers, as required by ADR 0008. Airflow imports DAG files and the
-lightweight `iqa.dags` factory only; the metier runtime runs inside task images.
+This document captures the Phase 3 evidence that Airflow orchestrates IQA
+application workflows as containers, as required by ADR 0008. Docker Compose
+orchestre les services longs (API, inference, MinIO, PostgreSQL, MLflow,
+Grafana, Streamlit, gateway). Airflow orchestre les workflows metier
+applicatifs. Airflow imports DAG files and the lightweight `iqa.dags` factory
+only; the metier runtime runs inside task images.
+
+Docker Compose orchestre les services longs ; Airflow orchestre les workflows
+metier applicatifs.
 
 ## Runtime Boundary
 
@@ -12,8 +18,14 @@ lightweight `iqa.dags` factory only; the metier runtime runs inside task images.
   `IQA_AIRFLOW_BACKEND=docker`.
 - Task containers join `iqa_net` so they can resolve `postgres`, `minio`,
   `mlflow`, `iqa-api` and `iqa-inference`.
-- The GPU training/evaluation tasks use Airflow pool `iqa_gpu` and the shared
+- The Feature-AE application lifecycle runs `iqa-run-replay-lifecycle-cycle`
+  in the ML image. This is the pipeline applicatif Feature-AE de reference:
+  replay, progressive training, fair active-vs-candidate comparison, MLflow
+  evidence and test-stage promotion.
+- The application lifecycle task uses Airflow pool `iqa_gpu` and the shared
   `iqa_gpu_lock` volume.
+- `iqa_lifecycle` has `max_active_runs=1`, an explicit execution timeout and no
+  retry loop for long GPU training runs.
 - `iqa_dvc_reproducibility` remains a separate DVC gate. It does not run `dvc
   push` and does not trigger a model lifecycle.
 
@@ -43,7 +55,11 @@ Expected result:
   "backend": "docker",
   "dvc_gate": "iqa_dvc_reproducibility",
   "gpu_pool": "iqa_gpu",
+  "lifecycle_command": "iqa-run-replay-lifecycle-cycle",
+  "lifecycle_mode": "progressive-train",
   "network": "iqa_net",
+  "promotion_policy": "candidate_must_improve_active_on_same_eval_set",
+  "registry_stage": "test",
   "status": "validated"
 }
 ```
@@ -72,6 +88,10 @@ docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibili
 
 docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle_trigger \
   --conf '{"scenario_id":"production_replay_natural","conforming_validated_count":50,"drift_confirmed":false,"roi_fail_rate":0.0}'
+
+docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle
+docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle \
+  --conf '{"mode":"progressive-train","max_events":260,"lifecycle_interval":50,"max_cycles":3,"epochs":10,"target_stage":"test","promotion_min_delta":0.0}'
 ```
 
 Expected evidence:
@@ -83,6 +103,7 @@ Expected evidence:
 - the DAGs used for the proof are unpaused before triggering;
 - `iqa_dvc_reproducibility` can be triggered explicitly;
 - `iqa_lifecycle_trigger` forwards a data event to `iqa_lifecycle`;
+- `iqa_lifecycle` runs the application lifecycle task `run_application_lifecycle`;
 - there is pas de training via CI.
 
 ## What This Does Not Change

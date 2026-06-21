@@ -22,10 +22,14 @@ def test_dag_accepts_regime_and_scenario_id_params() -> None:
     if dag is None:
         pytest.skip("DAG dependencies not available")
 
-    assert "regime" in dag.params, "DAG should have 'regime' param"
     assert "scenario_id" in dag.params, "DAG should have 'scenario_id' param"
-    assert "conforming_validated_count" in dag.params
-    assert "drift_confirmed" in dag.params
+    assert "image_root" in dag.params
+    assert "mode" in dag.params
+    assert "max_events" in dag.params
+    assert "lifecycle_interval" in dag.params
+    assert "max_cycles" in dag.params
+    assert "epochs" in dag.params
+    assert "promotion_min_delta" in dag.params
     assert "target_stage" in dag.params
 
 
@@ -39,13 +43,17 @@ def test_dag_params_have_sensible_defaults() -> None:
     if dag is None:
         pytest.skip("DAG dependencies not available")
 
-    assert dag.params.get("regime") == "natural", "Default regime should be 'natural'"
     assert (
         dag.params.get("scenario_id") == "production_replay_natural"
     ), "Default scenario_id should be 'production_replay_natural'"
-    assert dag.params.get("conforming_validated_count") == 0
-    assert dag.params.get("drift_confirmed") is False
+    assert dag.params.get("mode") == "progressive-train"
+    assert dag.params.get("max_events") == 260
+    assert dag.params.get("lifecycle_interval") == 50
+    assert dag.params.get("max_cycles") == 3
+    assert dag.params.get("epochs") == 10
     assert dag.params.get("target_stage") == "test"
+    assert dag.params.get("promotion_min_delta") == 0.0
+    assert dag.params.get("require_mlflow_registry") is False
 
 
 def test_dag_can_run_with_drift_scenario() -> None:

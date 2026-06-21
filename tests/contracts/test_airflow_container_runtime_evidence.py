@@ -23,7 +23,11 @@ def test_airflow_container_runtime_static_checks_pass() -> None:
     assert evidence["backend"] == "docker"
     assert evidence["dvc_gate"] == "iqa_dvc_reproducibility"
     assert evidence["gpu_pool"] == "iqa_gpu"
+    assert evidence["lifecycle_command"] == "iqa-run-replay-lifecycle-cycle"
+    assert evidence["lifecycle_mode"] == "progressive-train"
     assert evidence["network"] == "iqa_net"
+    assert evidence["promotion_policy"] == "candidate_must_improve_active_on_same_eval_set"
+    assert evidence["registry_stage"] == "test"
     assert set(evidence["container_dags"]) >= {
         "iqa_ingestion",
         "iqa_replay",
@@ -105,6 +109,10 @@ def test_airflow_runtime_docs_cover_server_evidence_and_security_boundary() -> N
         "airflow dags unpause iqa_lifecycle_trigger",
         "airflow dags trigger iqa_dvc_reproducibility",
         "airflow dags trigger iqa_lifecycle_trigger",
+        "airflow dags trigger iqa_lifecycle",
+        "iqa-run-replay-lifecycle-cycle",
+        "pipeline applicatif Feature-AE",
+        "Docker Compose orchestre les services longs",
         "/var/run/docker.sock",
         "DockerOperator",
         "Kubernetes reste Phase 4",
