@@ -143,7 +143,7 @@ def test_lifecycle_dag_runs_on_ml_image_with_gpu_lock() -> None:
     assert '"{{ params.ml_image }}"' in source
     assert "gpu_lock=True" in source
     assert "repo_mount=True" in source
-    assert 'working_dir="{{ params.repo_root }}"' in source
+    assert 'working_dir="/opt/iqa/iqa-mlops"' in source
     assert '"repo_root": "/opt/iqa/iqa-mlops"' in source
     assert "pool=GPU_POOL" in source
     assert "max_active_runs=1" in source

@@ -39,7 +39,7 @@ def _define() -> None:
         pool=GPU_POOL,
         gpu_lock=True,
         repo_mount=True,
-        working_dir="{{ params.repo_root }}",
+        working_dir="/opt/iqa/iqa-mlops",
         retries=0,
         execution_timeout=timedelta(hours=6),
     )

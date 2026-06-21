@@ -160,7 +160,7 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
             raise AssertionError(f"application lifecycle DAG still calls legacy command: {legacy_command}")
     if 'pool=GPU_POOL' not in lifecycle or 'gpu_lock=True' not in lifecycle:
         raise AssertionError("application lifecycle task is not protected by GPU pool and lock")
-    for term in ['repo_mount=True', 'working_dir="{{ params.repo_root }}"', '"repo_root": "/opt/iqa/iqa-mlops"']:
+    for term in ['repo_mount=True', 'working_dir="/opt/iqa/iqa-mlops"', '"repo_root": "/opt/iqa/iqa-mlops"']:
         if term not in lifecycle:
             raise AssertionError(f"application lifecycle DAG misses workspace mount contract: {term}")
 
