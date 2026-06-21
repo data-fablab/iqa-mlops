@@ -102,6 +102,7 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "DEFAULT_TASK_ENV_PASSTHROUGH",
         "IQA_AIRFLOW_REPO_MOUNT_SOURCE",
         "repo_mount",
+        "DeviceRequest",
     ]:
         if term not in operators:
             raise AssertionError(f"operator factory misses: {term}")
@@ -193,6 +194,7 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "network": "iqa_net",
         "promotion_policy": "candidate_must_improve_active_on_same_eval_set",
         "registry_stage": "test",
+        "gpu_device_request": "all",
         "repo_mount": "/opt/iqa/iqa-mlops",
         "server_commands": [
             "airflow dags list",

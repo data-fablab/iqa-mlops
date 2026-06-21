@@ -214,6 +214,9 @@ def test_make_container_task_can_mount_repo_and_gpu_lock(monkeypatch: pytest.Mon
     assert mounts["/var/run/iqa-gpu"]["Source"] == "iqa_gpu_lock"
     assert mounts["/opt/iqa/iqa-mlops"]["Type"] == "bind"
     assert mounts["/opt/iqa/iqa-mlops"]["Source"] == "/opt/iqa/iqa-mlops"
+    assert op.device_requests
+    assert op.device_requests[0]["Count"] == -1
+    assert op.device_requests[0]["Capabilities"] == [["gpu"]]
     assert op.environment["IQA_REPO_ROOT"] == "/opt/iqa/iqa-mlops"
     assert op.working_dir == "/opt/iqa/iqa-mlops"
 

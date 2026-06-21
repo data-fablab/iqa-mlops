@@ -28,6 +28,7 @@ def test_airflow_container_runtime_static_checks_pass() -> None:
     assert evidence["network"] == "iqa_net"
     assert evidence["promotion_policy"] == "candidate_must_improve_active_on_same_eval_set"
     assert evidence["registry_stage"] == "test"
+    assert evidence["gpu_device_request"] == "all"
     assert set(evidence["container_dags"]) >= {
         "iqa_ingestion",
         "iqa_replay",

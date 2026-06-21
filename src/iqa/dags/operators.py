@@ -164,7 +164,7 @@ def _make_docker_task(
     **kwargs: Any,
 ) -> BaseOperator:
     from airflow.providers.docker.operators.docker import DockerOperator
-    from docker.types import Mount
+    from docker.types import DeviceRequest, Mount
 
     environment = _task_environment(env)
     params: dict[str, Any] = {
@@ -194,6 +194,9 @@ def _make_docker_task(
                 type="volume",
             )
         )
+        device_requests = list(kwargs.pop("device_requests", []) or [])
+        device_requests.append(DeviceRequest(count=-1, capabilities=[["gpu"]]))
+        params["device_requests"] = device_requests
     if repo_mount:
         mount_source = os.environ.get("IQA_AIRFLOW_REPO_MOUNT_SOURCE", DEFAULT_REPO_MOUNT_PATH)
         mount_target = os.environ.get("IQA_AIRFLOW_REPO_MOUNT_TARGET", DEFAULT_REPO_MOUNT_PATH)
