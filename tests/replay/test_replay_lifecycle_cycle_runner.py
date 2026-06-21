@@ -29,6 +29,8 @@ def _args(tmp_path: Path, *, scenario_id: str, mode: str = "decision-only", max_
         batch_size=1,
         epochs=1,
         max_steps=1,
+        promotion_min_delta=0.0,
+        require_mlflow_registry=False,
     )
 
 
@@ -98,6 +100,37 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
         return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001", "run_dir": str(run_dir)}
 
     monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train)
+    def fake_evaluate_progressive_model(args, model_version, checkpoint_path, evaluation_set_path, output_dir):
+        value = 0.2
+        if model_version.endswith("cycle_001"):
+            value = 0.42
+        elif model_version.endswith("cycle_002"):
+            value = 0.62
+        elif model_version.endswith("cycle_003"):
+            value = 0.82
+        return {
+            "model_version": model_version,
+            "checkpoint_path": str(checkpoint_path),
+            "metrics": {
+                "pixel_aupimo_1e-5_1e-3": value,
+                "pixel_ap": value / 3.5,
+            },
+            "metrics_path": str(output_dir / "metrics.json"),
+        }
+
+    monkeypatch.setattr(runner, "evaluate_progressive_model_on_set", fake_evaluate_progressive_model)
+    monkeypatch.setattr(
+        runner,
+        "register_run_to_model",
+        lambda **kwargs: {
+            "registered_model_name": f"feature_ae__{kwargs['scenario_id']}",
+            "version": "1",
+            "stage": kwargs["stage"],
+            "alias": kwargs["stage"],
+            "source_of_truth": "mlflow_registry",
+        },
+    )
+    monkeypatch.setattr(runner, "tag_mlflow_promotion_evidence", lambda cycle: None)
     return train_calls
 
 
@@ -234,11 +267,20 @@ def test_progressive_train_promotes_multiple_test_models(tmp_path: Path, monkeyp
     cycles = [json.loads(line) for line in (Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8").splitlines()]
     assert cycles[0]["selected_metric"] == "pixel_aupimo_1e-5_1e-3"
     assert cycles[0]["selected_metric_value"] == 0.42
+    assert cycles[0]["active_model_before"] == runner.DEFAULT_FEATURE_AE_MODEL_VERSION
+    assert cycles[0]["evaluation_seen_events"] == 50
+    assert cycles[0]["active_metric_value"] == 0.2
+    assert cycles[0]["candidate_metric_value"] == 0.42
+    assert round(cycles[0]["metric_delta"], 2) == 0.22
+    assert cycles[0]["promotion_policy"] == "candidate_must_improve_active_on_same_eval_set"
+    assert cycles[0]["registry_status"] == "registered"
     assert cycles[0]["val_loss"] == 0.3
     assert cycles[0]["gate_decision"] == "passed"
     assert summary["metric_history"][0]["selected_metric"] == "pixel_aupimo_1e-5_1e-3"
-    assert summary["best_cycle"] == "cycle_001"
+    assert summary["best_cycle"] == "cycle_002"
     assert summary["rejected_candidates"] == []
+    assert summary["promotion_policy"] == "candidate_must_improve_active_on_same_eval_set"
+    assert round(summary["comparison_history"][0]["metric_delta"], 2) == 0.22
 
 
 def test_progressive_train_rejects_candidate_without_business_metrics(tmp_path: Path, monkeypatch) -> None:
@@ -256,6 +298,14 @@ def test_progressive_train_rejects_candidate_without_business_metrics(tmp_path: 
         return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001", "run_dir": str(run_dir)}
 
     monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train_without_metrics)
+    monkeypatch.setattr(
+        runner,
+        "evaluate_progressive_model_on_set",
+        lambda *args, **kwargs: {
+            "metrics": {},
+            "metrics_path": str(kwargs["output_dir"] / "metrics.json"),
+        },
+    )
     args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
     args.max_cycles = 1
 
@@ -263,12 +313,88 @@ def test_progressive_train_rejects_candidate_without_business_metrics(tmp_path: 
 
     cycle = json.loads((Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8"))
     assert cycle["gate_decision"] == "rejected"
-    assert cycle["gate_reason"] == "missing_business_metric"
-    assert cycle["promotion_status"] == "rejected"
+    assert cycle["gate_reason"] == "rejected_missing_comparable_metric"
+    assert cycle["promotion_status"] == "rejected_missing_comparable_metric"
     assert cycle["selected_metric"] is None
     assert summary["models_promoted"] == []
     assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
     assert summary["rejected_candidates"] == ["rd_feature_ae_gated_natural_cycle_001"]
+
+
+def test_progressive_train_rejects_candidate_that_does_not_improve_active_on_same_eval_set(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    _mock_runtime(monkeypatch)
+    monkeypatch.setattr(
+        runner,
+        "evaluate_progressive_model_on_set",
+        lambda args, model_version, checkpoint_path, evaluation_set_path, output_dir: {
+            "model_version": model_version,
+            "checkpoint_path": str(checkpoint_path),
+            "metrics": {"pixel_aupimo_1e-5_1e-3": 0.9 if model_version == runner.DEFAULT_FEATURE_AE_MODEL_VERSION else 0.4},
+            "metrics_path": str(output_dir / "metrics.json"),
+        },
+    )
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    args.max_cycles = 1
+
+    summary = runner.run_cycle(args)
+
+    cycle = json.loads((Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8"))
+    assert cycle["active_metric_value"] == 0.9
+    assert cycle["candidate_metric_value"] == 0.4
+    assert cycle["metric_delta"] == -0.5
+    assert cycle["gate_decision"] == "rejected"
+    assert cycle["gate_reason"] == "candidate_did_not_improve_active_on_same_eval_set"
+    assert cycle["promotion_status"] == "rejected_no_improvement"
+    assert summary["models_promoted"] == []
+    assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
+
+
+def test_register_promoted_cycle_records_registry_failure_without_strict_mode(tmp_path: Path, monkeypatch) -> None:
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    state = runner.CycleState(
+        scenario_id=runner.NATURAL_SCENARIO_ID,
+        mode="progressive-train",
+        run_id="run",
+        output_dir=tmp_path,
+    )
+    monkeypatch.setattr(
+        runner,
+        "register_run_to_model",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("registry offline")),
+    )
+
+    result = runner.register_promoted_cycle(args, state, {"mlflow_run_id": "mlflow-001"})
+
+    assert result["registry_status"] == "failed"
+    assert result["registered_model_name"] == "feature_ae__production_replay_natural"
+
+
+def test_register_promoted_cycle_raises_registry_failure_in_strict_mode(tmp_path: Path, monkeypatch) -> None:
+    import pytest
+
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    args.require_mlflow_registry = True
+    state = runner.CycleState(
+        scenario_id=runner.NATURAL_SCENARIO_ID,
+        mode="progressive-train",
+        run_id="run",
+        output_dir=tmp_path,
+    )
+    monkeypatch.setattr(
+        runner,
+        "register_run_to_model",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("registry offline")),
+    )
+
+    with pytest.raises(RuntimeError, match="registry offline"):
+        runner.register_promoted_cycle(args, state, {"mlflow_run_id": "mlflow-001"})
 
 
 def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) -> None:

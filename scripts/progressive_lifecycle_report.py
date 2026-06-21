@@ -25,7 +25,7 @@ def render_report(run_dir: Path) -> str:
         raise FileNotFoundError(f"progressive lifecycle report requires {cycles_path}")
     cycles = [json.loads(line) for line in cycles_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     rows = [
-        ("cycle", "model", "selected_metric", "value", "gate", "stage", "mlflow"),
+        ("cycle", "active_before", "candidate", "eval_n", "active", "candidate_metric", "delta", "gate", "registry"),
         *[_row(cycle) for cycle in cycles],
     ]
     widths = [max(len(str(row[index])) for row in rows) for index in range(len(rows[0]))]
@@ -35,16 +35,25 @@ def render_report(run_dir: Path) -> str:
     )
 
 
-def _row(cycle: dict[str, Any]) -> tuple[str, str, str, str, str, str, str]:
-    value = cycle.get("selected_metric_value")
+def _row(cycle: dict[str, Any]) -> tuple[str, str, str, str, str, str, str, str, str]:
+    active_value = cycle.get("active_metric_value")
+    candidate_value = cycle.get("candidate_metric_value", cycle.get("selected_metric_value"))
+    delta = cycle.get("metric_delta")
+    registry = cycle.get("registry_alias") or cycle.get("registry_stage") or ""
+    if cycle.get("registered_model_version"):
+        registry = f"{registry}:v{cycle['registered_model_version']}"
+    elif cycle.get("registry_status") in {"failed", "not_registered", "skipped"}:
+        registry = str(cycle.get("registry_status") or "")
     return (
         str(cycle.get("cycle_id") or ""),
+        str(cycle.get("active_model_before") or ""),
         str(cycle.get("candidate_version") or ""),
-        str(cycle.get("selected_metric") or ""),
-        "" if value is None else f"{float(value):.6g}",
+        str(cycle.get("evaluation_seen_events") or cycle.get("seen_events") or ""),
+        "" if active_value is None else f"{float(active_value):.6g}",
+        "" if candidate_value is None else f"{float(candidate_value):.6g}",
+        "" if delta is None else f"{float(delta):+.6g}",
         str(cycle.get("gate_decision") or ""),
-        str(cycle.get("registry_stage") or ""),
-        str(cycle.get("mlflow_run_id") or ""),
+        registry,
     )
 
 

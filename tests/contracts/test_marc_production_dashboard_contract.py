@@ -32,6 +32,9 @@ def test_marc_dashboard_exposes_production_and_lineage_terms() -> None:
     for expected in [
         "Conformite des lots",
         "Lifecycle Feature-AE",
+        "Actif avant",
+        "Delta",
+        "Registry",
         "pixel_aupimo_1e-5_1e-3",
         "pixel_ap",
         "MLflow",
@@ -67,15 +70,20 @@ def test_marc_lifecycle_rows_surface_aupimo_and_promotion() -> None:
         [
             {
                 "cycle_id": "cycle_003",
+                "active_model_before": "rd_feature_ae_gated_natural_cycle_002",
                 "candidate_version": "rd_feature_ae_gated_natural_cycle_003",
-                "seen_events": 180,
+                "evaluation_seen_events": 180,
                 "seen_defective": 5,
                 "selected_metric": "pixel_aupimo_1e-5_1e-3",
                 "selected_metric_value": 0.0059,
+                "active_metric_value": 0.004,
+                "candidate_metric_value": 0.0059,
+                "metric_delta": 0.0019,
                 "metrics": {"pixel_aupimo_1e-5_1e-3": 0.0059, "pixel_ap": 0.004},
                 "gate_decision": "passed",
                 "promotion_status": "promoted",
                 "registry_stage": "test",
+                "registry_status": "registered",
                 "mlflow_run_id": "abc123",
             }
         ]
@@ -83,5 +91,10 @@ def test_marc_lifecycle_rows_surface_aupimo_and_promotion() -> None:
 
     assert rows[0]["pixel_aupimo_1e-5_1e-3"] == 0.0059
     assert rows[0]["pixel_ap"] == 0.004
+    assert rows[0]["actif_avant"] == "rd_feature_ae_gated_natural_cycle_002"
+    assert rows[0]["active_metric_value"] == 0.004
+    assert rows[0]["candidate_metric_value"] == 0.0059
+    assert rows[0]["metric_delta"] == 0.0019
+    assert rows[0]["registry"] == "registered"
     assert rows[0]["promotion"] == "promoted"
     assert rows[0]["mlflow_run_id"] == "abc123"

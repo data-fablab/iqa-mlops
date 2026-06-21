@@ -172,6 +172,8 @@ def register_run_to_model(
         "registered_model_name": model_name,
         "version": version_str,
         "stage": stage,
+        "alias": stage,
+        "source_of_truth": "mlflow_registry",
     }
 
 

@@ -66,11 +66,15 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
         rows.append(
             {
                 "cycle_id": cycle.get("cycle_id"),
+                "actif_avant": cycle.get("active_model_before"),
                 "modele": cycle.get("candidate_version"),
-                "vus": cycle.get("seen_events"),
+                "vus": cycle.get("evaluation_seen_events") or cycle.get("seen_events"),
                 "defauts_vus": cycle.get("seen_defective"),
                 "selected_metric": cycle.get("selected_metric"),
                 "selected_value": cycle.get("selected_metric_value"),
+                "active_metric_value": cycle.get("active_metric_value"),
+                "candidate_metric_value": cycle.get("candidate_metric_value"),
+                "metric_delta": cycle.get("metric_delta"),
                 "pixel_aupimo_1e-5_1e-3": metrics.get("pixel_aupimo_1e-5_1e-3"),
                 "pixel_ap": metrics.get("pixel_ap"),
                 "image_ap": metrics.get("image_ap"),
@@ -78,6 +82,7 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "gate": cycle.get("gate_decision"),
                 "promotion": cycle.get("promotion_status"),
                 "stage": cycle.get("registry_stage"),
+                "registry": cycle.get("registry_status"),
                 "mlflow_run_id": cycle.get("mlflow_run_id"),
                 "checkpoint": cycle.get("candidate_checkpoint"),
                 "dataset_snapshot_id": cycle.get("dataset_snapshot_id"),
@@ -98,7 +103,8 @@ def production_alerts(lots: list[dict[str, Any]], cycles: list[dict[str, Any]]) 
         if float(lot.get("roi_fail_rate") or 0) > 0:
             alerts.append(f"{lot['lot_id']} a un ROI fail rate de {lot['roi_fail_rate']} %.")
     for cycle in cycles:
-        if cycle.get("promotion_status") == "rejected" or cycle.get("gate_decision") == "rejected":
+        promotion_status = str(cycle.get("promotion_status") or "")
+        if promotion_status.startswith("rejected") or cycle.get("gate_decision") == "rejected":
             alerts.append(f"{cycle.get('candidate_version')} rejete par le gate modele.")
     return alerts
 
