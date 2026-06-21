@@ -86,6 +86,34 @@ def test_manifest_parser_accepts_singular_gt_mask_path_for_progressive_eval(tmp_
     assert sample.gt_mask_path == "Casting_class1/test/defective/part_mask.png"
 
 
+def test_tiled_dataset_resolves_progressive_eval_gt_mask_from_hss_iad_path(tmp_path: Path) -> None:
+    image_root = tmp_path / "data" / "raw" / "hss-iad"
+    image_path = image_root / "Casting_class1" / "test" / "defective" / "part.jpg"
+    mask_path = image_root / "Casting_class1" / "test" / "defective" / "part_mask.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 32), (128, 128, 128)).save(image_path)
+    _save_mask(mask_path, (32, 32), (8, 8, 16, 16))
+    manifest = tmp_path / ".cache" / "iqa" / "replay_lifecycle" / "run" / "evaluation_set.csv"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    _write_manifest(
+        manifest,
+        [
+            {
+                "image_id": "part",
+                "relative_path": "Casting_class1/test/defective/part.jpg",
+                "split_set": "progressive_eval",
+                "label": "defective",
+                "is_defective": "true",
+                "gt_mask_path": "../raw/hss-iad/Casting_class1/test/defective/part_mask.png",
+            }
+        ],
+    )
+
+    item = TiledFeatureAEDataset(manifest, image_root, tile_size=32, context_size=64, tile_stride=32)[0]
+
+    assert item["gt_mask"].sum() > 0
+
+
 def test_train_normal_without_gt_uses_empty_defect_mask(tmp_path: Path) -> None:
     image_root = tmp_path / "images"
     image_path = image_root / "Casting_class1" / "train" / "good" / "part.jpg"

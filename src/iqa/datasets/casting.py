@@ -312,7 +312,7 @@ class TiledFeatureAEDataset(Dataset):
         roi_mask = self._load_roi_mask(sample, record.image_size)
         gt_path = self.gt_masks.get(sample.image_id) or self.gt_masks.get(sample.relative_path)
         if gt_path is None and sample.gt_mask_path:
-            gt_path = self.image_root / sample.gt_mask_path
+            gt_path = _resolve_mask_path(sample.gt_mask_path, image_root=self.image_root, manifest_path=self.manifest_path)
         gt_mask = (
             load_mask_tensor(gt_path, size=record.image_size)
             if gt_path
@@ -346,6 +346,28 @@ def _is_train_normal(sample: CastingImageSample, *, reject_validation: bool) -> 
     if reject_validation and _is_excluded_feature_ae_train_split(split):
         return False
     return not sample.is_defective and label in {"good", "normal", "conforme"}
+
+
+def _resolve_mask_path(mask_path: str, *, image_root: Path, manifest_path: Path) -> Path:
+    path = Path(mask_path)
+    if path.is_absolute():
+        return path
+
+    candidates = [
+        image_root / path,
+        manifest_path.parent / path,
+        Path.cwd() / path,
+    ]
+    parts = path.parts
+    if "hss-iad" in parts:
+        hss_index = parts.index("hss-iad")
+        suffix = Path(*parts[hss_index + 1 :])
+        candidates.append(image_root / suffix)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 def _is_excluded_feature_ae_train_split(split: str) -> bool:
