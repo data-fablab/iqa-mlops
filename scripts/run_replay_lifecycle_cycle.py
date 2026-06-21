@@ -72,8 +72,11 @@ class CycleEvent:
     threshold_source: str
     roi_mask_path: str
     roi_mask_uri: str | None
+    roi_probability_path: str
     heatmap_path: str
     heatmap_uri: str | None
+    active_model_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION
+    score_contract_version: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -285,6 +288,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 output_dir=state.output_dir,
                 device=args.device,
                 visual_store=visual_store,
+                active_model_version=state.active_model_final,
             )
             current_lot.add(event)
             state.seen_events.append(event)
@@ -352,6 +356,7 @@ def process_replay_event(
     output_dir: Path,
     device: str,
     visual_store: ObjectStore | None = None,
+    active_model_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION,
 ) -> CycleEvent:
     relative_path = first_csv_value(row.get("relative_paths") or row.get("relative_path") or "")
     image_path = image_root / relative_path
@@ -361,6 +366,7 @@ def process_replay_event(
     lot_id = row.get("lot_id") or "unknown_lot"
     scenario_id = row.get("scenario_id") or ""
     mask_path = output_dir / "roi_masks" / f"{piece_event_id}_{image_id}_roi.png"
+    probability_path = output_dir / "roi_masks" / f"{piece_event_id}_{image_id}_roi_prob.png"
     heatmap_path = output_dir / "heatmaps" / f"{piece_event_id}_{image_id}_heatmap.png"
     context = VisualArtifactContext(
         scenario_id=scenario_id,
@@ -368,13 +374,20 @@ def process_replay_event(
         piece_event_id=piece_event_id,
         image_id=image_id,
     )
-    roi = predict_roi_image(image_path, roi_checkpoint, device=device, output_mask=mask_path)
+    roi = predict_roi_image(
+        image_path,
+        roi_checkpoint,
+        device=device,
+        output_mask=mask_path,
+        output_probability_map=probability_path,
+    )
     roi_mask_uri = publish_roi_mask(mask_path, context, store=visual_store) if mask_path.exists() else None
     feature = predict_feature_ae_image(
         image_path,
         feature_checkpoint,
         device=device,
         roi_mask_path=mask_path,
+        roi_probability_path=probability_path,
         heatmap_output_path=heatmap_path,
         threshold_orange=float(decision_thresholds["threshold_orange"]),
         threshold_red=float(decision_thresholds["threshold_red"]),
@@ -400,8 +413,11 @@ def process_replay_event(
         threshold_source=feature.threshold_source,
         roi_mask_path=str(mask_path),
         roi_mask_uri=roi_mask_uri,
+        roi_probability_path=str(probability_path),
         heatmap_path=str(heatmap_path),
         heatmap_uri=heatmap_uri,
+        active_model_version=active_model_version,
+        score_contract_version=getattr(feature, "score_contract_version", "feature_ae_champion_v001"),
     )
 
 
@@ -722,8 +738,9 @@ def train_progressive_candidate(
         metric_eval_device=args.device,
         metric_eval_every_epochs=1,
         metric_eval_start_epoch=1,
-        metric_eval_calibrate_normal=True,
-        metric_eval_apply_score_region_to_map=True,
+        metric_eval_calibrate_normal=False,
+        metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
+        metric_eval_apply_score_region_to_map=False,
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
@@ -756,8 +773,9 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         metric_eval_device=args.device,
         metric_eval_every_epochs=1,
         metric_eval_start_epoch=1,
-        metric_eval_calibrate_normal=True,
-        metric_eval_apply_score_region_to_map=True,
+        metric_eval_calibrate_normal=False,
+        metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
+        metric_eval_apply_score_region_to_map=False,
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())

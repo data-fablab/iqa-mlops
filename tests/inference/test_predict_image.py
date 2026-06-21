@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import torch
 from PIL import Image
 
 from iqa.inference import FeatureAEPrediction, predict_feature_ae_image
-from iqa.inference.feature_ae import save_feature_ae_heatmap_overlay
+from iqa.inference.feature_ae import normalize_feature_ae_display_map, save_feature_ae_heatmap_overlay
+from iqa.models.feature_ae import (
+    apply_champion_roi,
+    fuse_numpy_layer_maps,
+    score_numpy_map_topk,
+)
 
 
 def _predict(image_path: Path, checkpoint_path: Path) -> FeatureAEPrediction:
@@ -94,6 +100,7 @@ class TestPredictImage:
         assert "roi_status" in result_dict
         assert "heatmap_uri" in result_dict
         assert "latency_ms" in result_dict
+        assert result_dict["score_contract_version"] == "feature_ae_champion_v001"
 
     def test_predict_image_latency_ms_is_positive(
         self, sample_image: Path, synthetic_feature_ae_checkpoint: Path
@@ -117,22 +124,85 @@ def test_save_feature_ae_heatmap_overlay_writes_png(tmp_path: Path) -> None:
         assert image.size == (16, 16)
 
 
-def test_save_feature_ae_heatmap_overlay_uses_decision_thresholds(tmp_path: Path) -> None:
+def test_save_feature_ae_heatmap_overlay_uses_roi_percentile_display(tmp_path: Path) -> None:
     image_path = tmp_path / "piece.jpg"
     heatmap_path = tmp_path / "heatmap.png"
     Image.new("RGB", (16, 16), color=(120, 120, 120)).save(image_path)
 
+    score_map = torch.full((8, 8), 0.10)
+    score_map[4, 4] = 10.0
     save_feature_ae_heatmap_overlay(
         image_path,
-        torch.ones(8, 8),
+        score_map,
         heatmap_path,
         threshold_orange=100.0,
         threshold_red=200.0,
     )
 
     with Image.open(heatmap_path) as image:
-        pixel = image.convert("RGB").getpixel((8, 8))
-    assert pixel[0] > 120
-    assert pixel[0] < 170
-    assert pixel[1] < 120
-    assert pixel[2] < 120
+        rgb = image.convert("RGB")
+        hot_pixel = rgb.getpixel((8, 8))
+        background_pixel = rgb.getpixel((1, 1))
+    assert hot_pixel[0] > 170
+    assert hot_pixel[1] > 120
+    assert hot_pixel[2] < 80
+    assert background_pixel == (120, 120, 120)
+
+
+def test_normalize_feature_ae_display_map_applies_roi_and_display_threshold() -> None:
+    score_map = torch.tensor(
+        [
+            [0.1, 0.1, 9.0],
+            [0.1, 8.0, 0.1],
+            [0.1, 0.1, 0.1],
+        ]
+    ).numpy()
+    roi_mask = torch.tensor(
+        [
+            [1, 1, 0],
+            [1, 1, 1],
+            [1, 1, 1],
+        ],
+        dtype=torch.bool,
+    ).numpy()
+
+    display = normalize_feature_ae_display_map(
+        score_map,
+        roi_mask=roi_mask,
+        low_percentile=85.0,
+        high_percentile=99.8,
+        gamma=1.4,
+        display_threshold=0.60,
+    )
+
+    assert display[0, 2] == 0.0
+    assert display[1, 1] > 0.60
+    assert display[0, 0] == 0.0
+
+
+def test_champion_feature_map_fusion_uses_layer_weights() -> None:
+    fused = fuse_numpy_layer_maps(
+        {
+            "layer2": torch.ones(2, 2).numpy(),
+            "layer3": (torch.ones(2, 2) * 10).numpy(),
+        },
+        layer_weights={"layer2": 0.65, "layer3": 0.35},
+    )
+
+    assert fused[0, 0] == pytest.approx(4.15)
+
+
+def test_champion_roi_soft_map_weights_scores() -> None:
+    score_map = torch.tensor([[10.0, 10.0], [10.0, 10.0]]).numpy()
+    roi_probability = torch.tensor([[1.0, 0.5], [0.0, 0.25]]).numpy()
+
+    weighted = apply_champion_roi(score_map, roi_probability=roi_probability, roi_mode="soft_map")
+    score = score_numpy_map_topk(
+        weighted,
+        roi_probability=roi_probability,
+        score_image="topk_mean",
+        topk_fraction=1.0,
+    )
+
+    assert weighted.tolist() == [[10.0, 5.0], [0.0, 2.5]]
+    assert score == pytest.approx((10.0 + 5.0 + 2.5) / 3.0)

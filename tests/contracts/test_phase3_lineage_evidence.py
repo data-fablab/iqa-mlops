@@ -109,7 +109,7 @@ def test_lineage_summary_builds_complete_evidence(tmp_path: Path) -> None:
     assert summary["lot_ids"] == ["lot-001"]
     assert summary["model_artifact_uri"] == "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt"
     assert summary["model_sha256"]
-    assert summary["preprocessing_contract_version"] == "feature_ae_preprocessing_v001"
+    assert summary["preprocessing_contract_version"] == "feature_ae_champion_v001"
     assert summary["decision_thresholds"]["calibration_set_id"] == "calibration_set_v001"
     assert summary["threshold_sources"] == ["manifest:calibration_good_quantiles"]
     assert set(summary["dvc"]["stages"]) >= {"inventory", "piece_events", "replay", "validation", "model_dataset"}

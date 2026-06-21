@@ -21,6 +21,7 @@ from iqa.training.feature_ae_contracts import (
 
 BOOTSTRAP_MODEL_VERSION = "rd_feature_ae_gated_v001_bootstrap"
 BOOTSTRAP_ARTIFACT_URI = f"s3://iqa-models/{BOOTSTRAP_MODEL_VERSION}/checkpoint.pt"
+BOOTSTRAP_RUNTIME_CACHE_CHECKPOINT = Path(".cache/iqa/models") / BOOTSTRAP_MODEL_VERSION / "checkpoint.pt"
 BUSINESS_METRIC_PRIORITY = FEATURE_AE_BUSINESS_METRIC_PRIORITY
 
 
@@ -97,6 +98,24 @@ def materialize_bootstrap_checkpoint(champion: BootstrapChampion, output_checkpo
     return destination
 
 
+def sync_bootstrap_runtime_cache(
+    source_checkpoint: str | Path,
+    runtime_checkpoint: str | Path = BOOTSTRAP_RUNTIME_CACHE_CHECKPOINT,
+) -> Path:
+    """Keep the model resolver cache aligned with the freshly selected bootstrap champion."""
+    source = Path(source_checkpoint)
+    destination = Path(runtime_checkpoint)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    source_sha256 = sha256_file(source)
+    copied_sha256 = sha256_file(destination)
+    if copied_sha256 != source_sha256:
+        raise ValueError(
+            f"Runtime bootstrap checkpoint checksum mismatch: expected {source_sha256}, got {copied_sha256}."
+        )
+    return destination
+
+
 def update_bootstrap_manifest(
     manifest_path: str | Path,
     champion: BootstrapChampion,
@@ -166,10 +185,12 @@ def _build_s3_client() -> Any:
 __all__ = [
     "BOOTSTRAP_ARTIFACT_URI",
     "BOOTSTRAP_MODEL_VERSION",
+    "BOOTSTRAP_RUNTIME_CACHE_CHECKPOINT",
     "BUSINESS_METRIC_PRIORITY",
     "BootstrapChampion",
     "materialize_bootstrap_checkpoint",
     "select_bootstrap_champion",
+    "sync_bootstrap_runtime_cache",
     "update_bootstrap_manifest",
     "upload_checkpoint_to_s3",
 ]

@@ -7,13 +7,16 @@ from typing import Any
 
 from iqa.datasets import FEATURE_AE_CONTEXT_SIZE, FEATURE_AE_TILE_SIZE
 
-FEATURE_AE_PREPROCESSING_CONTRACT_VERSION = "feature_ae_preprocessing_v001"
+FEATURE_AE_PREPROCESSING_CONTRACT_VERSION = "feature_ae_champion_v001"
 FEATURE_AE_BUSINESS_METRIC_PRIORITY = (
     "pixel_aupimo_1e-5_1e-3",
     "pixel_ap",
     "image_ap",
     "image_auroc",
 )
+FEATURE_AE_CHAMPION_LAYER_WEIGHTS = {"layer2": 0.65, "layer3": 0.35}
+FEATURE_AE_CHAMPION_TEACHER_WEIGHTS = "IMAGENET1K_V1"
+FEATURE_AE_CHAMPION_ROI_MODE = "soft_map"
 
 
 @dataclass(frozen=True)
@@ -22,10 +25,13 @@ class FeatureAEPreprocessingContract:
     preprocessing_mode: str = "tiled_context"
     image_size: int = FEATURE_AE_TILE_SIZE
     context_size: int = FEATURE_AE_CONTEXT_SIZE
-    tile_stride: int = FEATURE_AE_TILE_SIZE // 2
+    tile_stride: int = FEATURE_AE_TILE_SIZE
     normalization: str = "imagenet"
     tile_train_sampling: str = "all"
-    roi_threshold: float = 0.30
+    teacher_weights: str = FEATURE_AE_CHAMPION_TEACHER_WEIGHTS
+    layer_weights: dict[str, float] | None = None
+    roi_mode: str = FEATURE_AE_CHAMPION_ROI_MODE
+    roi_threshold: float = 0.50
     min_roi_ratio: float = 0.03
     score_region: str = "functional_surface_prediction"
     score_smoothing: str = "median3"
@@ -34,7 +40,9 @@ class FeatureAEPreprocessingContract:
     augmentation_profile: str = "none"
 
 
-CANONICAL_FEATURE_AE_PREPROCESSING = FeatureAEPreprocessingContract()
+CANONICAL_FEATURE_AE_PREPROCESSING = FeatureAEPreprocessingContract(
+    layer_weights=FEATURE_AE_CHAMPION_LAYER_WEIGHTS.copy()
+)
 
 
 def canonical_feature_ae_preprocessing_dict() -> dict[str, Any]:

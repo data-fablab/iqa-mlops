@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, random_split
 
 from iqa.datasets import TiledFeatureAEDataset
 from iqa.models.feature_ae import (
+    CHAMPION_FEATURE_AE_CONTRACT,
     DEFAULT_FEATURE_LAYERS,
     FEATURE_AE_MODEL_TYPE,
     ReverseDistillationGatedDualContextResNet18,
@@ -56,7 +57,7 @@ class FeatureAETrainingConfig:
     weight_decay: float = 1e-4
     max_steps: int | None = None
     device: str = "cpu"
-    pretrained_teacher: bool = False
+    pretrained_teacher: bool = True
     loss: str = "l2_cosine"
     cosine_weight: float = 0.5
     layer_loss_weights: dict[str, float] | None = None
@@ -247,6 +248,8 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     device=config.metric_eval_device or config.device,
                     layers=layers,
                     pretrained_teacher=config.pretrained_teacher,
+                    layer_weights=config.metric_eval_layer_weights
+                    or CHAMPION_FEATURE_AE_CONTRACT.normalized_layer_weights(),
                     calibrate_normal=config.metric_eval_calibrate_normal,
                     calibration_mode=config.metric_eval_calibration_mode,
                     calibration_stat=config.metric_eval_calibration_stat,

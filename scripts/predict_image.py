@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold-orange", type=float, default=0.02)
     parser.add_argument("--threshold-red", type=float, default=0.05)
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--pretrained-teacher", action="store_true")
+    parser.add_argument("--no-pretrained-teacher", action="store_true")
     return parser.parse_args()
 
 
@@ -34,7 +34,7 @@ def main() -> None:
         threshold_orange=args.threshold_orange,
         threshold_red=args.threshold_red,
         device=args.device,
-        pretrained_teacher=args.pretrained_teacher,
+        pretrained_teacher=not args.no_pretrained_teacher,
     )
     print(json.dumps(prediction.to_dict(), indent=2, sort_keys=True))
 

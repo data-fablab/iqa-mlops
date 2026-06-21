@@ -12,6 +12,7 @@ from iqa.training.bootstrap import (
     BOOTSTRAP_ARTIFACT_URI,
     materialize_bootstrap_checkpoint,
     select_bootstrap_champion,
+    sync_bootstrap_runtime_cache,
     update_bootstrap_manifest,
     upload_checkpoint_to_s3,
 )
@@ -102,6 +103,17 @@ def test_materialize_and_update_bootstrap_manifest(tmp_path: Path) -> None:
     assert payload["validation_set_id"] == "validation_set_v001"
     assert payload["preprocessing_contract_version"] == FEATURE_AE_PREPROCESSING_CONTRACT_VERSION
     assert payload["preprocessing_contract"]["image_size"] == 384
+
+
+def test_sync_bootstrap_runtime_cache_copies_selected_checkpoint(tmp_path: Path) -> None:
+    source = _checkpoint(tmp_path / "run" / "checkpoint.pt", b"champion")
+    runtime = tmp_path / ".cache" / "iqa" / "models" / "rd_feature_ae_gated_v001_bootstrap" / "checkpoint.pt"
+
+    copied = sync_bootstrap_runtime_cache(source, runtime)
+
+    assert copied == runtime
+    assert copied.read_bytes() == b"champion"
+    assert sha256_file(copied) == sha256_file(source)
 
 
 def test_upload_checkpoint_to_s3_uses_manifest_uri(tmp_path: Path) -> None:

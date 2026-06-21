@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--pretrained-teacher", action="store_true")
+    parser.add_argument("--no-pretrained-teacher", action="store_true")
     parser.add_argument("--loss", choices=["l2_cosine"], default="l2_cosine")
     parser.add_argument("--cosine-weight", type=float, default=0.5)
     parser.add_argument("--layers", nargs="+", default=["layer2", "layer3"])
@@ -116,7 +116,7 @@ def main() -> None:
             weight_decay=args.weight_decay,
             max_steps=args.max_steps,
             device=args.device,
-            pretrained_teacher=args.pretrained_teacher,
+            pretrained_teacher=not args.no_pretrained_teacher,
             loss=args.loss,
             cosine_weight=args.cosine_weight,
             layer_loss_weights=parse_layer_loss_weights(args.layer_loss_weights),

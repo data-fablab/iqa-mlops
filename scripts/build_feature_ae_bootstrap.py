@@ -13,6 +13,7 @@ from iqa.training.bootstrap import (
     BOOTSTRAP_MODEL_VERSION,
     materialize_bootstrap_checkpoint,
     select_bootstrap_champion,
+    sync_bootstrap_runtime_cache,
     update_bootstrap_manifest,
     upload_checkpoint_to_s3,
 )
@@ -76,6 +77,7 @@ def main() -> None:
 
     champion = select_bootstrap_champion(run_dir)
     canonical_checkpoint = materialize_bootstrap_checkpoint(champion, run_dir / "checkpoint.pt")
+    runtime_cache_checkpoint = sync_bootstrap_runtime_cache(canonical_checkpoint)
     if args.publish_minio:
         upload_checkpoint_to_s3(canonical_checkpoint, args.artifact_uri)
     manifest = update_bootstrap_manifest(
@@ -94,6 +96,7 @@ def main() -> None:
                 "manifest": str(args.manifest_output),
                 "model_version": BOOTSTRAP_MODEL_VERSION,
                 "published_minio": bool(args.publish_minio),
+                "runtime_cache_checkpoint": str(runtime_cache_checkpoint),
                 "selected_epoch": champion.selected_epoch,
                 "selected_metric": champion.selected_metric,
                 "selected_metric_value": champion.selected_metric_value,
@@ -167,8 +170,8 @@ def _train_bootstrap(args: argparse.Namespace) -> dict[str, object]:
             metric_early_stopping_patience=args.metric_early_stopping_patience,
             require_business_metric_for_early_stopping=True,
             allow_noncanonical_preprocessing=args.allow_noncanonical_preprocessing,
-            metric_eval_calibrate_normal=True,
-            metric_eval_apply_score_region_to_map=True,
+            metric_eval_calibrate_normal=False,
+            metric_eval_apply_score_region_to_map=False,
             metric_eval_score_region=CANONICAL_FEATURE_AE_PREPROCESSING.score_region,
             metric_eval_score_smoothing=CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
             metric_eval_score_image=CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
