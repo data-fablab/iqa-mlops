@@ -14,20 +14,32 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
     cycles = [
         {
             "cycle_id": "cycle_001",
+            "active_model_before": "bootstrap",
             "candidate_version": "rd_feature_ae_gated_natural_cycle_001",
             "selected_metric": "image_ap",
             "selected_metric_value": 0.91,
+            "evaluation_seen_events": 60,
+            "active_metric_value": 0.80,
+            "candidate_metric_value": 0.91,
+            "metric_delta": 0.11,
             "gate_decision": "passed",
             "registry_stage": "test",
+            "registered_model_version": "1",
             "mlflow_run_id": "run-001",
         },
         {
             "cycle_id": "cycle_002",
+            "active_model_before": "rd_feature_ae_gated_natural_cycle_001",
             "candidate_version": "rd_feature_ae_gated_natural_cycle_002",
             "selected_metric": "pixel_aupimo_1e-5_1e-3",
             "selected_metric_value": 0.42,
+            "evaluation_seen_events": 120,
+            "active_metric_value": 0.50,
+            "candidate_metric_value": 0.42,
+            "metric_delta": -0.08,
             "gate_decision": "rejected",
             "registry_stage": "test",
+            "registry_status": "not_registered",
             "mlflow_run_id": "run-002",
         },
     ]
@@ -39,11 +51,13 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
     report = render_report(run_dir)
 
     assert "cycle" in report
+    assert "active_before" in report
     assert "rd_feature_ae_gated_natural_cycle_001" in report
-    assert "image_ap" in report
     assert "0.91" in report
-    assert "pixel_aupimo_1e-5_1e-3" in report
-    assert "run-002" in report
+    assert "+0.11" in report
+    assert "-0.08" in report
+    assert "test:v1" in report
+    assert "not_registered" in report
 
 
 def test_progressive_lifecycle_report_fails_without_cycles_jsonl(tmp_path: Path) -> None:

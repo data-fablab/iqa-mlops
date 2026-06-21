@@ -31,8 +31,10 @@ from iqa.storage.visual_artifacts import (
 )
 from iqa.training.bootstrap import upload_checkpoint_to_s3
 from iqa.training.feature_ae import FeatureAETrainingConfig
-from iqa.training.feature_ae_contracts import FEATURE_AE_BUSINESS_METRIC_PRIORITY
+from iqa.training.feature_ae_evaluation import FeatureAEEvaluationConfig, evaluate_feature_ae_checkpoint
+from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING, FEATURE_AE_BUSINESS_METRIC_PRIORITY
 from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
+from iqa.registry import register_run_to_model, registered_model_name
 
 NATURAL_SCENARIO_ID = "production_replay_natural"
 DRIFT_SCENARIO_ID = "drift_domain_extension"
@@ -75,6 +77,7 @@ class CycleEvent:
     roi_probability_path: str
     heatmap_path: str
     heatmap_uri: str | None
+    gt_mask_path: str = ""
     active_model_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION
     score_contract_version: str = ""
 
@@ -148,6 +151,7 @@ class CycleState:
     active_model_initial: str = DEFAULT_FEATURE_AE_MODEL_VERSION
     active_model_final: str = DEFAULT_FEATURE_AE_MODEL_VERSION
     cycles_requested: int = 0
+    promotion_min_delta: float = 0.0
     cycles: list[dict[str, Any]] = field(default_factory=list)
     promotion_chain: list[str] = field(default_factory=lambda: [DEFAULT_FEATURE_AE_MODEL_VERSION])
     seen_events: list[CycleEvent] = field(default_factory=list)
@@ -182,24 +186,48 @@ class CycleState:
                     ],
                     "promotion_chain": self.promotion_chain,
                     "registry_stage": self.cycles[-1]["registry_stage"] if self.cycles else "",
+                    "registry_model_name": registered_model_name(self.scenario_id),
+                    "promotion_policy": "candidate_must_improve_active_on_same_eval_set",
+                    "promotion_min_delta": getattr(self, "promotion_min_delta", 0.0),
+                    "comparison_history": [
+                        {
+                            "cycle_id": cycle.get("cycle_id"),
+                            "active_model_before": cycle.get("active_model_before"),
+                            "candidate_version": cycle.get("candidate_version"),
+                            "evaluation_seen_events": cycle.get("evaluation_seen_events"),
+                            "selected_metric": cycle.get("selected_metric"),
+                            "active_metric_value": cycle.get("active_metric_value"),
+                            "candidate_metric_value": cycle.get("candidate_metric_value"),
+                            "metric_delta": cycle.get("metric_delta"),
+                            "gate_decision": cycle.get("gate_decision"),
+                            "promotion_status": cycle.get("promotion_status"),
+                            "registry_status": cycle.get("registry_status"),
+                        }
+                        for cycle in self.cycles
+                    ],
                     "metric_history": [
                         {
                             "cycle_id": cycle.get("cycle_id"),
                             "candidate_version": cycle.get("candidate_version"),
                             "selected_metric": cycle.get("selected_metric"),
                             "selected_metric_value": cycle.get("selected_metric_value"),
+                            "active_metric_value": cycle.get("active_metric_value"),
+                            "candidate_metric_value": cycle.get("candidate_metric_value"),
+                            "metric_delta": cycle.get("metric_delta"),
                             "gate_decision": cycle.get("gate_decision"),
                             "promotion_status": cycle.get("promotion_status"),
                         }
                         for cycle in self.cycles
                     ],
                     "best_cycle": _best_cycle_id(self.cycles),
+                    "best_promoted_cycle": _best_cycle_id(self.cycles),
+                    "best_candidate_seen": _best_candidate_seen(self.cycles),
                     "best_metric": _best_metric_name(self.cycles),
                     "best_metric_value": _best_metric_value(self.cycles),
                     "rejected_candidates": [
                         str(cycle["candidate_version"])
                         for cycle in self.cycles
-                        if cycle.get("promotion_status") == "rejected"
+                        if str(cycle.get("promotion_status", "")).startswith("rejected")
                     ],
                 }
             )
@@ -229,6 +257,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lifecycle-interval", type=int, default=50)
     parser.add_argument("--max-cycles", type=int)
     parser.add_argument("--target-stage", default="test")
+    parser.add_argument("--promotion-min-delta", type=float, default=0.0)
+    parser.add_argument("--require-mlflow-registry", action="store_true")
     return parser.parse_args()
 
 
@@ -249,6 +279,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
         run_id=f"replay_lifecycle_{uuid4().hex}",
         output_dir=args.output_root / args.scenario_id,
         cycles_requested=args.max_cycles or 0,
+        promotion_min_delta=float(args.promotion_min_delta),
     )
     state.output_dir = state.output_dir / state.run_id
     state.output_dir.mkdir(parents=True, exist_ok=True)
@@ -414,6 +445,7 @@ def process_replay_event(
         roi_mask_path=str(mask_path),
         roi_mask_uri=roi_mask_uri,
         roi_probability_path=str(probability_path),
+        gt_mask_path=first_csv_value(row.get("gt_mask_paths") or row.get("gt_mask_path") or row.get("mask_paths") or ""),
         heatmap_path=str(heatmap_path),
         heatmap_uri=heatmap_uri,
         active_model_version=active_model_version,
@@ -515,6 +547,9 @@ def build_progressive_cycle(
     candidate_version = f"rd_feature_ae_gated_natural_cycle_{cycle_number:03d}"
     dataset_snapshot_id = f"feature_ae_natural_cycle_{cycle_number:03d}"
     calibration_set_id = f"calibration_natural_cycle_{cycle_number:03d}"
+    evaluation_set_id = f"progressive_eval_cycle_{cycle_number:03d}"
+    active_model_before = state.active_model_final
+    active_checkpoint = state.candidate_checkpoint or str(resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True))
     cycle_dir = state.output_dir / "cycles" / f"cycle_{cycle_number:03d}"
     cycle_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = write_seen_dataset_snapshot(
@@ -523,12 +558,24 @@ def build_progressive_cycle(
         dataset_snapshot_id=dataset_snapshot_id,
         scenario_id=state.scenario_id,
     )
+    evaluation_set_path = write_seen_evaluation_set(
+        state.seen_events,
+        cycle_dir / "evaluation_set.csv",
+        evaluation_set_id=evaluation_set_id,
+        scenario_id=state.scenario_id,
+    )
     result: dict[str, Any] = {
         "cycle_id": f"cycle_{cycle_number:03d}",
+        "promotion_policy": "candidate_must_improve_active_on_same_eval_set",
+        "promotion_min_delta": float(args.promotion_min_delta),
+        "active_model_before": active_model_before,
         "candidate_version": candidate_version,
         "dataset_snapshot_id": dataset_snapshot_id,
         "dataset_snapshot_path": str(manifest_path),
         "calibration_set_id": calibration_set_id,
+        "evaluation_set_id": evaluation_set_id,
+        "evaluation_set_path": str(evaluation_set_path),
+        "evaluation_seen_events": len(state.seen_events),
         "seen_events": len(state.seen_events),
         "seen_conforming": sum(1 for event in state.seen_events if event.oracle_verdict == "conforme"),
         "seen_defective": sum(1 for event in state.seen_events if event.oracle_verdict == "defective"),
@@ -543,25 +590,45 @@ def build_progressive_cycle(
         "selected_epoch": None,
         "selected_checkpoint": None,
         "val_loss": None,
+        "active_metrics_on_eval_set": {},
+        "candidate_metrics_on_eval_set": {},
+        "active_metric_value": None,
+        "candidate_metric_value": None,
+        "metric_delta": None,
+        "registry_status": "not_registered",
     }
     if args.mode == "progressive-train":
         train_result = train_progressive_candidate(args, candidate_version, manifest_path, dataset_snapshot_id)
         result["candidate_checkpoint"] = str(train_result.get("checkpoint") or "")
         result["mlflow_run_id"] = str(train_result.get("run_id") or "")
-        result.update(metric_evidence_from_training_result(train_result))
-        if result["selected_metric"]:
+        candidate_training_evidence = metric_evidence_from_training_result(train_result)
+        result.update(candidate_training_evidence)
+        comparison = evaluate_progressive_promotion_comparison(
+            args,
+            cycle_dir=cycle_dir,
+            evaluation_set_path=evaluation_set_path,
+            active_model_version=active_model_before,
+            active_checkpoint_path=Path(active_checkpoint),
+            candidate_version=candidate_version,
+            candidate_checkpoint_path=Path(str(result["candidate_checkpoint"])),
+        )
+        result.update(comparison)
+        if comparison["gate_decision"] == "passed":
             result["promotion_status"] = "promoted"
             result["gate_decision"] = "passed"
-            result["gate_reason"] = "business_metric_available"
+            result["gate_reason"] = "candidate_improved_active_on_same_eval_set"
         else:
-            result["promotion_status"] = "rejected"
+            result["promotion_status"] = comparison["promotion_status"]
             result["gate_decision"] = "rejected"
-            result["gate_reason"] = "missing_business_metric"
+            result["gate_reason"] = comparison["gate_reason"]
         if args.publish_minio and result["candidate_checkpoint"] and result["promotion_status"] == "promoted":
             upload_checkpoint_to_s3(
                 str(result["candidate_checkpoint"]),
                 f"s3://iqa-models/{candidate_version}/checkpoint.pt",
             )
+        if result["promotion_status"] == "promoted":
+            result.update(register_promoted_cycle(args, state, result))
+        tag_mlflow_promotion_evidence(result)
     else:
         result["candidate_checkpoint"] = None
         result["mlflow_run_id"] = None
@@ -612,6 +679,185 @@ def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[s
     }
 
 
+def evaluate_progressive_promotion_comparison(
+    args: argparse.Namespace,
+    *,
+    cycle_dir: Path,
+    evaluation_set_path: Path,
+    active_model_version: str,
+    active_checkpoint_path: Path,
+    candidate_version: str,
+    candidate_checkpoint_path: Path,
+) -> dict[str, Any]:
+    active = evaluate_progressive_model_on_set(
+        args,
+        model_version=active_model_version,
+        checkpoint_path=active_checkpoint_path,
+        evaluation_set_path=evaluation_set_path,
+        output_dir=cycle_dir / "evaluation" / "active_before",
+    )
+    candidate = evaluate_progressive_model_on_set(
+        args,
+        model_version=candidate_version,
+        checkpoint_path=candidate_checkpoint_path,
+        evaluation_set_path=evaluation_set_path,
+        output_dir=cycle_dir / "evaluation" / "candidate",
+    )
+    selected_metric = select_comparable_business_metric(active["metrics"], candidate["metrics"])
+    if selected_metric is None:
+        return {
+            "metrics": candidate["metrics"],
+            "active_metrics_on_eval_set": active["metrics"],
+            "candidate_metrics_on_eval_set": candidate["metrics"],
+            "active_metric_value": None,
+            "candidate_metric_value": None,
+            "metric_delta": None,
+            "selected_metric": None,
+            "selected_metric_value": None,
+            "gate_decision": "rejected",
+            "gate_reason": "rejected_missing_comparable_metric",
+            "promotion_status": "rejected_missing_comparable_metric",
+            "active_eval_metrics_path": active["metrics_path"],
+            "candidate_eval_metrics_path": candidate["metrics_path"],
+        }
+    active_value = float(active["metrics"][selected_metric])
+    candidate_value = float(candidate["metrics"][selected_metric])
+    delta = candidate_value - active_value
+    passed = delta > float(args.promotion_min_delta)
+    return {
+        "metrics": candidate["metrics"],
+        "active_metrics_on_eval_set": active["metrics"],
+        "candidate_metrics_on_eval_set": candidate["metrics"],
+        "active_metric_value": active_value,
+        "candidate_metric_value": candidate_value,
+        "metric_delta": delta,
+        "selected_metric": selected_metric,
+        "selected_metric_value": candidate_value,
+        "gate_decision": "passed" if passed else "rejected",
+        "gate_reason": (
+            "candidate_improved_active_on_same_eval_set"
+            if passed
+            else "candidate_did_not_improve_active_on_same_eval_set"
+        ),
+        "promotion_status": "promoted" if passed else "rejected_no_improvement",
+        "active_eval_metrics_path": active["metrics_path"],
+        "candidate_eval_metrics_path": candidate["metrics_path"],
+    }
+
+
+def evaluate_progressive_model_on_set(
+    args: argparse.Namespace,
+    *,
+    model_version: str,
+    checkpoint_path: Path,
+    evaluation_set_path: Path,
+    output_dir: Path,
+) -> dict[str, Any]:
+    result = evaluate_feature_ae_checkpoint(
+        FeatureAEEvaluationConfig(
+            checkpoint_path=checkpoint_path,
+            manifest_path=evaluation_set_path,
+            image_root=args.image_root,
+            output_dir=output_dir,
+            gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
+            validation_set_id=evaluation_set_path.stem,
+            batch_size=args.batch_size,
+            device=args.device,
+            layer_weights=CANONICAL_FEATURE_AE_PREPROCESSING.layer_weights,
+            roi_threshold=CANONICAL_FEATURE_AE_PREPROCESSING.roi_threshold,
+            score_smoothing=CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
+            score_image=CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
+            topk_fraction=CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
+        )
+    )
+    metrics = {
+        metric: float(value)
+        for metric, value in (result.get("metrics") or {}).items()
+        if value is not None and metric in {*FEATURE_AE_BUSINESS_METRIC_PRIORITY, "pixel_auroc"}
+    }
+    return {
+        "model_version": model_version,
+        "checkpoint_path": str(checkpoint_path),
+        "metrics": metrics,
+        "metrics_path": str(output_dir / "metrics.json"),
+    }
+
+
+def select_comparable_business_metric(
+    active_metrics: dict[str, float],
+    candidate_metrics: dict[str, float],
+) -> str | None:
+    for metric in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
+        if active_metrics.get(metric) is not None and candidate_metrics.get(metric) is not None:
+            return metric
+    return None
+
+
+def register_promoted_cycle(
+    args: argparse.Namespace,
+    state: CycleState,
+    cycle: dict[str, Any],
+) -> dict[str, Any]:
+    run_id = str(cycle.get("mlflow_run_id") or "")
+    if not run_id:
+        return {"registry_status": "skipped", "registry_reason": "missing_mlflow_run_id"}
+    try:
+        result = register_run_to_model(
+            run_id=run_id,
+            scenario_id=state.scenario_id,
+            stage=args.target_stage,
+        )
+    except Exception as exc:
+        if args.require_mlflow_registry:
+            raise
+        return {
+            "registry_status": "failed",
+            "registry_reason": str(exc),
+            "registered_model_name": registered_model_name(state.scenario_id),
+            "registry_stage": args.target_stage,
+            "registry_source_of_truth": "mlflow_registry",
+        }
+    return {
+        "registry_status": "registered",
+        "registered_model_name": result.get("registered_model_name"),
+        "registered_model_version": result.get("version"),
+        "registry_alias": result.get("alias") or result.get("stage") or args.target_stage,
+        "registry_stage": result.get("stage") or args.target_stage,
+        "registry_source_of_truth": result.get("source_of_truth") or "mlflow_registry",
+    }
+
+
+def tag_mlflow_promotion_evidence(cycle: dict[str, Any]) -> None:
+    run_id = str(cycle.get("mlflow_run_id") or "")
+    if not run_id:
+        return
+    try:
+        import mlflow
+
+        client = mlflow.tracking.MlflowClient()
+        for key in [
+            "promotion_policy",
+            "active_model_before",
+            "candidate_version",
+            "evaluation_set_id",
+            "evaluation_seen_events",
+            "selected_metric",
+            "active_metric_value",
+            "candidate_metric_value",
+            "metric_delta",
+            "gate_decision",
+            "promotion_status",
+            "registered_model_name",
+            "registry_stage",
+            "registry_status",
+        ]:
+            value = cycle.get(key)
+            if value is not None:
+                client.set_tag(run_id, key, str(value))
+    except Exception:
+        return
+
+
 def _val_loss_for_epoch(path: Path, epoch: int) -> float | None:
     if not path.is_file() or epoch <= 0:
         return None
@@ -650,6 +896,18 @@ def _best_metric_name(cycles: list[dict[str, Any]]) -> str | None:
 def _best_metric_value(cycles: list[dict[str, Any]]) -> float | None:
     cycle = _best_cycle(cycles)
     return float(cycle["selected_metric_value"]) if cycle and cycle.get("selected_metric_value") is not None else None
+
+
+def _best_candidate_seen(cycles: list[dict[str, Any]]) -> str | None:
+    candidates = [
+        cycle
+        for cycle in cycles
+        if cycle.get("candidate_metric_value") is not None and cycle.get("selected_metric") in FEATURE_AE_BUSINESS_METRIC_PRIORITY
+    ]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda cycle: float(cycle["candidate_metric_value"]))
+    return str(best.get("candidate_version") or "")
 
 
 def write_seen_dataset_snapshot(
@@ -705,6 +963,71 @@ def write_seen_dataset_snapshot(
                     "train_eligible": "true",
                     "train_eligibility_source": "oracle_gt_seen_lots",
                     "quarantine_reason": "",
+                }
+            )
+    return output_path
+
+
+def write_seen_evaluation_set(
+    events: list[CycleEvent],
+    output_path: Path,
+    *,
+    evaluation_set_id: str,
+    scenario_id: str,
+) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "image_id",
+        "image_ids",
+        "relative_path",
+        "relative_paths",
+        "event_id",
+        "piece_event_id",
+        "lot_id",
+        "source_class",
+        "split_set",
+        "label",
+        "is_defective",
+        "scenario_id",
+        "dataset_version",
+        "manifest_version",
+        "gt_mask_path",
+        "oracle_verdict",
+        "train_eligible",
+        "train_eligibility_source",
+        "quarantine_reason",
+        "roi_mask_path",
+        "roi_probability_path",
+    ]
+    with output_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for event in events:
+            image_id = Path(event.relative_path).stem
+            is_defective = event.oracle_verdict != "conforme"
+            writer.writerow(
+                {
+                    "image_id": image_id,
+                    "image_ids": image_id,
+                    "relative_path": event.relative_path,
+                    "relative_paths": event.relative_path,
+                    "event_id": event.event_id,
+                    "piece_event_id": event.piece_event_id,
+                    "lot_id": event.lot_id,
+                    "source_class": event.source_class,
+                    "split_set": "progressive_eval",
+                    "label": "defective" if is_defective else "good",
+                    "is_defective": str(is_defective).lower(),
+                    "scenario_id": scenario_id,
+                    "dataset_version": event.dataset_version,
+                    "manifest_version": evaluation_set_id,
+                    "gt_mask_path": event.gt_mask_path,
+                    "oracle_verdict": event.oracle_verdict,
+                    "train_eligible": "false",
+                    "train_eligibility_source": "progressive_eval_same_sample",
+                    "quarantine_reason": "" if not is_defective else "oracle_gt_defect",
+                    "roi_mask_path": event.roi_mask_path,
+                    "roi_probability_path": event.roi_probability_path,
                 }
             )
     return output_path
