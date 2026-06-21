@@ -142,7 +142,9 @@ def compute_feature_ae_score_maps(
 ) -> FeatureAEScoreMaps:
     layers = normalize_feature_layers(layers)
     torch_device = torch.device(device)
-    model = load_rd_feature_ae_gated(checkpoint_path, layers=layers, map_location=torch_device).to(torch_device)
+    if torch_device.type == "cuda" and not torch.cuda.is_available():
+        torch_device = torch.device("cpu")
+    model = load_rd_feature_ae_gated(checkpoint_path, layers=layers, map_location="cpu").to(torch_device)
     teacher = ResNetTeacherFeatures(layers=layers, pretrained=pretrained_teacher).to(torch_device)
     model.eval()
     teacher.eval()

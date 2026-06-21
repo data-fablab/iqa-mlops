@@ -56,11 +56,13 @@ def predict_roi_image(
     image_path = Path(image_path)
     checkpoint_path = Path(checkpoint_path)
     torch_device = torch.device(device)
+    if torch_device.type == "cuda" and not torch.cuda.is_available():
+        torch_device = torch.device("cpu")
     checkpoint = load_roi_segmenter_checkpoint(checkpoint_path, map_location="cpu")
     resolved_image_size = int(image_size or checkpoint.get("input_size", DEFAULT_SEGMENTATION_IMAGE_SIZE))
     resolved_context_size = int(context_size or checkpoint.get("context_size", resolved_image_size))
     num_classes = int(checkpoint.get("num_classes", 1))
-    model = load_roi_segmenter(checkpoint_path, map_location=torch_device).to(torch_device)
+    model = load_roi_segmenter(checkpoint_path, map_location="cpu").to(torch_device)
     original_size = Image.open(image_path).size
     image = _load_rgb_tensor(image_path, image_size=resolved_image_size).to(torch_device)
     global_image = _load_rgb_tensor(image_path, image_size=resolved_context_size).to(torch_device)
