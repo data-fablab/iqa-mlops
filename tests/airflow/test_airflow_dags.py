@@ -130,7 +130,7 @@ def test_lifecycle_dag_runs_reference_application_pipeline_via_factory() -> None
     assert "make_container_task(" in source
     assert "iqa-run-replay-lifecycle-cycle" in source
     assert "{{ params.scenario_id }}" in source
-    assert "{{ params.image_root }}" in source
+    assert "{{ params.repo_root }}/data/raw/hss-iad" in source
     assert "{{ params.mode }}" in source
     assert "pipeline" in source.lower()
 
@@ -142,6 +142,9 @@ def test_lifecycle_dag_runs_on_ml_image_with_gpu_lock() -> None:
 
     assert '"{{ params.ml_image }}"' in source
     assert "gpu_lock=True" in source
+    assert "repo_mount=True" in source
+    assert 'working_dir="{{ params.repo_root }}"' in source
+    assert '"repo_root": "/opt/iqa/iqa-mlops"' in source
     assert "pool=GPU_POOL" in source
     assert "max_active_runs=1" in source
     assert "execution_timeout=timedelta(hours=6)" in source

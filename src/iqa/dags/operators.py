@@ -20,6 +20,8 @@ Other env knobs (read lazily, so importing this module never requires them):
 - ``IQA_DOCKER_NETWORK``   network the task container joins (services discovery)
 - ``IQA_GPU_LOCK_VOLUME``  named volume carrying the single-GPU lock (default ``iqa_gpu_lock``)
 - ``IQA_GPU_LOCK_PATH``    lock file path inside the container (default ``/var/run/iqa-gpu/gpu.lock``)
+- ``IQA_AIRFLOW_REPO_MOUNT_SOURCE`` host repo path for tasks that need local data/cache
+- ``IQA_AIRFLOW_REPO_MOUNT_TARGET`` container repo path (default ``/opt/iqa/iqa-mlops``)
 - ``IQA_K8S_NAMESPACE``    namespace for the k8s backend (default ``default``)
 - ``IQA_TASK_ENV_PASSTHROUGH``  extra env var names to forward to task containers
   (comma-separated; appended to :data:`DEFAULT_TASK_ENV_PASSTHROUGH`)
@@ -44,6 +46,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, no runtime Airflow import.
 DEFAULT_DOCKER_URL = "unix://var/run/docker.sock"
 DEFAULT_GPU_LOCK_VOLUME = "iqa_gpu_lock"
 DEFAULT_GPU_LOCK_PATH = "/var/run/iqa-gpu/gpu.lock"
+DEFAULT_REPO_MOUNT_PATH = "/opt/iqa/iqa-mlops"
 
 TASK_ENV_PASSTHROUGH_ENV = "IQA_TASK_ENV_PASSTHROUGH"
 
@@ -114,6 +117,7 @@ def make_container_task(
     env: dict[str, str] | None = None,
     pool: str | None = None,
     gpu_lock: bool = False,
+    repo_mount: bool = False,
     **kwargs: Any,
 ) -> BaseOperator:
     """Build the Airflow operator that runs ``image`` as a one-shot container.
@@ -125,6 +129,10 @@ def make_container_task(
     mounted into the container so the file lock is shared with the inference
     service (one holder at a time). Pair it with ``pool="iqa_gpu"`` (slots=1).
 
+    Set ``repo_mount=True`` only for application tasks that intentionally consume
+    host-local repo data/cache paths. Most one-shot tasks should stay data-plane
+    only (MinIO/Postgres/MLflow) and not receive the workspace bind mount.
+
     Extra keyword arguments are forwarded to the underlying operator, so DAGs
     keep full control (retries, ``execution_timeout``, ``trigger_rule``, ...).
     """
@@ -132,12 +140,12 @@ def make_container_task(
     if backend == "docker":
         return _make_docker_task(
             task_id=task_id, image=image, command=command, env=env, pool=pool,
-            gpu_lock=gpu_lock, **kwargs
+            gpu_lock=gpu_lock, repo_mount=repo_mount, **kwargs
         )
     if backend == "k8s":
         return _make_k8s_task(
             task_id=task_id, image=image, command=command, env=env, pool=pool,
-            gpu_lock=gpu_lock, **kwargs
+            gpu_lock=gpu_lock, repo_mount=repo_mount, **kwargs
         )
     raise ValueError(
         f"Unknown IQA_AIRFLOW_BACKEND={backend!r} (expected 'docker' or 'k8s')"
@@ -152,6 +160,7 @@ def _make_docker_task(
     env: dict[str, str] | None,
     pool: str | None,
     gpu_lock: bool,
+    repo_mount: bool,
     **kwargs: Any,
 ) -> BaseOperator:
     from airflow.providers.docker.operators.docker import DockerOperator
@@ -174,16 +183,24 @@ def _make_docker_task(
     network = os.environ.get("IQA_DOCKER_NETWORK")
     if network:
         params["network_mode"] = network
+    mounts = list(kwargs.pop("mounts", []) or [])
     if gpu_lock:
         lock_path = os.environ.get("IQA_GPU_LOCK_PATH", DEFAULT_GPU_LOCK_PATH)
         environment.setdefault("IQA_GPU_LOCK_PATH", lock_path)
-        params["mounts"] = [
+        mounts.append(
             Mount(
                 source=os.environ.get("IQA_GPU_LOCK_VOLUME", DEFAULT_GPU_LOCK_VOLUME),
                 target=dirname(lock_path),
                 type="volume",
             )
-        ]
+        )
+    if repo_mount:
+        mount_source = os.environ.get("IQA_AIRFLOW_REPO_MOUNT_SOURCE", DEFAULT_REPO_MOUNT_PATH)
+        mount_target = os.environ.get("IQA_AIRFLOW_REPO_MOUNT_TARGET", DEFAULT_REPO_MOUNT_PATH)
+        environment.setdefault("IQA_REPO_ROOT", mount_target)
+        mounts.append(Mount(source=mount_source, target=mount_target, type="bind"))
+    if mounts:
+        params["mounts"] = mounts
     params.update(kwargs)
     return DockerOperator(**params)
 
@@ -196,6 +213,7 @@ def _make_k8s_task(
     env: dict[str, str] | None,
     pool: str | None,
     gpu_lock: bool,
+    repo_mount: bool,
     **kwargs: Any,
 ) -> BaseOperator:
     """Kubernetes backend -- stub, not exercised yet (ADR 0002 escape hatch).
@@ -207,7 +225,7 @@ def _make_k8s_task(
     TODO (k8s migration): ``gpu_lock`` should map to a node GPU resource request
     (``resources``) and/or a ``ReadWriteMany`` PVC, not a docker named volume.
     """
-    del gpu_lock  # not yet wired for the k8s backend (see TODO above)
+    del gpu_lock, repo_mount  # not yet wired for the k8s backend (see TODO above)
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
     from kubernetes.client import models as k8s
 

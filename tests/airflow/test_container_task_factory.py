@@ -192,6 +192,34 @@ def test_make_container_task_builds_docker_operator(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.docker_contract
 @pytest.mark.skipif(not _HAS_DOCKER_PROVIDER, reason="apache-airflow-providers-docker not installed")
+def test_make_container_task_can_mount_repo_and_gpu_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lifecycle-style tasks need host repo data/cache plus the shared GPU lock."""
+    monkeypatch.setenv("IQA_AIRFLOW_BACKEND", "docker")
+    monkeypatch.setenv("IQA_GPU_LOCK_VOLUME", "iqa_gpu_lock")
+    monkeypatch.setenv("IQA_GPU_LOCK_PATH", "/var/run/iqa-gpu/gpu.lock")
+    monkeypatch.setenv("IQA_AIRFLOW_REPO_MOUNT_SOURCE", "/opt/iqa/iqa-mlops")
+    monkeypatch.setenv("IQA_AIRFLOW_REPO_MOUNT_TARGET", "/opt/iqa/iqa-mlops")
+
+    op = make_container_task(
+        task_id="run_application_lifecycle",
+        image="iqa-ml:local",
+        command="iqa-run-replay-lifecycle-cycle",
+        gpu_lock=True,
+        repo_mount=True,
+        working_dir="/opt/iqa/iqa-mlops",
+    )
+
+    mounts = {mount["Target"]: mount for mount in op.mounts}
+    assert mounts["/var/run/iqa-gpu"]["Type"] == "volume"
+    assert mounts["/var/run/iqa-gpu"]["Source"] == "iqa_gpu_lock"
+    assert mounts["/opt/iqa/iqa-mlops"]["Type"] == "bind"
+    assert mounts["/opt/iqa/iqa-mlops"]["Source"] == "/opt/iqa/iqa-mlops"
+    assert op.environment["IQA_REPO_ROOT"] == "/opt/iqa/iqa-mlops"
+    assert op.working_dir == "/opt/iqa/iqa-mlops"
+
+
+@pytest.mark.docker_contract
+@pytest.mark.skipif(not _HAS_DOCKER_PROVIDER, reason="apache-airflow-providers-docker not installed")
 def test_tracer_dag_builds_one_container_task() -> None:
     import iqa_container_tracer
 
