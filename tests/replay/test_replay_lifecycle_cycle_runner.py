@@ -108,13 +108,30 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
             value = 0.62
         elif model_version.endswith("cycle_003"):
             value = 0.82
+        output_dir.mkdir(parents=True, exist_ok=True)
+        metrics = {
+            "pixel_aupimo_1e-5_1e-3": value,
+            "pixel_ap": value / 3.5,
+            "image_recall": 1.0,
+            "false_negatives": 0,
+            "orange_rate": 0.0,
+        }
+        (output_dir / "metrics.json").write_text(
+            json.dumps(
+                {
+                    "metrics": metrics,
+                    "images": [
+                        {"image_id": f"good_{index:03d}", "score": 0.1 + (index * 0.001), "is_defective": False}
+                        for index in range(8)
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         return {
             "model_version": model_version,
             "checkpoint_path": str(checkpoint_path),
-            "metrics": {
-                "pixel_aupimo_1e-5_1e-3": value,
-                "pixel_ap": value / 3.5,
-            },
+            "metrics": metrics,
             "metrics_path": str(output_dir / "metrics.json"),
         }
 
@@ -292,6 +309,38 @@ def test_progressive_train_promotes_multiple_test_models(tmp_path: Path, monkeyp
     assert round(summary["comparison_history"][0]["metric_delta"], 2) == 0.22
 
 
+def test_progressive_train_activates_promoted_model_for_following_events(tmp_path: Path, monkeypatch) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=120)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    _mock_runtime(monkeypatch)
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    args.max_cycles = 2
+
+    summary = runner.run_cycle(args)
+
+    run_dir = Path(summary["output_dir"])
+    events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    first_next_lot_event = events[50]
+    assert first_next_lot_event["active_model_version"] == "rd_feature_ae_gated_natural_cycle_001"
+    assert first_next_lot_event["threshold_source"].startswith("progressive_eval_good_quantiles:progressive_eval_cycle_001")
+    assert first_next_lot_event["threshold_orange"] != 0.42
+
+    cycles_path = run_dir / "cycles.jsonl"
+    progress_path = run_dir / "progress.json"
+    lifecycle_events_path = run_dir / "lifecycle_events.jsonl"
+    assert cycles_path.exists()
+    assert progress_path.exists()
+    assert lifecycle_events_path.exists()
+    progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert progress["active_model_version"] == "rd_feature_ae_gated_natural_cycle_002"
+    assert progress["phase"] == "completed"
+    lifecycle_events = lifecycle_events_path.read_text(encoding="utf-8")
+    assert "model_activated" in lifecycle_events
+    assert "gate_passed" in lifecycle_events
+
+
 def test_progressive_train_rejects_candidate_without_business_metrics(tmp_path: Path, monkeypatch) -> None:
     plan = tmp_path / "natural.csv"
     _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
@@ -362,6 +411,56 @@ def test_progressive_train_rejects_candidate_that_does_not_improve_active_on_sam
     assert cycle["gate_reason"] == "candidate_did_not_improve_active_on_same_eval_set"
     assert cycle["promotion_status"] == "rejected_no_improvement"
     assert summary["models_promoted"] == []
+    assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
+
+
+def test_progressive_train_blocks_promotion_when_false_negatives_increase(tmp_path: Path, monkeypatch) -> None:
+    plan = tmp_path / "natural.csv"
+    _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)
+    monkeypatch.setattr(runner, "REPLAY_PLANS", {runner.NATURAL_SCENARIO_ID: plan})
+    monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
+    _mock_runtime(monkeypatch)
+
+    def fake_evaluate(args, model_version, checkpoint_path, evaluation_set_path, output_dir):
+        value = 0.8 if model_version == runner.DEFAULT_FEATURE_AE_MODEL_VERSION else 0.9
+        false_negatives = 0 if model_version == runner.DEFAULT_FEATURE_AE_MODEL_VERSION else 2
+        output_dir.mkdir(parents=True, exist_ok=True)
+        metrics = {
+            "pixel_aupimo_1e-5_1e-3": value,
+            "pixel_ap": value / 4,
+            "false_negatives": false_negatives,
+            "image_recall": 1.0 if false_negatives == 0 else 0.5,
+        }
+        (output_dir / "metrics.json").write_text(
+            json.dumps(
+                {
+                    "metrics": metrics,
+                    "images": [
+                        {"image_id": f"good_{index:03d}", "score": 0.1 + (index * 0.001), "is_defective": False}
+                        for index in range(6)
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "model_version": model_version,
+            "checkpoint_path": str(checkpoint_path),
+            "metrics": metrics,
+            "metrics_path": str(output_dir / "metrics.json"),
+        }
+
+    monkeypatch.setattr(runner, "evaluate_progressive_model_on_set", fake_evaluate)
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
+    args.max_cycles = 1
+
+    summary = runner.run_cycle(args)
+
+    cycle = json.loads((Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8"))
+    assert cycle["metric_delta"] > 0
+    assert cycle["gate_decision"] == "rejected"
+    assert cycle["gate_reason"] == "candidate_increases_false_negatives"
+    assert cycle["promotion_status"] == "rejected_operational_guardrail"
     assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
 
 

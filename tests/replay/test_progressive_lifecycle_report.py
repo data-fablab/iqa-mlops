@@ -63,3 +63,25 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
 def test_progressive_lifecycle_report_fails_without_cycles_jsonl(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="cycles.jsonl"):
         render_report(tmp_path / "missing")
+
+
+def test_progressive_lifecycle_report_reads_in_progress_run(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "progress.json").write_text(
+        json.dumps(
+            {
+                "phase": "cycle_running",
+                "active_model_version": "rd_feature_ae_gated_v001_bootstrap",
+                "events_processed": 120,
+                "lots_processed": 4,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = render_report(run_dir)
+
+    assert "No completed cycles yet" in report
+    assert "cycle_running" in report
+    assert "rd_feature_ae_gated_v001_bootstrap" in report

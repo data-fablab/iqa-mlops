@@ -7,6 +7,7 @@ import csv
 import json
 import subprocess
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -234,6 +235,46 @@ class CycleState:
         return payload
 
 
+@dataclass
+class ActiveRuntimeModel:
+    version: str
+    checkpoint: Path
+    decision_thresholds: dict[str, Any]
+    registry_model_name: str
+    registry_stage: str
+    registry_alias: str = ""
+    registered_model_version: str = ""
+    registry_status: str = ""
+    registry_source_of_truth: str = ""
+    score_contract_version: str = CANONICAL_FEATURE_AE_PREPROCESSING.version
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "checkpoint": str(self.checkpoint),
+            "threshold_orange": self.decision_thresholds.get("threshold_orange"),
+            "threshold_red": self.decision_thresholds.get("threshold_red"),
+            "threshold_source": self.decision_thresholds.get("threshold_source"),
+            "registry_model_name": self.registry_model_name,
+            "registry_stage": self.registry_stage,
+            "registry_alias": self.registry_alias,
+            "registered_model_version": self.registered_model_version,
+            "registry_status": self.registry_status,
+            "registry_source_of_truth": self.registry_source_of_truth,
+            "score_contract_version": self.score_contract_version,
+        }
+
+
+@dataclass
+class LifecycleArtifacts:
+    events_path: Path
+    lots_path: Path
+    cycles_path: Path
+    summary_path: Path
+    progress_path: Path
+    lifecycle_events_path: Path
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario-id", choices=sorted(REPLAY_PLANS), default=NATURAL_SCENARIO_ID)
@@ -272,6 +313,84 @@ def main() -> None:
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(json.dumps(payload, default=str, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(payload, default=str, sort_keys=True) + "\n")
+        file.flush()
+
+
+def write_progress(
+    artifacts: LifecycleArtifacts,
+    state: CycleState,
+    active_runtime: ActiveRuntimeModel,
+    *,
+    phase: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    payload = state.summary()
+    payload.update(
+        {
+            "phase": phase,
+            "active_runtime_model": active_runtime.to_dict(),
+            "active_model_version": active_runtime.version,
+            "current_cycle": len(state.cycles),
+            "last_cycle": state.cycles[-1] if state.cycles else None,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    if extra:
+        payload.update(extra)
+    write_json(artifacts.progress_path, payload)
+
+
+def summary_with_runtime(
+    state: CycleState,
+    active_runtime: ActiveRuntimeModel,
+    artifacts: LifecycleArtifacts,
+) -> dict[str, Any]:
+    payload = state.summary()
+    payload.update(
+        {
+            "active_runtime_final": active_runtime.to_dict(),
+            "progress_path": str(artifacts.progress_path),
+            "lifecycle_events_path": str(artifacts.lifecycle_events_path),
+            "cycles_path": str(artifacts.cycles_path),
+        }
+    )
+    return payload
+
+
+def record_lifecycle_event(
+    artifacts: LifecycleArtifacts,
+    state: CycleState,
+    active_runtime: ActiveRuntimeModel,
+    event_type: str,
+    **payload: Any,
+) -> None:
+    append_jsonl(
+        artifacts.lifecycle_events_path,
+        {
+            "event_type": event_type,
+            "run_id": state.run_id,
+            "scenario_id": state.scenario_id,
+            "mode": state.mode,
+            "events_processed": state.events_processed,
+            "lots_processed": state.lots_processed,
+            "active_model_version": active_runtime.version,
+            "timestamp": datetime.now(UTC).isoformat(),
+            **payload,
+        },
+    )
+
+
 def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     state = CycleState(
         scenario_id=args.scenario_id,
@@ -285,13 +404,28 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     state.output_dir.mkdir(parents=True, exist_ok=True)
 
     roi_checkpoint = resolve_roi_segmenter_checkpoint(DEFAULT_ROI_MODEL_VERSION, strict_checksum=True)
-    feature_checkpoint = resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True)
-    decision_thresholds = resolve_runtime_thresholds(DEFAULT_FEATURE_AE_MODEL_VERSION)
+    active_runtime = ActiveRuntimeModel(
+        version=DEFAULT_FEATURE_AE_MODEL_VERSION,
+        checkpoint=resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True),
+        decision_thresholds=resolve_runtime_thresholds(DEFAULT_FEATURE_AE_MODEL_VERSION),
+        registry_model_name=registered_model_name(args.scenario_id),
+        registry_stage=args.target_stage,
+    )
     visual_store = create_visual_object_store()
     rows = load_replay_rows(args.scenario_id)
     events_path = state.output_dir / "events.jsonl"
     lots_path = state.output_dir / "lots.jsonl"
     cycles_path = state.output_dir / "cycles.jsonl"
+    artifacts = LifecycleArtifacts(
+        events_path=events_path,
+        lots_path=lots_path,
+        cycles_path=cycles_path,
+        summary_path=state.output_dir / "summary.json",
+        progress_path=state.output_dir / "progress.json",
+        lifecycle_events_path=state.output_dir / "lifecycle_events.jsonl",
+    )
+    write_progress(artifacts, state, active_runtime, phase="started")
+    record_lifecycle_event(artifacts, state, active_runtime, "run_started", args=vars(args))
 
     current_lot: LotAccumulator | None = None
     with events_path.open("w", encoding="utf-8") as events_file, lots_path.open("w", encoding="utf-8") as lots_file:
@@ -301,10 +435,16 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
             lot_id = row.get("lot_id") or "unknown_lot"
             if current_lot is not None and current_lot.lot_id != lot_id:
                 decision = _finalize_lot(current_lot, args=args, state=state, lots_file=lots_file)
-                if handle_lifecycle_decision(args, state, decision):
+                write_progress(artifacts, state, active_runtime, phase="lot_finalized", extra={"last_lot_id": current_lot.lot_id})
+                should_stop, active_runtime = handle_lifecycle_decision(
+                    args,
+                    state,
+                    decision,
+                    active_runtime=active_runtime,
+                    artifacts=artifacts,
+                )
+                if should_stop:
                     break
-                if args.mode == "progressive-train" and state.candidate_checkpoint:
-                    feature_checkpoint = Path(state.candidate_checkpoint)
                 if args.max_lots is not None and state.lots_processed >= args.max_lots:
                     break
             if current_lot is None or current_lot.lot_id != lot_id:
@@ -314,23 +454,30 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 row,
                 image_root=args.image_root,
                 roi_checkpoint=roi_checkpoint,
-                feature_checkpoint=feature_checkpoint,
-                decision_thresholds=decision_thresholds,
+                feature_checkpoint=active_runtime.checkpoint,
+                decision_thresholds=active_runtime.decision_thresholds,
                 output_dir=state.output_dir,
                 device=args.device,
                 visual_store=visual_store,
-                active_model_version=state.active_model_final,
+                active_model_version=active_runtime.version,
             )
             current_lot.add(event)
             state.seen_events.append(event)
             state.events_processed += 1
             events_file.write(json.dumps(event.to_dict(), sort_keys=True) + "\n")
+            events_file.flush()
+            write_progress(artifacts, state, active_runtime, phase="replaying", extra={"current_lot_id": current_lot.lot_id})
 
         if current_lot is not None and should_finalize_last_lot(args, state):
             decision = _finalize_lot(current_lot, args=args, state=state, lots_file=lots_file)
-            handle_lifecycle_decision(args, state, decision)
-            if args.mode == "progressive-train" and state.candidate_checkpoint:
-                feature_checkpoint = Path(state.candidate_checkpoint)
+            write_progress(artifacts, state, active_runtime, phase="lot_finalized", extra={"last_lot_id": current_lot.lot_id})
+            _, active_runtime = handle_lifecycle_decision(
+                args,
+                state,
+                decision,
+                active_runtime=active_runtime,
+                artifacts=artifacts,
+            )
 
     if state.trigger_decision and state.trigger_decision.trigger_lifecycle and args.mode == "train-on-trigger":
         train_result = train_candidate_on_trigger(args, state.trigger_decision)
@@ -343,14 +490,10 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 f"s3://iqa-models/{state.trigger_decision.candidate_dataset_version}/checkpoint.pt",
             )
 
-    if state.cycles:
-        cycles_path.write_text(
-            "".join(json.dumps(cycle, sort_keys=True) + "\n" for cycle in state.cycles),
-            encoding="utf-8",
-        )
-
-    summary = state.summary()
-    (state.output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    summary = summary_with_runtime(state, active_runtime, artifacts)
+    write_json(artifacts.summary_path, summary)
+    write_progress(artifacts, state, active_runtime, phase="completed")
+    record_lifecycle_event(artifacts, state, active_runtime, "run_completed", summary=summary)
     return summary
 
 
@@ -520,6 +663,7 @@ def _finalize_lot(
     decision = lifecycle_decision_for_lot(state, lot, interval=args.lifecycle_interval)
     state.lots_processed += 1
     lots_file.write(json.dumps(lot.to_dict(lifecycle_decision=decision), sort_keys=True) + "\n")
+    lots_file.flush()
     return decision
 
 
@@ -529,17 +673,52 @@ def should_finalize_last_lot(args: argparse.Namespace, state: CycleState) -> boo
     return args.mode in PROGRESSIVE_MODES and not reached_max_cycles(args, state)
 
 
-def handle_lifecycle_decision(args: argparse.Namespace, state: CycleState, decision: LifecycleDecision) -> bool:
+def handle_lifecycle_decision(
+    args: argparse.Namespace,
+    state: CycleState,
+    decision: LifecycleDecision,
+    *,
+    active_runtime: ActiveRuntimeModel,
+    artifacts: LifecycleArtifacts,
+) -> tuple[bool, ActiveRuntimeModel]:
     if not decision.trigger_lifecycle:
-        return False
+        return False, active_runtime
     state.trigger_decision = decision
     if args.mode not in PROGRESSIVE_MODES:
-        return True
+        return True, active_runtime
 
     cycle_number = len(state.cycles) + 1
-    cycle_result = build_progressive_cycle(args, state, decision, cycle_number)
-    state.cycles.append(cycle_result)
+    cycle_id = f"cycle_{cycle_number:03d}"
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "cycle_started",
+        cycle_id=cycle_id,
+        trigger_reason=decision.trigger_reason,
+    )
+    write_progress(
+        artifacts,
+        state,
+        active_runtime,
+        phase="cycle_running",
+        extra={"current_cycle": cycle_number, "trigger_reason": decision.trigger_reason},
+    )
+    cycle_result = build_progressive_cycle(args, state, decision, cycle_number, active_runtime=active_runtime)
     state.last_cycle_conforming_validated_count = state.total_conforming_validated_count
+    if cycle_result.get("mlflow_run_id"):
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "candidate_trained",
+            cycle_id=cycle_id,
+            candidate_version=cycle_result.get("candidate_version"),
+            candidate_checkpoint=cycle_result.get("candidate_checkpoint"),
+            mlflow_run_id=cycle_result.get("mlflow_run_id"),
+            selected_metric=cycle_result.get("selected_metric"),
+            selected_metric_value=cycle_result.get("selected_metric_value"),
+        )
     if cycle_result.get("promotion_status") == "promoted":
         promoted = str(cycle_result["candidate_version"])
         state.active_model_final = promoted
@@ -547,9 +726,98 @@ def handle_lifecycle_decision(args: argparse.Namespace, state: CycleState, decis
         state.candidate_checkpoint = str(cycle_result.get("candidate_checkpoint") or "")
         state.mlflow_run_id = str(cycle_result.get("mlflow_run_id") or "")
         state.status = "trained" if args.mode == "progressive-train" else "validated"
+        active_runtime = ActiveRuntimeModel(
+            version=promoted,
+            checkpoint=Path(str(cycle_result["candidate_checkpoint"])),
+            decision_thresholds=dict(cycle_result["candidate_decision_thresholds"]),
+            registry_model_name=str(cycle_result.get("registered_model_name") or registered_model_name(state.scenario_id)),
+            registry_stage=str(cycle_result.get("registry_stage") or args.target_stage),
+            registry_alias=str(cycle_result.get("registry_alias") or args.target_stage),
+            registered_model_version=str(cycle_result.get("registered_model_version") or ""),
+            registry_status=str(cycle_result.get("registry_status") or ""),
+            registry_source_of_truth=str(cycle_result.get("registry_source_of_truth") or ""),
+        )
+        cycle_result["activated_for_next_events"] = True
+        cycle_result["activation_event_index"] = state.events_processed
+        cycle_result["activation_scope"] = (
+            "mlflow_registry" if cycle_result.get("registry_status") == "registered" else "run_local_runtime"
+        )
+        cycle_result["active_thresholds_after"] = active_runtime.decision_thresholds
+        cycle_result["active_runtime_after"] = active_runtime.to_dict()
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "gate_passed",
+            cycle_id=cycle_id,
+            candidate_version=promoted,
+            selected_metric=cycle_result.get("selected_metric"),
+            active_metric_value=cycle_result.get("active_metric_value"),
+            candidate_metric_value=cycle_result.get("candidate_metric_value"),
+            metric_delta=cycle_result.get("metric_delta"),
+            promotion_status=cycle_result.get("promotion_status"),
+            registry_status=cycle_result.get("registry_status"),
+        )
+        if cycle_result.get("registry_status") == "failed":
+            record_lifecycle_event(
+                artifacts,
+                state,
+                active_runtime,
+                "registry_failed",
+                cycle_id=cycle_id,
+                candidate_version=promoted,
+                registry_reason=cycle_result.get("registry_reason"),
+                activation_scope=cycle_result["activation_scope"],
+            )
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "model_activated",
+            cycle_id=cycle_id,
+            active_model_version=active_runtime.version,
+            active_thresholds=active_runtime.decision_thresholds,
+            activation_scope=cycle_result["activation_scope"],
+        )
     elif args.mode == "progressive-train":
         state.status = "rejected"
-    return reached_max_cycles(args, state)
+        cycle_result["activated_for_next_events"] = False
+        cycle_result["activation_event_index"] = state.events_processed
+        cycle_result["activation_scope"] = "unchanged"
+        cycle_result["active_thresholds_after"] = active_runtime.decision_thresholds
+        cycle_result["active_runtime_after"] = active_runtime.to_dict()
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "gate_rejected",
+            cycle_id=cycle_id,
+            candidate_version=cycle_result.get("candidate_version"),
+            selected_metric=cycle_result.get("selected_metric"),
+            active_metric_value=cycle_result.get("active_metric_value"),
+            candidate_metric_value=cycle_result.get("candidate_metric_value"),
+            metric_delta=cycle_result.get("metric_delta"),
+            gate_reason=cycle_result.get("gate_reason"),
+            promotion_status=cycle_result.get("promotion_status"),
+        )
+    else:
+        cycle_result["activated_for_next_events"] = False
+        cycle_result["activation_scope"] = "simulated"
+        cycle_result["active_thresholds_after"] = active_runtime.decision_thresholds
+        cycle_result["active_runtime_after"] = active_runtime.to_dict()
+    state.cycles.append(cycle_result)
+    append_jsonl(artifacts.cycles_path, cycle_result)
+    write_json(artifacts.summary_path, summary_with_runtime(state, active_runtime, artifacts))
+    write_progress(artifacts, state, active_runtime, phase="cycle_completed", extra={"last_cycle": cycle_result})
+    print(
+        "lifecycle cycle "
+        f"{cycle_id}: gate={cycle_result.get('gate_decision')} "
+        f"delta={cycle_result.get('metric_delta')} "
+        f"promotion={cycle_result.get('promotion_status')} "
+        f"active_model={active_runtime.version}",
+        flush=True,
+    )
+    return reached_max_cycles(args, state), active_runtime
 
 
 def reached_max_cycles(args: argparse.Namespace, state: CycleState) -> bool:
@@ -561,13 +829,15 @@ def build_progressive_cycle(
     state: CycleState,
     decision: LifecycleDecision,
     cycle_number: int,
+    *,
+    active_runtime: ActiveRuntimeModel,
 ) -> dict[str, Any]:
     candidate_version = f"rd_feature_ae_gated_natural_cycle_{cycle_number:03d}"
     dataset_snapshot_id = f"feature_ae_natural_cycle_{cycle_number:03d}"
     calibration_set_id = f"calibration_natural_cycle_{cycle_number:03d}"
     evaluation_set_id = f"progressive_eval_cycle_{cycle_number:03d}"
-    active_model_before = state.active_model_final
-    active_checkpoint = state.candidate_checkpoint or str(resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True))
+    active_model_before = active_runtime.version
+    active_checkpoint = active_runtime.checkpoint
     cycle_dir = state.output_dir / "cycles" / f"cycle_{cycle_number:03d}"
     cycle_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = write_seen_dataset_snapshot(
@@ -587,6 +857,8 @@ def build_progressive_cycle(
         "promotion_policy": "candidate_must_improve_active_on_same_eval_set",
         "promotion_min_delta": float(args.promotion_min_delta),
         "active_model_before": active_model_before,
+        "active_runtime_before": active_runtime.to_dict(),
+        "active_thresholds_before": active_runtime.decision_thresholds,
         "candidate_version": candidate_version,
         "dataset_snapshot_id": dataset_snapshot_id,
         "dataset_snapshot_path": str(manifest_path),
@@ -614,6 +886,10 @@ def build_progressive_cycle(
         "candidate_metric_value": None,
         "metric_delta": None,
         "registry_status": "not_registered",
+        "candidate_decision_thresholds": None,
+        "threshold_source": "",
+        "active_thresholds_after": active_runtime.decision_thresholds,
+        "operational_alerts": [],
     }
     if args.mode == "progressive-train":
         train_result = train_progressive_candidate(args, candidate_version, manifest_path, dataset_snapshot_id)
@@ -625,6 +901,7 @@ def build_progressive_cycle(
             args,
             cycle_dir=cycle_dir,
             evaluation_set_path=evaluation_set_path,
+            evaluation_set_id=evaluation_set_id,
             active_model_version=active_model_before,
             active_checkpoint_path=Path(active_checkpoint),
             candidate_version=candidate_version,
@@ -702,6 +979,7 @@ def evaluate_progressive_promotion_comparison(
     *,
     cycle_dir: Path,
     evaluation_set_path: Path,
+    evaluation_set_id: str,
     active_model_version: str,
     active_checkpoint_path: Path,
     candidate_version: str,
@@ -721,6 +999,10 @@ def evaluate_progressive_promotion_comparison(
         evaluation_set_path=evaluation_set_path,
         output_dir=cycle_dir / "evaluation" / "candidate",
     )
+    candidate_decision_thresholds = thresholds_from_evaluation_scores(
+        candidate["metrics_path"],
+        evaluation_set_id=evaluation_set_id,
+    )
     selected_metric = select_comparable_business_metric(active["metrics"], candidate["metrics"])
     if selected_metric is None:
         return {
@@ -737,11 +1019,40 @@ def evaluate_progressive_promotion_comparison(
             "promotion_status": "rejected_missing_comparable_metric",
             "active_eval_metrics_path": active["metrics_path"],
             "candidate_eval_metrics_path": candidate["metrics_path"],
+            "candidate_decision_thresholds": candidate_decision_thresholds,
+            "threshold_source": (
+                candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
+            ),
+            "operational_alerts": ["missing_comparable_business_metric"],
         }
     active_value = float(active["metrics"][selected_metric])
     candidate_value = float(candidate["metrics"][selected_metric])
     delta = candidate_value - active_value
-    passed = delta > float(args.promotion_min_delta)
+    active_false_negatives = int(active["metrics"].get("false_negatives") or 0)
+    candidate_false_negatives = int(candidate["metrics"].get("false_negatives") or 0)
+    operational_alerts: list[str] = []
+    if candidate_false_negatives > active_false_negatives:
+        operational_alerts.append("candidate_increases_false_negatives")
+    if candidate_decision_thresholds is None:
+        operational_alerts.append("missing_candidate_runtime_thresholds")
+
+    metric_improved = delta > float(args.promotion_min_delta)
+    passed = metric_improved and candidate_decision_thresholds is not None and candidate_false_negatives <= active_false_negatives
+    if passed:
+        gate_reason = "candidate_improved_active_on_same_eval_set"
+        promotion_status = "promoted"
+    elif not metric_improved:
+        gate_reason = "candidate_did_not_improve_active_on_same_eval_set"
+        promotion_status = "rejected_no_improvement"
+    elif candidate_false_negatives > active_false_negatives:
+        gate_reason = "candidate_increases_false_negatives"
+        promotion_status = "rejected_operational_guardrail"
+    elif candidate_decision_thresholds is None:
+        gate_reason = "missing_candidate_runtime_thresholds"
+        promotion_status = "rejected_missing_runtime_thresholds"
+    else:
+        gate_reason = "candidate_did_not_improve_active_on_same_eval_set"
+        promotion_status = "rejected_no_improvement"
     return {
         "metrics": candidate["metrics"],
         "active_metrics_on_eval_set": active["metrics"],
@@ -752,14 +1063,17 @@ def evaluate_progressive_promotion_comparison(
         "selected_metric": selected_metric,
         "selected_metric_value": candidate_value,
         "gate_decision": "passed" if passed else "rejected",
-        "gate_reason": (
-            "candidate_improved_active_on_same_eval_set"
-            if passed
-            else "candidate_did_not_improve_active_on_same_eval_set"
-        ),
-        "promotion_status": "promoted" if passed else "rejected_no_improvement",
+        "gate_reason": gate_reason,
+        "promotion_status": promotion_status,
         "active_eval_metrics_path": active["metrics_path"],
         "candidate_eval_metrics_path": candidate["metrics_path"],
+        "candidate_decision_thresholds": candidate_decision_thresholds,
+        "threshold_source": (
+            candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
+        ),
+        "candidate_false_negatives": candidate_false_negatives,
+        "active_false_negatives": active_false_negatives,
+        "operational_alerts": operational_alerts,
     }
 
 
@@ -791,7 +1105,15 @@ def evaluate_progressive_model_on_set(
     metrics = {
         metric: float(value)
         for metric, value in (result.get("metrics") or {}).items()
-        if value is not None and metric in {*FEATURE_AE_BUSINESS_METRIC_PRIORITY, "pixel_auroc"}
+        if value is not None
+        and metric
+        in {
+            *FEATURE_AE_BUSINESS_METRIC_PRIORITY,
+            "pixel_auroc",
+            "image_recall",
+            "false_negatives",
+            "orange_rate",
+        }
     }
     return {
         "model_version": model_version,
@@ -809,6 +1131,50 @@ def select_comparable_business_metric(
         if active_metrics.get(metric) is not None and candidate_metrics.get(metric) is not None:
             return metric
     return None
+
+
+def thresholds_from_evaluation_scores(
+    metrics_path: str | Path,
+    *,
+    evaluation_set_id: str,
+    orange_quantile: float = 0.95,
+    red_quantile: float = 0.99,
+) -> dict[str, Any] | None:
+    path = Path(metrics_path)
+    if not path.is_file():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    images = payload.get("images") or payload.get("predictions") or []
+    conforming_scores = [
+        float(record["score"])
+        for record in images
+        if record.get("score") is not None and not bool(record.get("is_defective"))
+    ]
+    if not conforming_scores:
+        return None
+    threshold_orange = _interpolated_quantile(conforming_scores, orange_quantile)
+    threshold_red = max(threshold_orange, _interpolated_quantile(conforming_scores, red_quantile))
+    return {
+        "threshold_orange": threshold_orange,
+        "threshold_red": threshold_red,
+        "threshold_source": f"progressive_eval_good_quantiles:{evaluation_set_id}",
+        "method": "progressive_eval_good_quantiles",
+        "orange_quantile": orange_quantile,
+        "red_quantile": red_quantile,
+    }
+
+
+def _interpolated_quantile(values: list[float], quantile: float) -> float:
+    sorted_values = sorted(values)
+    if len(sorted_values) == 1:
+        return float(sorted_values[0])
+    position = (len(sorted_values) - 1) * quantile
+    lower_index = int(position)
+    upper_index = min(lower_index + 1, len(sorted_values) - 1)
+    fraction = position - lower_index
+    lower_value = sorted_values[lower_index]
+    upper_value = sorted_values[upper_index]
+    return float(lower_value + (upper_value - lower_value) * fraction)
 
 
 def register_promoted_cycle(
@@ -868,6 +1234,11 @@ def tag_mlflow_promotion_evidence(cycle: dict[str, Any]) -> None:
             "registered_model_name",
             "registry_stage",
             "registry_status",
+            "activated_for_next_events",
+            "activation_scope",
+            "threshold_source",
+            "active_false_negatives",
+            "candidate_false_negatives",
         ]:
             value = cycle.get(key)
             if value is not None:

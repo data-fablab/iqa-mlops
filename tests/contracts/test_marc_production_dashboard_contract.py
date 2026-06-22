@@ -17,6 +17,8 @@ def test_marc_dashboard_exposes_lifecycle_run_and_api_history() -> None:
         "lots.jsonl",
         "cycles.jsonl",
         "summary.json",
+        "progress.json",
+        "lifecycle_events.jsonl",
         "Run lifecycle",
         "Historique API",
         "/lots/summary",
@@ -32,6 +34,8 @@ def test_marc_dashboard_exposes_production_and_lineage_terms() -> None:
     for expected in [
         "Conformite des lots",
         "Lifecycle Feature-AE",
+        "Modele actif courant",
+        "Journal lifecycle live",
         "Actif avant",
         "Delta",
         "Registry",
@@ -79,6 +83,10 @@ def test_marc_lifecycle_rows_surface_aupimo_and_promotion() -> None:
                 "active_metric_value": 0.004,
                 "candidate_metric_value": 0.0059,
                 "metric_delta": 0.0019,
+                "active_false_negatives": 1,
+                "candidate_false_negatives": 0,
+                "activated_for_next_events": True,
+                "activation_scope": "mlflow_registry",
                 "metrics": {"pixel_aupimo_1e-5_1e-3": 0.0059, "pixel_ap": 0.004},
                 "gate_decision": "passed",
                 "promotion_status": "promoted",
@@ -95,6 +103,10 @@ def test_marc_lifecycle_rows_surface_aupimo_and_promotion() -> None:
     assert rows[0]["active_metric_value"] == 0.004
     assert rows[0]["candidate_metric_value"] == 0.0059
     assert rows[0]["metric_delta"] == 0.0019
+    assert rows[0]["active_false_negatives"] == 1
+    assert rows[0]["candidate_false_negatives"] == 0
+    assert rows[0]["activated_for_next_events"] is True
+    assert rows[0]["activation_scope"] == "mlflow_registry"
     assert rows[0]["registry"] == "registered"
     assert rows[0]["promotion"] == "promoted"
     assert rows[0]["mlflow_run_id"] == "abc123"
