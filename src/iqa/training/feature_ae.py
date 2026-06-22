@@ -160,6 +160,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
     best_business_metric_value: float | None = None
     metric_no_improve_epochs = 0
     metric_early_stopped = False
+    epoch_metric_history: list[dict[str, Any]] = []
     step = 0
     last_checkpoint = run_dir / "checkpoint_last.pt"
 
@@ -212,7 +213,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
             best_epoch=best_epoch,
             best_loss=best_loss,
         )
-        if config.output_checkpoint != last_checkpoint:
+        if config.output_checkpoint != last_checkpoint and not metric_eval_configured:
             shutil.copy2(last_checkpoint, config.output_checkpoint)
 
         if val_loss < best_loss:
@@ -221,7 +222,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
             no_improve_epochs = 0
             if config.save_best:
                 shutil.copy2(last_checkpoint, run_dir / "checkpoint_best_loss.pt")
-                if not _has_metric_best(run_dir):
+                if not metric_eval_configured and not _has_metric_best(run_dir):
                     shutil.copy2(last_checkpoint, run_dir / "checkpoint.pt")
         else:
             no_improve_epochs += 1
@@ -265,6 +266,16 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     max_previews=config.metric_eval_max_previews,
                 )
             )
+            epoch_metric_history.append(
+                {
+                    "epoch": epoch,
+                    "checkpoint": str(checkpoint),
+                    "metrics": eval_result.get("metrics") or {},
+                    "per_class_metrics": eval_result.get("per_class_metrics") or {},
+                    "aupimo_stability": eval_result.get("aupimo_stability") or {},
+                    "predictions_path": eval_result.get("predictions_path"),
+                }
+            )
             update_metric_best_checkpoints(
                 run_dir=run_dir,
                 candidate_checkpoint=checkpoint,
@@ -307,6 +318,10 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
         )
 
     _write_history(run_dir / "loss_history.csv", history)
+    (run_dir / "metric_eval_history.json").write_text(
+        json.dumps(epoch_metric_history, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     (run_dir / "params.json").write_text(json.dumps(_metadata(config, layers), indent=2, sort_keys=True), encoding="utf-8")
     return {
         "model_type": FEATURE_AE_MODEL_TYPE,
@@ -319,6 +334,8 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
         "best_loss": best_loss,
         "best_business_metric": best_business_metric,
         "best_business_metric_value": best_business_metric_value,
+        "epoch_metric_history": epoch_metric_history,
+        "checkpoint_selection_policy": "business_metric_only" if metric_eval_configured else "loss_only_no_metric_eval",
         "metric_early_stopped": metric_early_stopped,
         "preprocessing_mode": config.preprocessing_mode,
         "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
@@ -499,6 +516,8 @@ def _validate_config(config: FeatureAETrainingConfig) -> None:
     )
     if config.loss != "l2_cosine":
         raise ValueError("Feature-AE champion training only supports loss='l2_cosine'.")
+    if config.metric_eval_manifest_path is not None and config.metric_eval_every_epochs != 1:
+        raise ValueError("Feature-AE metric evaluation must run every epoch; set metric_eval_every_epochs=1.")
     if config.scenario_id in REPLAY_SCENARIOS:
         missing = [
             name

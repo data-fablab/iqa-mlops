@@ -66,6 +66,8 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for cycle in cycles:
         metrics = cycle.get("metrics") or {}
+        stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
+        per_class = cycle.get("candidate_per_class_metrics") or cycle.get("per_class_metrics") or {}
         rows.append(
             {
                 "cycle_id": cycle.get("cycle_id"),
@@ -74,6 +76,7 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "vus": cycle.get("evaluation_seen_events") or cycle.get("seen_events"),
                 "defauts_vus": cycle.get("seen_defective"),
                 "selected_metric": cycle.get("selected_metric"),
+                "selected_epoch": cycle.get("selected_epoch"),
                 "selected_value": cycle.get("selected_metric_value"),
                 "active_metric_value": cycle.get("active_metric_value"),
                 "candidate_metric_value": cycle.get("candidate_metric_value"),
@@ -88,6 +91,11 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "image_auroc": metrics.get("image_auroc"),
                 "image_recall": metrics.get("image_recall"),
                 "orange_rate": metrics.get("orange_rate"),
+                "aupimo_unstable": stability.get("aupimo_unstable"),
+                "low_fpr_good_outlier_count": stability.get("low_fpr_good_outlier_count"),
+                "max_good_score": stability.get("max_good_score"),
+                "max_defect_score": stability.get("max_defect_score"),
+                "classes": ", ".join(sorted(per_class)) if isinstance(per_class, dict) else "",
                 "gate": cycle.get("gate_decision"),
                 "promotion": cycle.get("promotion_status"),
                 "stage": cycle.get("registry_stage"),
@@ -115,6 +123,9 @@ def production_alerts(lots: list[dict[str, Any]], cycles: list[dict[str, Any]]) 
         promotion_status = str(cycle.get("promotion_status") or "")
         if promotion_status.startswith("rejected") or cycle.get("gate_decision") == "rejected":
             alerts.append(f"{cycle.get('candidate_version')} rejete par le gate modele.")
+        stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
+        if stability.get("aupimo_unstable"):
+            alerts.append(f"{cycle.get('cycle_id')} AUPIMO instable : {', '.join(stability.get('unstable_reasons') or [])}.")
     return alerts
 
 

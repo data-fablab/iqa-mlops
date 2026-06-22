@@ -12,6 +12,7 @@ from iqa.inference import FeatureAEPrediction, predict_feature_ae_image
 from iqa.inference.feature_ae import normalize_feature_ae_display_map, save_feature_ae_heatmap_overlay
 from iqa.models.feature_ae import (
     apply_champion_roi,
+    feature_layer_anomaly_maps,
     fuse_numpy_layer_maps,
     score_numpy_map_topk,
 )
@@ -190,6 +191,20 @@ def test_champion_feature_map_fusion_uses_layer_weights() -> None:
     )
 
     assert fused[0, 0] == pytest.approx(4.15)
+
+
+def test_reference_layer_score_uses_sqrt_l2_plus_cosine() -> None:
+    teacher = {"layer2": torch.tensor([[[[1.0]], [[0.0]]]])}
+    reconstructed = {"layer2": torch.tensor([[[[0.0]], [[1.0]]]])}
+
+    maps = feature_layer_anomaly_maps(
+        teacher,
+        reconstructed,
+        layer_score_mode="sqrt_l2_plus_cosine",
+        cosine_weight=0.5,
+    )
+
+    assert maps["layer2"].squeeze().item() == pytest.approx(1.5)
 
 
 def test_champion_roi_soft_map_weights_scores() -> None:

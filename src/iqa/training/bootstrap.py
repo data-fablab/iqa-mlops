@@ -137,7 +137,8 @@ def update_bootstrap_manifest(
             "roi_model_version": roi_model_version,
             "preprocessing_contract": canonical_feature_ae_preprocessing_dict(),
             "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
-            "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss stability only",
+            "checkpoint_selection_policy": "business_metric_only",
+            "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss informational only",
         }
     )
     payload.update(champion.to_manifest_fields())

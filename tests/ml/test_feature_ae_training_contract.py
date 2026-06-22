@@ -12,6 +12,8 @@ from iqa.datasets import CALIBRATION_SET_ID, TiledFeatureAEDataset, is_calibrati
 from iqa.models.feature_ae import FEATURE_AE_MODEL_TYPE
 from iqa.training.feature_ae import FeatureAETrainingConfig, train_feature_ae
 from iqa.training.feature_ae_evaluation import (
+    compute_aupimo_stability,
+    materialize_evaluation_predictions,
     parse_layer_loss_weights,
     score_image_map,
     smooth_score_map,
@@ -197,6 +199,49 @@ def test_metric_best_checkpoint_aliases(tmp_path: Path) -> None:
     assert (tmp_path / "checkpoint_best_image.pt").exists()
     assert (tmp_path / "checkpoint_best_localization.pt").exists()
     assert (tmp_path / "checkpoint.pt").exists()
+
+
+def test_checkpoint_pt_follows_business_metric_priority(tmp_path: Path) -> None:
+    image_checkpoint = tmp_path / "checkpoint_epoch_001.pt"
+    aupimo_checkpoint = tmp_path / "checkpoint_epoch_002.pt"
+    image_checkpoint.write_bytes(b"image-ap")
+    aupimo_checkpoint.write_bytes(b"aupimo")
+
+    update_metric_best_checkpoints(
+        run_dir=tmp_path,
+        candidate_checkpoint=image_checkpoint,
+        metrics={"image_ap": 0.9},
+        epoch=1,
+    )
+    update_metric_best_checkpoints(
+        run_dir=tmp_path,
+        candidate_checkpoint=aupimo_checkpoint,
+        metrics={"pixel_aupimo_1e-5_1e-3": 0.1},
+        epoch=2,
+    )
+
+    assert (tmp_path / "checkpoint.pt").read_bytes() == b"aupimo"
+
+
+def test_evaluation_predictions_npz_and_aupimo_stability(tmp_path: Path) -> None:
+    records = [
+        {"image_id": "good_1", "source_class": "Casting_class1", "is_defective": False, "score": 10.0, "gt_positive_pixels": 0, "relative_path": "Casting_class1/train/good/a.jpg"},
+        {"image_id": "def_1", "source_class": "Casting_class1", "is_defective": True, "score": 1.0, "gt_positive_pixels": 1, "relative_path": "Casting_class1/test/defective/b.jpg"},
+    ]
+    predictions_path = tmp_path / "predictions.npz"
+
+    materialize_evaluation_predictions(predictions_path, records)
+    stability = compute_aupimo_stability(
+        records,
+        {
+            "good_1": np.asarray([[10.0, 9.0]], dtype=np.float32),
+            "def_1": np.asarray([[1.0, 0.5]], dtype=np.float32),
+        },
+    )
+
+    assert predictions_path.exists()
+    assert stability["aupimo_unstable"] is True
+    assert "good_outliers_dominate_low_fpr" in stability["unstable_reasons"]
 
 
 def test_tiny_feature_ae_training_smoke(tmp_path: Path) -> None:

@@ -23,6 +23,8 @@ from iqa.models.feature_ae.models import DEFAULT_FEATURE_LAYERS, normalize_featu
 FEATURE_AE_CHAMPION_LAYER_WEIGHTS = {"layer2": 0.65, "layer3": 0.35}
 FEATURE_AE_CHAMPION_ROI_MODE = "soft_map"
 FEATURE_AE_CHAMPION_TEACHER_WEIGHTS = "IMAGENET1K_V1"
+FEATURE_AE_REFERENCE_SCORE_MODE = "sqrt_l2_plus_cosine"
+FEATURE_AE_REFERENCE_LAYER_NORMALIZATION = "good_p99"
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,10 @@ class FeatureAEChampionContract:
     roi_threshold: float = 0.5
     score_image: str = "topk_mean"
     topk_fraction: float = 0.005
+    layer_score_mode: str = FEATURE_AE_REFERENCE_SCORE_MODE
+    layer_normalization: str = FEATURE_AE_REFERENCE_LAYER_NORMALIZATION
+    layer_normalization_stats: dict[str, float] | None = None
+    cosine_weight: float = 0.5
 
     def normalized_layer_weights(self) -> dict[str, float]:
         layers = normalize_feature_layers(self.layers)
@@ -65,13 +71,22 @@ def feature_layer_anomaly_maps(
     reconstructed_features: dict[str, torch.Tensor],
     *,
     output_size: tuple[int, int] | None = None,
+    layer_score_mode: str = FEATURE_AE_REFERENCE_SCORE_MODE,
+    cosine_weight: float = 0.5,
 ) -> dict[str, torch.Tensor]:
     """Return one anomaly map per teacher layer."""
 
     maps: dict[str, torch.Tensor] = {}
     for layer, teacher in teacher_features.items():
         reconstructed = reconstructed_features[layer]
-        layer_error = (teacher - reconstructed).pow(2).mean(dim=1, keepdim=True)
+        if layer_score_mode == "mean_squared_l2":
+            layer_error = (teacher - reconstructed).pow(2).mean(dim=1, keepdim=True)
+        elif layer_score_mode == FEATURE_AE_REFERENCE_SCORE_MODE:
+            l2 = (teacher - reconstructed).pow(2).mean(dim=1, keepdim=True).clamp_min(1e-12).sqrt()
+            cosine = 1.0 - F.cosine_similarity(reconstructed, teacher, dim=1, eps=1e-8).unsqueeze(1)
+            layer_error = l2 + float(cosine_weight) * cosine
+        else:
+            raise ValueError(f"Unsupported Feature-AE layer score mode: {layer_score_mode!r}")
         size = output_size or layer_error.shape[-2:]
         maps[layer] = F.interpolate(layer_error, size=size, mode="bilinear", align_corners=False)
     return maps
@@ -121,6 +136,8 @@ def reconstruct_tiled_feature_maps(
                 teacher(tile),
                 model(tile, context_images=context),
                 output_size=(contract.tile_size, contract.tile_size),
+                layer_score_mode=contract.layer_score_mode,
+                cosine_weight=contract.cosine_weight,
             )
         x0, y0, x1, y1 = box
         sx0, sy0 = max(0, x0), max(0, y0)
@@ -139,6 +156,7 @@ def fuse_numpy_layer_maps(
     layer_maps: dict[str, np.ndarray],
     *,
     layer_weights: dict[str, float] | None = None,
+    layer_normalization_stats: dict[str, float] | None = None,
 ) -> np.ndarray:
     layers = normalize_feature_layers(tuple(layer_maps))
     weights = layer_weights or FEATURE_AE_CHAMPION_LAYER_WEIGHTS
@@ -147,8 +165,36 @@ def fuse_numpy_layer_maps(
         raise ValueError("Feature-AE layer weights must sum to a positive value")
     fused = np.zeros_like(layer_maps[layers[0]], dtype=np.float32)
     for layer in layers:
-        fused += np.asarray(layer_maps[layer], dtype=np.float32) * (float(weights[layer]) / total)
+        current = np.asarray(layer_maps[layer], dtype=np.float32)
+        if layer_normalization_stats:
+            scale = max(float(layer_normalization_stats.get(layer) or 1.0), 1e-8)
+            current = current / scale
+        fused += current * (float(weights[layer]) / total)
     return fused
+
+
+def good_p99_layer_normalization_stats(
+    layer_maps_by_image: dict[str, dict[str, np.ndarray]],
+    *,
+    normal_image_ids: set[str],
+    layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
+    percentile: float = 99.0,
+) -> dict[str, float]:
+    """Compute robust per-layer scales from conforming images only."""
+
+    stats: dict[str, float] = {}
+    for layer in normalize_feature_layers(layers):
+        values = [
+            np.asarray(layer_maps[layer], dtype=np.float32).reshape(-1)
+            for image_id, layer_maps in layer_maps_by_image.items()
+            if image_id in normal_image_ids and layer in layer_maps
+        ]
+        if not values:
+            stats[layer] = 1.0
+            continue
+        scale = float(np.percentile(np.concatenate(values), float(percentile)))
+        stats[layer] = max(scale, 1e-8)
+    return stats
 
 
 def smooth_numpy_score_map(score_map: np.ndarray, mode: str) -> np.ndarray:
@@ -225,6 +271,7 @@ __all__ = [
     "feature_layer_anomaly_maps",
     "fuse_layer_anomaly_maps",
     "fuse_numpy_layer_maps",
+    "good_p99_layer_normalization_stats",
     "load_roi_probability_map",
     "reconstruct_tiled_feature_maps",
     "score_numpy_map_topk",

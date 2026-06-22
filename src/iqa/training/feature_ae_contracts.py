@@ -17,6 +17,8 @@ FEATURE_AE_BUSINESS_METRIC_PRIORITY = (
 FEATURE_AE_CHAMPION_LAYER_WEIGHTS = {"layer2": 0.65, "layer3": 0.35}
 FEATURE_AE_CHAMPION_TEACHER_WEIGHTS = "IMAGENET1K_V1"
 FEATURE_AE_CHAMPION_ROI_MODE = "soft_map"
+FEATURE_AE_REFERENCE_SCORE_MODE = "sqrt_l2_plus_cosine"
+FEATURE_AE_REFERENCE_LAYER_NORMALIZATION = "good_p99"
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,10 @@ class FeatureAEPreprocessingContract:
     score_image: str = "topk_mean"
     topk_fraction: float = 0.005
     augmentation_profile: str = "none"
+    layer_score_mode: str = FEATURE_AE_REFERENCE_SCORE_MODE
+    layer_normalization: str = FEATURE_AE_REFERENCE_LAYER_NORMALIZATION
+    layer_normalization_stats: dict[str, float] | None = None
+    cosine_weight: float = 0.5
 
 
 CANONICAL_FEATURE_AE_PREPROCESSING = FeatureAEPreprocessingContract(

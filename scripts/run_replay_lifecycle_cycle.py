@@ -719,6 +719,21 @@ def handle_lifecycle_decision(
             selected_metric=cycle_result.get("selected_metric"),
             selected_metric_value=cycle_result.get("selected_metric_value"),
         )
+    if cycle_result.get("evaluation_completed_at"):
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "evaluation_completed",
+            cycle_id=cycle_id,
+            candidate_version=cycle_result.get("candidate_version"),
+            selected_metric=cycle_result.get("selected_metric"),
+            active_metric_value=cycle_result.get("active_metric_value"),
+            candidate_metric_value=cycle_result.get("candidate_metric_value"),
+            metric_delta=cycle_result.get("metric_delta"),
+            evaluation_duration_seconds=cycle_result.get("evaluation_duration_seconds"),
+            aupimo_stability=cycle_result.get("candidate_aupimo_stability"),
+        )
     if cycle_result.get("promotion_status") == "promoted":
         promoted = str(cycle_result["candidate_version"])
         state.active_model_final = promoted
@@ -757,6 +772,7 @@ def handle_lifecycle_decision(
             metric_delta=cycle_result.get("metric_delta"),
             promotion_status=cycle_result.get("promotion_status"),
             registry_status=cycle_result.get("registry_status"),
+            aupimo_stability=cycle_result.get("candidate_aupimo_stability"),
         )
         if cycle_result.get("registry_status") == "failed":
             record_lifecycle_event(
@@ -799,6 +815,8 @@ def handle_lifecycle_decision(
             metric_delta=cycle_result.get("metric_delta"),
             gate_reason=cycle_result.get("gate_reason"),
             promotion_status=cycle_result.get("promotion_status"),
+            aupimo_stability=cycle_result.get("candidate_aupimo_stability"),
+            operational_alerts=cycle_result.get("operational_alerts"),
         )
     else:
         cycle_result["activated_for_next_events"] = False
@@ -943,6 +961,8 @@ def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[s
 
     best_path = next((path for path in candidates if path.is_file()), None)
     best = json.loads(best_path.read_text(encoding="utf-8")) if best_path else {}
+    history_path = next((path.parent / "metric_eval_history.json" for path in candidates if (path.parent / "metric_eval_history.json").is_file()), None)
+    epoch_metric_history = json.loads(history_path.read_text(encoding="utf-8")) if history_path else train_result.get("epoch_metric_history", [])
     metrics = {
         metric: float(record["value"])
         for metric, record in best.items()
@@ -971,6 +991,8 @@ def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[s
         "selected_epoch": int(selected_record.get("epoch") or 0) if selected_record else None,
         "selected_checkpoint": str(selected_record.get("checkpoint") or "") if selected_record else None,
         "val_loss": val_loss,
+        "epoch_metric_history": epoch_metric_history,
+        "checkpoint_selection_policy": train_result.get("checkpoint_selection_policy") or "business_metric_only",
     }
 
 
@@ -985,6 +1007,7 @@ def evaluate_progressive_promotion_comparison(
     candidate_version: str,
     candidate_checkpoint_path: Path,
 ) -> dict[str, Any]:
+    started_at = datetime.now(UTC)
     active = evaluate_progressive_model_on_set(
         args,
         model_version=active_model_version,
@@ -999,6 +1022,7 @@ def evaluate_progressive_promotion_comparison(
         evaluation_set_path=evaluation_set_path,
         output_dir=cycle_dir / "evaluation" / "candidate",
     )
+    completed_at = datetime.now(UTC)
     candidate_decision_thresholds = thresholds_from_evaluation_scores(
         candidate["metrics_path"],
         evaluation_set_id=evaluation_set_id,
@@ -1024,6 +1048,9 @@ def evaluate_progressive_promotion_comparison(
                 candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
             ),
             "operational_alerts": ["missing_comparable_business_metric"],
+            "evaluation_started_at": started_at.isoformat(),
+            "evaluation_completed_at": completed_at.isoformat(),
+            "evaluation_duration_seconds": (completed_at - started_at).total_seconds(),
         }
     active_value = float(active["metrics"][selected_metric])
     candidate_value = float(candidate["metrics"][selected_metric])
@@ -1035,6 +1062,9 @@ def evaluate_progressive_promotion_comparison(
         operational_alerts.append("candidate_increases_false_negatives")
     if candidate_decision_thresholds is None:
         operational_alerts.append("missing_candidate_runtime_thresholds")
+    candidate_stability = candidate.get("aupimo_stability") or {}
+    if candidate_stability.get("aupimo_unstable"):
+        operational_alerts.append("candidate_aupimo_unstable")
 
     metric_improved = delta > float(args.promotion_min_delta)
     passed = metric_improved and candidate_decision_thresholds is not None and candidate_false_negatives <= active_false_negatives
@@ -1073,6 +1103,15 @@ def evaluate_progressive_promotion_comparison(
         ),
         "candidate_false_negatives": candidate_false_negatives,
         "active_false_negatives": active_false_negatives,
+        "active_per_class_metrics": active.get("per_class_metrics", {}),
+        "candidate_per_class_metrics": candidate.get("per_class_metrics", {}),
+        "candidate_aupimo_stability": candidate.get("aupimo_stability", {}),
+        "active_aupimo_stability": active.get("aupimo_stability", {}),
+        "candidate_predictions_path": candidate.get("predictions_path"),
+        "active_predictions_path": active.get("predictions_path"),
+        "evaluation_started_at": started_at.isoformat(),
+        "evaluation_completed_at": completed_at.isoformat(),
+        "evaluation_duration_seconds": (completed_at - started_at).total_seconds(),
         "operational_alerts": operational_alerts,
     }
 
@@ -1119,6 +1158,9 @@ def evaluate_progressive_model_on_set(
         "model_version": model_version,
         "checkpoint_path": str(checkpoint_path),
         "metrics": metrics,
+        "per_class_metrics": result.get("per_class_metrics") or {},
+        "aupimo_stability": result.get("aupimo_stability") or {},
+        "predictions_path": result.get("predictions_path"),
         "metrics_path": str(output_dir / "metrics.json"),
     }
 
@@ -1452,7 +1494,7 @@ def train_progressive_candidate(
         metric_eval_start_epoch=1,
         metric_eval_calibrate_normal=False,
         metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
-        metric_eval_apply_score_region_to_map=False,
+        metric_eval_apply_score_region_to_map=True,
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
@@ -1487,7 +1529,7 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         metric_eval_start_epoch=1,
         metric_eval_calibrate_normal=False,
         metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
-        metric_eval_apply_score_region_to_map=False,
+        metric_eval_apply_score_region_to_map=True,
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())

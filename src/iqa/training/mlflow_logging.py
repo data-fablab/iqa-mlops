@@ -70,6 +70,10 @@ class MLflowRunLogger:
             "lr_factor": config.lr_factor,
             "early_stopping_patience": config.early_stopping_patience,
             "metric_early_stopping_patience": config.metric_early_stopping_patience,
+            "metric_eval_every_epochs": config.metric_eval_every_epochs,
+            "checkpoint_selection_policy": "business_metric_only" if config.metric_eval_manifest_path else "loss_only_no_metric_eval",
+            "layer_score_mode": "sqrt_l2_plus_cosine",
+            "layer_normalization": "good_p99",
             "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
             "tile_stride": config.tile_stride,
             "preprocessing_mode": config.preprocessing_mode,
@@ -241,6 +245,9 @@ def train_feature_ae_with_mlflow_logging(
         eval_best_path = run_dir / "metric_eval_best.json"
         if eval_best_path.exists():
             logger.log_artifacts(eval_report_path=eval_best_path)
+        eval_history_path = run_dir / "metric_eval_history.json"
+        if eval_history_path.exists():
+            logger.log_artifacts(eval_report_path=eval_history_path)
 
         result["run_id"] = logger._run_id or ""
         return result

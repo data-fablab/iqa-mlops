@@ -22,7 +22,9 @@ from iqa.models.feature_ae import (
     CHAMPION_FEATURE_AE_CONTRACT,
     DEFAULT_FEATURE_LAYERS,
     ResNetTeacherFeatures,
-    feature_anomaly_map,
+    feature_layer_anomaly_maps,
+    fuse_numpy_layer_maps,
+    good_p99_layer_normalization_stats,
     load_rd_feature_ae_gated,
     normalize_feature_layers,
 )
@@ -30,10 +32,10 @@ from iqa.roi import load_roi_mask_lookup
 
 
 METRIC_BEST_FILES = {
-    "image_auroc": "checkpoint_best_image_auroc.pt",
-    "image_ap": "checkpoint_best_image_ap.pt",
-    "pixel_ap": "checkpoint_best_pixel_ap.pt",
     "pixel_aupimo_1e-5_1e-3": "checkpoint_best_pixel_aupimo_1e-5_1e-3.pt",
+    "pixel_ap": "checkpoint_best_pixel_ap.pt",
+    "image_ap": "checkpoint_best_image_ap.pt",
+    "image_auroc": "checkpoint_best_image_auroc.pt",
 }
 
 
@@ -59,11 +61,14 @@ class FeatureAEEvaluationConfig:
     calibration_stat: str = "median_mad"
     calibration_max_images: int = 120
     score_region: str = "functional_surface_prediction"
-    roi_threshold: float = 0.3
-    apply_score_region_to_map: bool = False
+    roi_threshold: float = 0.5
+    apply_score_region_to_map: bool = True
     score_smoothing: str = "median3"
     score_image: str = "topk_mean"
     topk_fraction: float = 0.005
+    layer_score_mode: str = "sqrt_l2_plus_cosine"
+    layer_normalization: str = "good_p99"
+    cosine_weight: float = 0.5
     threshold_orange: float = 0.02
     threshold_red: float = 0.05
     save_score_maps: bool = False
@@ -182,6 +187,68 @@ def compute_binary_metrics(
     return metrics
 
 
+def compute_per_class_metrics(
+    records: list[dict[str, Any]],
+    pixel_labels_by_image: dict[str, np.ndarray],
+    pixel_scores_by_image: dict[str, np.ndarray],
+) -> dict[str, dict[str, float | None]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        grouped.setdefault(str(record.get("source_class") or "unknown"), []).append(record)
+    result: dict[str, dict[str, float | None]] = {}
+    for source_class, class_records in grouped.items():
+        image_labels = [bool(record["is_defective"]) for record in class_records]
+        image_scores = [float(record["score"]) for record in class_records]
+        pixel_labels = [pixel_labels_by_image[str(record["image_id"])] for record in class_records]
+        pixel_scores = [pixel_scores_by_image[str(record["image_id"])] for record in class_records]
+        result[source_class] = compute_binary_metrics(image_labels, image_scores, pixel_labels, pixel_scores)
+    return result
+
+
+def compute_aupimo_stability(
+    records: list[dict[str, Any]],
+    pixel_scores_by_image: dict[str, np.ndarray],
+) -> dict[str, Any]:
+    good_scores = [
+        pixel_scores_by_image[str(record["image_id"])].reshape(-1)
+        for record in records
+        if not bool(record.get("is_defective"))
+    ]
+    defect_scores = [
+        pixel_scores_by_image[str(record["image_id"])].reshape(-1)
+        for record in records
+        if bool(record.get("is_defective"))
+    ]
+    good_count = sum(1 for record in records if not bool(record.get("is_defective")))
+    defective_count = sum(1 for record in records if bool(record.get("is_defective")))
+    source_distribution: dict[str, int] = {}
+    for record in records:
+        key = str(record.get("source_class") or "unknown")
+        source_distribution[key] = source_distribution.get(key, 0) + 1
+    good_values = np.concatenate(good_scores) if good_scores else np.asarray([], dtype=np.float32)
+    defect_values = np.concatenate(defect_scores) if defect_scores else np.asarray([], dtype=np.float32)
+    max_good = float(np.max(good_values)) if good_values.size else None
+    max_defect = float(np.max(defect_values)) if defect_values.size else None
+    low_fpr_good_outlier_count = 0
+    if good_values.size and max_defect is not None:
+        low_fpr_good_outlier_count = int((good_values >= max_defect).sum())
+    unstable_reasons: list[str] = []
+    if defective_count < 5:
+        unstable_reasons.append("defective_count_below_5")
+    if low_fpr_good_outlier_count > 0:
+        unstable_reasons.append("good_outliers_dominate_low_fpr")
+    return {
+        "defective_count": defective_count,
+        "good_count": good_count,
+        "source_class_distribution": source_distribution,
+        "low_fpr_good_outlier_count": low_fpr_good_outlier_count,
+        "max_good_score": max_good,
+        "max_defect_score": max_defect,
+        "aupimo_unstable": bool(unstable_reasons),
+        "unstable_reasons": unstable_reasons,
+    }
+
+
 def compute_decision_metrics(
     image_labels: list[bool],
     image_scores: list[float],
@@ -266,46 +333,75 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             images = torch.stack([item["image"] for item in items]).to(device)
             contexts = torch.stack([item["context_image"] for item in items]).to(device)
             start = time.perf_counter()
-            maps = feature_anomaly_map(
+            layer_maps = feature_layer_anomaly_maps(
                 teacher(images),
                 model(images, context_images=contexts),
-                layer_weights=config.layer_weights or CHAMPION_FEATURE_AE_CONTRACT.normalized_layer_weights(),
+                output_size=(config.image_size, config.image_size),
+                layer_score_mode=config.layer_score_mode,
+                cosine_weight=config.cosine_weight,
             )
-            maps = F.interpolate(maps, size=(config.image_size, config.image_size), mode="bilinear", align_corners=False)
             tile_latency_ms = (time.perf_counter() - start) * 1000.0 / max(len(items), 1)
-            for item, score_tensor in zip(items, maps.cpu(), strict=True):
+            layer_maps_cpu = {layer: score_tensor.cpu() for layer, score_tensor in layer_maps.items()}
+            for item_index, item in enumerate(items):
                 image_id = str(item["image_id"])
                 width, height = item["image_size"]
                 x0, y0, x1, y1 = item["tile_box"]
                 entry = aggregated.setdefault(
                     image_id,
                     {
-                        "score_sum": np.zeros((height, width), dtype=np.float32),
+                        "layer_score_sum": {
+                            layer: np.zeros((height, width), dtype=np.float32)
+                            for layer in layers
+                        },
                         "count": np.zeros((height, width), dtype=np.float32),
                         "roi": np.zeros((height, width), dtype=np.float32),
                         "gt": np.zeros((height, width), dtype=np.float32),
                         "is_defective": bool(item["is_defective"]),
                         "relative_path": str(item["relative_path"]),
+                        "source_class": _source_class(str(item["relative_path"])),
                         "latency_ms": 0.0,
                     },
                 )
                 entry["latency_ms"] += tile_latency_ms
-                score = score_tensor.squeeze(0).numpy()
                 roi = item["roi_mask"].squeeze(0).numpy()
                 gt = item["gt_mask"].squeeze(0).numpy()
                 sx0, sy0 = max(0, x0), max(0, y0)
                 sx1, sy1 = min(width, x1), min(height, y1)
                 px0, py0 = sx0 - x0, sy0 - y0
                 px1, py1 = px0 + sx1 - sx0, py0 + sy1 - sy0
-                entry["score_sum"][sy0:sy1, sx0:sx1] += score[py0:py1, px0:px1]
+                for layer in layers:
+                    score = layer_maps_cpu[layer][item_index].squeeze(0).numpy()
+                    entry["layer_score_sum"][layer][sy0:sy1, sx0:sx1] += score[py0:py1, px0:px1]
                 entry["count"][sy0:sy1, sx0:sx1] += 1.0
                 entry["roi"][sy0:sy1, sx0:sx1] = np.maximum(entry["roi"][sy0:sy1, sx0:sx1], roi[py0:py1, px0:px1])
                 entry["gt"][sy0:sy1, sx0:sx1] = np.maximum(entry["gt"][sy0:sy1, sx0:sx1], gt[py0:py1, px0:px1])
 
     raw_maps: dict[str, np.ndarray] = {}
+    raw_layer_maps: dict[str, dict[str, np.ndarray]] = {}
     normal_pixels: list[np.ndarray] = []
     for image_id, entry in aggregated.items():
-        score_map = entry["score_sum"] / np.maximum(entry["count"], 1.0)
+        count = np.maximum(entry["count"], 1.0)
+        raw_layer_maps[image_id] = {
+            layer: entry["layer_score_sum"][layer] / count
+            for layer in layers
+        }
+    normal_image_ids = {image_id for image_id, entry in aggregated.items() if not entry["is_defective"]}
+    layer_normalization_stats = (
+        good_p99_layer_normalization_stats(
+            raw_layer_maps,
+            normal_image_ids=normal_image_ids,
+            layers=layers,
+            percentile=99.0,
+        )
+        if config.layer_normalization == "good_p99"
+        else {}
+    )
+    for image_id, entry in aggregated.items():
+        score_map = fuse_numpy_layer_maps(
+            raw_layer_maps[image_id],
+            layer_weights=config.layer_weights or CHAMPION_FEATURE_AE_CONTRACT.normalized_layer_weights(),
+            layer_normalization_stats=layer_normalization_stats,
+        )
         raw_maps[image_id] = score_map
         if not entry["is_defective"] and len(normal_pixels) < config.calibration_max_images:
             normal_pixels.append(score_map.reshape(-1))
@@ -316,6 +412,8 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
     image_latencies_ms: list[float] = []
     pixel_labels: list[np.ndarray] = []
     pixel_scores: list[np.ndarray] = []
+    pixel_labels_by_image: dict[str, np.ndarray] = {}
+    pixel_scores_by_image: dict[str, np.ndarray] = {}
     per_image: list[dict[str, Any]] = []
     maps_dir = config.output_dir / "score_maps"
     previews_dir = config.output_dir / "previews"
@@ -329,7 +427,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         score_map = smooth_score_map(score_map, config.score_smoothing)
         roi = entry["roi"] > 0
         if config.apply_score_region_to_map and config.score_region == "functional_surface_prediction":
-            score_map = np.where(roi, score_map, 0.0)
+            score_map = (score_map * entry["roi"]).astype(np.float32)
         image_score = score_image_map(
             score_map,
             mode=config.score_image,
@@ -342,10 +440,13 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         image_latencies_ms.append(float(entry["latency_ms"]))
         pixel_labels.append(gt)
         pixel_scores.append(score_map.astype(np.float32))
+        pixel_labels_by_image[image_id] = gt
+        pixel_scores_by_image[image_id] = score_map.astype(np.float32)
         per_image.append(
             {
                 "image_id": image_id,
                 "relative_path": entry["relative_path"],
+                "source_class": entry["source_class"],
                 "is_defective": bool(entry["is_defective"]),
                 "score": image_score,
                 "gt_positive_pixels": int(gt.sum()),
@@ -368,9 +469,24 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
     metrics["false_negatives"] = decision["false_negatives"]
     metrics["orange_rate"] = decision["orange_rate"]
     metrics["latency_ms"] = decision["latency_ms"]
+    per_class_metrics = compute_per_class_metrics(per_image, pixel_labels_by_image, pixel_scores_by_image)
+    aupimo_stability = compute_aupimo_stability(per_image, pixel_scores_by_image)
+    predictions_path = config.output_dir / "predictions.npz"
     result = {
         "checkpoint": str(config.checkpoint_path),
         "validation_set_id": config.validation_set_id,
+        "score_contract": {
+            "score_contract_version": CHAMPION_FEATURE_AE_CONTRACT.version,
+            "layer_score_mode": config.layer_score_mode,
+            "layer_normalization": config.layer_normalization,
+            "layer_normalization_stats": layer_normalization_stats,
+            "layer_weights": config.layer_weights or CHAMPION_FEATURE_AE_CONTRACT.normalized_layer_weights(),
+            "cosine_weight": config.cosine_weight,
+            "score_smoothing": config.score_smoothing,
+            "roi_threshold": config.roi_threshold,
+            "score_image": config.score_image,
+            "topk_fraction": config.topk_fraction,
+        },
         "calibration": {
             "enabled": config.calibrate_normal,
             "mode": config.calibration_mode,
@@ -379,9 +495,13 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             "scale": stats[1],
         },
         "metrics": metrics,
+        "per_class_metrics": per_class_metrics,
+        "aupimo_stability": aupimo_stability,
+        "predictions_path": str(predictions_path),
         "images": per_image,
     }
     config.output_dir.mkdir(parents=True, exist_ok=True)
+    materialize_evaluation_predictions(predictions_path, per_image)
     (config.output_dir / "metrics.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
     return result
 
@@ -403,18 +523,40 @@ def update_metric_best_checkpoints(
         if previous is None or float(value) > float(previous):
             shutil.copy2(candidate_checkpoint, run_dir / filename)
             best[metric] = {"value": float(value), "epoch": int(epoch), "checkpoint": filename}
+    selected_metric = next((metric for metric in METRIC_BEST_FILES if metric in best), None)
+    if selected_metric is not None:
+        shutil.copy2(run_dir / METRIC_BEST_FILES[selected_metric], run_dir / "checkpoint.pt")
     if "image_ap" in best:
         shutil.copy2(run_dir / METRIC_BEST_FILES["image_ap"], run_dir / "checkpoint_best_image.pt")
-        shutil.copy2(run_dir / METRIC_BEST_FILES["image_ap"], run_dir / "checkpoint.pt")
     elif "image_auroc" in best:
         shutil.copy2(run_dir / METRIC_BEST_FILES["image_auroc"], run_dir / "checkpoint_best_image.pt")
-        shutil.copy2(run_dir / METRIC_BEST_FILES["image_auroc"], run_dir / "checkpoint.pt")
     if "pixel_aupimo_1e-5_1e-3" in best:
         shutil.copy2(run_dir / METRIC_BEST_FILES["pixel_aupimo_1e-5_1e-3"], run_dir / "checkpoint_best_localization.pt")
     elif "pixel_ap" in best:
         shutil.copy2(run_dir / METRIC_BEST_FILES["pixel_ap"], run_dir / "checkpoint_best_localization.pt")
     best_path.write_text(json.dumps(best, indent=2, sort_keys=True), encoding="utf-8")
     return best
+
+
+def materialize_evaluation_predictions(path: Path, records: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path,
+        piece_event_id=np.asarray([record["image_id"] for record in records], dtype=object),
+        source_class=np.asarray([record.get("source_class") or "unknown" for record in records], dtype=object),
+        oracle_verdict=np.asarray(
+            ["defective" if bool(record.get("is_defective")) else "good" for record in records],
+            dtype=object,
+        ),
+        image_score=np.asarray([float(record.get("score") or 0.0) for record in records], dtype=np.float32),
+        gt_positive_pixels=np.asarray([int(record.get("gt_positive_pixels") or 0) for record in records], dtype=np.int64),
+        relative_path=np.asarray([record.get("relative_path") or "" for record in records], dtype=object),
+    )
+
+
+def _source_class(relative_path: str) -> str:
+    normalized = relative_path.replace("\\", "/")
+    return normalized.split("/", 1)[0] if "/" in normalized else "unknown"
 
 
 def _save_preview(path: Path, score_map: np.ndarray) -> None:
@@ -527,6 +669,7 @@ __all__ = [
     "evaluate_feature_ae_checkpoint",
     "evaluate_on_validation_set_v001",
     "median_mad_stats",
+    "materialize_evaluation_predictions",
     "parse_layer_loss_weights",
     "score_image_map",
     "smooth_score_map",

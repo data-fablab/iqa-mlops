@@ -161,6 +161,10 @@ def compute_feature_ae_score_maps(
         roi_threshold=champion_contract.roi_threshold,
         score_image=score_image,
         topk_fraction=topk_fraction,
+        layer_score_mode=champion_contract.layer_score_mode,
+        layer_normalization=champion_contract.layer_normalization,
+        layer_normalization_stats=champion_contract.layer_normalization_stats,
+        cosine_weight=champion_contract.cosine_weight,
     )
     layer_maps = reconstruct_tiled_feature_maps(
         image_path=image_path,
@@ -169,7 +173,11 @@ def compute_feature_ae_score_maps(
         device=torch_device,
         contract=contract,
     )
-    fused_map = fuse_numpy_layer_maps(layer_maps, layer_weights=contract.normalized_layer_weights())
+    fused_map = fuse_numpy_layer_maps(
+        layer_maps,
+        layer_weights=contract.normalized_layer_weights(),
+        layer_normalization_stats=contract.layer_normalization_stats,
+    )
     smoothed_map = smooth_numpy_score_map(fused_map, score_smoothing)
     roi_source = roi_probability_path or roi_mask_path
     roi_probability = load_roi_probability_map(

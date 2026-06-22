@@ -35,7 +35,20 @@ def render_report(run_dir: Path) -> str:
         )
     cycles = [json.loads(line) for line in cycles_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     rows = [
-        ("cycle", "active_before", "candidate", "eval_n", "active", "candidate_metric", "delta", "gate", "registry"),
+        (
+            "cycle",
+            "active_before",
+            "candidate",
+            "eval_n",
+            "epoch",
+            "active_aupimo",
+            "candidate_aupimo",
+            "delta",
+            "pixel_ap",
+            "unstable",
+            "gate",
+            "registry",
+        ),
         *[_row(cycle) for cycle in cycles],
     ]
     widths = [max(len(str(row[index])) for row in rows) for index in range(len(rows[0]))]
@@ -45,10 +58,13 @@ def render_report(run_dir: Path) -> str:
     )
 
 
-def _row(cycle: dict[str, Any]) -> tuple[str, str, str, str, str, str, str, str, str]:
+def _row(cycle: dict[str, Any]) -> tuple[str, str, str, str, str, str, str, str, str, str, str, str]:
     active_value = cycle.get("active_metric_value")
     candidate_value = cycle.get("candidate_metric_value", cycle.get("selected_metric_value"))
     delta = cycle.get("metric_delta")
+    candidate_metrics = cycle.get("candidate_metrics_on_eval_set") or cycle.get("metrics") or {}
+    pixel_ap = candidate_metrics.get("pixel_ap")
+    stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
     registry = cycle.get("registry_alias") or cycle.get("registry_stage") or ""
     if cycle.get("registered_model_version"):
         registry = f"{registry}:v{cycle['registered_model_version']}"
@@ -59,9 +75,12 @@ def _row(cycle: dict[str, Any]) -> tuple[str, str, str, str, str, str, str, str,
         str(cycle.get("active_model_before") or ""),
         str(cycle.get("candidate_version") or ""),
         str(cycle.get("evaluation_seen_events") or cycle.get("seen_events") or ""),
+        str(cycle.get("selected_epoch") or ""),
         "" if active_value is None else f"{float(active_value):.6g}",
         "" if candidate_value is None else f"{float(candidate_value):.6g}",
         "" if delta is None else f"{float(delta):+.6g}",
+        "" if pixel_ap is None else f"{float(pixel_ap):.6g}",
+        "yes" if stability.get("aupimo_unstable") else "no",
         str(cycle.get("gate_decision") or ""),
         registry,
     )
