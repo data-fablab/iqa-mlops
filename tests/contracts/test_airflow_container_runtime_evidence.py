@@ -82,9 +82,11 @@ def test_airflow_scheduler_compose_exposes_docker_backend_network_and_gpu_lock()
     assert scheduler["environment"]["IQA_IMAGE_DATA"] == "${IQA_IMAGE_DATA:-iqa-data:local}"
     assert scheduler["environment"]["IQA_IMAGE_ML"] == "${IQA_IMAGE_ML:-iqa-ml:local}"
     assert scheduler["environment"]["IQA_IMAGE_DVC"] == "${IQA_IMAGE_DVC:-iqa-dvc-gate:local}"
+    assert scheduler["environment"]["MLFLOW_TRACKING_URI"] == "${IQA_MLFLOW_TRACKING_URI:-http://mlflow:5000}"
     assert webserver["environment"]["IQA_IMAGE_DATA"] == "${IQA_IMAGE_DATA:-iqa-data:local}"
     assert webserver["environment"]["IQA_IMAGE_ML"] == "${IQA_IMAGE_ML:-iqa-ml:local}"
     assert webserver["environment"]["IQA_IMAGE_DVC"] == "${IQA_IMAGE_DVC:-iqa-dvc-gate:local}"
+    assert webserver["environment"]["MLFLOW_TRACKING_URI"] == "${IQA_MLFLOW_TRACKING_URI:-http://mlflow:5000}"
     assert "/var/run/docker.sock:/var/run/docker.sock" in scheduler["volumes"]
     assert "../src:/opt/iqa/src:ro" in scheduler["volumes"]
     assert "../src:/opt/iqa/src:ro" in webserver["volumes"]

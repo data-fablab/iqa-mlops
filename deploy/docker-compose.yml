@@ -120,6 +120,7 @@ services:
       IQA_IMAGE_DATA: ${IQA_IMAGE_DATA:-iqa-data:local}
       IQA_IMAGE_ML: ${IQA_IMAGE_ML:-iqa-ml:local}
       IQA_IMAGE_DVC: ${IQA_IMAGE_DVC:-iqa-dvc-gate:local}
+      MLFLOW_TRACKING_URI: ${IQA_MLFLOW_TRACKING_URI:-http://mlflow:5000}
       # Expose iqa.dags.operators (factory) without installing the metier runtime.
       PYTHONPATH: /opt/iqa/src
     ports: ["8080:8080"]
@@ -157,6 +158,7 @@ services:
       IQA_IMAGE_DATA: ${IQA_IMAGE_DATA:-iqa-data:local}
       IQA_IMAGE_ML: ${IQA_IMAGE_ML:-iqa-ml:local}
       IQA_IMAGE_DVC: ${IQA_IMAGE_DVC:-iqa-dvc-gate:local}
+      MLFLOW_TRACKING_URI: ${IQA_MLFLOW_TRACKING_URI:-http://mlflow:5000}
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
       - ../src:/opt/iqa/src:ro

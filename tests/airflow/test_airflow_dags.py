@@ -158,6 +158,8 @@ def test_lifecycle_dag_declares_comparative_promotion_params() -> None:
 
     assert '"promotion_min_delta": 0.0' in source
     assert '"require_mlflow_registry": False' in source
+    assert '"mlflow_tracking_uri": "http://mlflow:5000"' in source
+    assert '"MLFLOW_TRACKING_URI": "{{ params.mlflow_tracking_uri }}"' in source
     assert "--promotion-min-delta" in source
     assert "--require-mlflow-registry" in source
 

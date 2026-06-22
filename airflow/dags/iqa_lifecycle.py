@@ -37,6 +37,7 @@ def _define() -> None:
             "{% if params.require_mlflow_registry %} --require-mlflow-registry{% endif %}"
         ),
         env={
+            "MLFLOW_TRACKING_URI": "{{ params.mlflow_tracking_uri }}",
             "PYTHONPATH": "{{ params.repo_root }}:{{ params.repo_root }}/src",
         },
         pool=GPU_POOL,
@@ -66,6 +67,7 @@ dag = build_container_dag(
         "target_stage": "test",
         "promotion_min_delta": 0.0,
         "require_mlflow_registry": False,
+        "mlflow_tracking_uri": "http://mlflow:5000",
         "ml_image": ml_image(),
     },
 )
