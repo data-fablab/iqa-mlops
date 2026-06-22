@@ -36,6 +36,9 @@ def _define() -> None:
             "--wait-for-gpu"
             "{% if params.require_mlflow_registry %} --require-mlflow-registry{% endif %}"
         ),
+        env={
+            "PYTHONPATH": "{{ params.repo_root }}:{{ params.repo_root }}/src",
+        },
         pool=GPU_POOL,
         gpu_lock=True,
         repo_mount=True,
