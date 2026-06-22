@@ -55,8 +55,10 @@ with tab_run:
     lots_path = run_dir / "lots.jsonl"
     cycles_path = run_dir / "cycles.jsonl"
     summary_path = run_dir / "summary.json"
+    progress_path = run_dir / "progress.json"
+    lifecycle_events_path = run_dir / "lifecycle_events.jsonl"
 
-    st.caption("Sources attendues : events.jsonl, lots.jsonl, cycles.jsonl, summary.json")
+    st.caption("Sources attendues : events.jsonl, lots.jsonl, cycles.jsonl, summary.json, progress.json, lifecycle_events.jsonl")
     if not run_dir_value:
         st.info("Renseigne IQA_MARC_REPLAY_RUN_DIR ou un dossier de run lifecycle pour piloter les lots.")
     elif not events_path.exists():
@@ -65,7 +67,12 @@ with tab_run:
         events = read_jsonl(events_path)
         cycles = read_jsonl(cycles_path)
         summary = read_json(summary_path)
-        lots = aggregate_lots(events, active_model=str(summary.get("active_model_final") or ""))
+        progress = read_json(progress_path)
+        lifecycle_events = read_jsonl(lifecycle_events_path)
+        active_model_current = str(
+            progress.get("active_model_version") or summary.get("active_model_final") or ""
+        )
+        lots = aggregate_lots(events, active_model=active_model_current)
         lifecycle = lifecycle_rows(cycles)
         alerts = production_alerts(lots, cycles)
 
@@ -86,10 +93,11 @@ with tab_run:
         k6.metric("ROI fail rate", f"{round(100 * roi_fail / max(total_pieces, 1), 2)} %")
 
         st.info(
-            "Modele actif final : "
-            f"`{summary.get('active_model_final', '-')}` | "
-            f"Registry stage : `{summary.get('registry_stage', '-')}` | "
-            f"Run : `{summary.get('run_id', run_dir.name)}`"
+            "Modele actif courant : "
+            f"`{active_model_current or '-'}` | "
+            f"Phase : `{progress.get('phase', 'complete' if summary else 'en cours')}` | "
+            f"Registry stage : `{summary.get('registry_stage') or progress.get('registry_stage') or '-'}` | "
+            f"Run : `{summary.get('run_id') or progress.get('run_id') or run_dir.name}`"
         )
 
         st.divider()
@@ -160,10 +168,16 @@ with tab_run:
                     "active_metric_value": st.column_config.NumberColumn("Actif", format="%.6f"),
                     "candidate_metric_value": st.column_config.NumberColumn("Candidat", format="%.6f"),
                     "metric_delta": st.column_config.NumberColumn("Delta", format="%.6f"),
+                    "active_false_negatives": "FN actif",
+                    "candidate_false_negatives": "FN candidat",
+                    "activated_for_next_events": "Active ensuite",
+                    "activation_scope": "Activation",
                     "pixel_aupimo_1e-5_1e-3": st.column_config.NumberColumn("AUPIMO pixel", format="%.6f"),
                     "pixel_ap": st.column_config.NumberColumn("Pixel AP", format="%.6f"),
                     "image_ap": st.column_config.NumberColumn("Image AP", format="%.6f"),
                     "image_auroc": st.column_config.NumberColumn("Image AUROC", format="%.6f"),
+                    "image_recall": st.column_config.NumberColumn("Recall image", format="%.3f"),
+                    "orange_rate": st.column_config.NumberColumn("Taux orange", format="%.3f"),
                     "gate": "Gate",
                     "promotion": "Promotion",
                     "stage": "Stage",
@@ -186,9 +200,18 @@ with tab_run:
                 }
             )
             st.write("**Chaine de promotion**")
-            st.code(" -> ".join(summary.get("promotion_chain") or []))
+            chain = summary.get("promotion_chain") or progress.get("promotion_chain") or []
+            st.code(" -> ".join(chain))
         else:
             st.info("Aucun cycle modele dans cycles.jsonl pour ce run.")
+
+        if lifecycle_events:
+            st.subheader("Journal lifecycle live")
+            st.dataframe(
+                lifecycle_events[-20:],
+                width="stretch",
+                hide_index=True,
+            )
 
         st.divider()
         alert_col, lineage_col = st.columns([1, 1])

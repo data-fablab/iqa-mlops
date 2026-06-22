@@ -48,6 +48,9 @@ def aggregate_lots(events: list[dict[str, Any]], *, active_model: str = "") -> l
         lot[decision] += 1
         if str(event.get("roi_quality_status") or "").lower() not in {"", "ok"}:
             lot["roi_fail_count"] += 1
+        event_model = str(event.get("active_model_version") or "")
+        if event_model:
+            lot["model_actif"] = event_model
 
     rows = []
     for lot in lots.values():
@@ -75,10 +78,16 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "active_metric_value": cycle.get("active_metric_value"),
                 "candidate_metric_value": cycle.get("candidate_metric_value"),
                 "metric_delta": cycle.get("metric_delta"),
+                "active_false_negatives": cycle.get("active_false_negatives"),
+                "candidate_false_negatives": cycle.get("candidate_false_negatives"),
+                "activated_for_next_events": cycle.get("activated_for_next_events"),
+                "activation_scope": cycle.get("activation_scope"),
                 "pixel_aupimo_1e-5_1e-3": metrics.get("pixel_aupimo_1e-5_1e-3"),
                 "pixel_ap": metrics.get("pixel_ap"),
                 "image_ap": metrics.get("image_ap"),
                 "image_auroc": metrics.get("image_auroc"),
+                "image_recall": metrics.get("image_recall"),
+                "orange_rate": metrics.get("orange_rate"),
                 "gate": cycle.get("gate_decision"),
                 "promotion": cycle.get("promotion_status"),
                 "stage": cycle.get("registry_stage"),

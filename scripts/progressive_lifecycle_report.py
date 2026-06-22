@@ -22,7 +22,17 @@ def main() -> None:
 def render_report(run_dir: Path) -> str:
     cycles_path = run_dir / "cycles.jsonl"
     if not cycles_path.is_file():
-        raise FileNotFoundError(f"progressive lifecycle report requires {cycles_path}")
+        progress_path = run_dir / "progress.json"
+        if not progress_path.is_file():
+            raise FileNotFoundError(f"progressive lifecycle report requires {cycles_path}")
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        return (
+            "No completed cycles yet. "
+            f"phase={progress.get('phase', 'unknown')} "
+            f"active_model={progress.get('active_model_version', '')} "
+            f"events={progress.get('events_processed', 0)} "
+            f"lots={progress.get('lots_processed', 0)}"
+        )
     cycles = [json.loads(line) for line in cycles_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     rows = [
         ("cycle", "active_before", "candidate", "eval_n", "active", "candidate_metric", "delta", "gate", "registry"),
