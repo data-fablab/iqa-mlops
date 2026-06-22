@@ -132,7 +132,12 @@ def iter_manifest_image_samples(manifest_path: str | Path) -> list[CastingImageS
         for row in csv.DictReader(file):
             image_ids = _split_pipe(row.get("image_ids") or row.get("image_id"))
             relative_paths = _split_pipe(row.get("relative_paths") or row.get("relative_path"))
-            gt_paths = _split_pipe(row.get("gt_mask_paths") or row.get("mask_paths") or row.get("mask_path"))
+            gt_paths = _split_pipe(
+                row.get("gt_mask_paths")
+                or row.get("gt_mask_path")
+                or row.get("mask_paths")
+                or row.get("mask_path")
+            )
             for index, relative_path in enumerate(relative_paths):
                 image_id = _resolve_indexed(image_ids, index) or Path(relative_path).stem
                 samples.append(
@@ -307,7 +312,7 @@ class TiledFeatureAEDataset(Dataset):
         roi_mask = self._load_roi_mask(sample, record.image_size)
         gt_path = self.gt_masks.get(sample.image_id) or self.gt_masks.get(sample.relative_path)
         if gt_path is None and sample.gt_mask_path:
-            gt_path = self.image_root / sample.gt_mask_path
+            gt_path = _resolve_mask_path(sample.gt_mask_path, image_root=self.image_root, manifest_path=self.manifest_path)
         gt_mask = (
             load_mask_tensor(gt_path, size=record.image_size)
             if gt_path
@@ -341,6 +346,28 @@ def _is_train_normal(sample: CastingImageSample, *, reject_validation: bool) -> 
     if reject_validation and _is_excluded_feature_ae_train_split(split):
         return False
     return not sample.is_defective and label in {"good", "normal", "conforme"}
+
+
+def _resolve_mask_path(mask_path: str, *, image_root: Path, manifest_path: Path) -> Path:
+    path = Path(mask_path)
+    if path.is_absolute():
+        return path
+
+    candidates = [
+        image_root / path,
+        manifest_path.parent / path,
+        Path.cwd() / path,
+    ]
+    parts = path.parts
+    if "hss-iad" in parts:
+        hss_index = parts.index("hss-iad")
+        suffix = Path(*parts[hss_index + 1 :])
+        candidates.append(image_root / suffix)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 def _is_excluded_feature_ae_train_split(split: str) -> bool:

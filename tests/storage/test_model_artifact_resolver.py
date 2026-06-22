@@ -141,3 +141,13 @@ def test_model_helpers_resolve_manifests_with_mocked_s3(tmp_path: Path, monkeypa
 
     assert roi.name == "checkpoint.pt"
     assert feature.name == "checkpoint.pt"
+
+
+def test_model_manifest_path_honours_repo_root_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Airflow task containers run installed code from /app but mount the repo elsewhere."""
+    repo_root = tmp_path / "mounted-repo"
+    monkeypatch.setenv("IQA_REPO_ROOT", str(repo_root))
+
+    path = model_artifacts.model_manifest_path("demo_model")
+
+    assert path == repo_root / "models" / "manifests" / "demo_model" / "model_manifest.json"

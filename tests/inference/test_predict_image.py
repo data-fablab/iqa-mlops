@@ -206,3 +206,18 @@ def test_champion_roi_soft_map_weights_scores() -> None:
 
     assert weighted.tolist() == [[10.0, 5.0], [0.0, 2.5]]
     assert score == pytest.approx((10.0 + 5.0 + 2.5) / 3.0)
+
+
+def test_roi_and_feature_ae_runtime_fall_back_to_cpu_when_cuda_is_unavailable() -> None:
+    """CPU-built task images must not deserialize CUDA checkpoints onto CUDA."""
+    segmentation_source = (Path(__file__).parents[2] / "src" / "iqa" / "inference" / "segmentation.py").read_text(
+        encoding="utf-8"
+    )
+    feature_ae_source = (Path(__file__).parents[2] / "src" / "iqa" / "inference" / "feature_ae.py").read_text(
+        encoding="utf-8"
+    )
+
+    for source in (segmentation_source, feature_ae_source):
+        assert 'torch_device.type == "cuda" and not torch.cuda.is_available()' in source
+        assert 'torch.device("cpu")' in source
+        assert 'map_location="cpu"' in source

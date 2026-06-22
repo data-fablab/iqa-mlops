@@ -445,7 +445,7 @@ def process_replay_event(
         roi_mask_path=str(mask_path),
         roi_mask_uri=roi_mask_uri,
         roi_probability_path=str(probability_path),
-        gt_mask_path=first_csv_value(row.get("gt_mask_paths") or row.get("gt_mask_path") or row.get("mask_paths") or ""),
+        gt_mask_path=resolve_event_gt_mask_path(row, relative_path),
         heatmap_path=str(heatmap_path),
         heatmap_uri=heatmap_uri,
         active_model_version=active_model_version,
@@ -470,6 +470,24 @@ def resolve_runtime_thresholds(model_version: str) -> dict[str, Any]:
 
 def first_csv_value(value: str) -> str:
     return value.split("|", 1)[0].split(";", 1)[0].split(",", 1)[0].strip()
+
+
+def gt_mask_path_for_original_dataset(relative_path: str) -> str:
+    path = Path(relative_path)
+    parts = path.parts
+    if len(parts) < 4:
+        return ""
+    source_class, split, label = parts[0], parts[1].lower(), parts[2].lower()
+    if split == "test" and label == "defective":
+        return str(Path(source_class) / "ground_truth" / "defective" / f"{path.stem}_mask.png").replace("\\", "/")
+    return ""
+
+
+def resolve_event_gt_mask_path(row: dict[str, str], relative_path: str) -> str:
+    explicit = first_csv_value(row.get("gt_mask_paths") or row.get("gt_mask_path") or row.get("mask_paths") or "")
+    if explicit:
+        return explicit
+    return gt_mask_path_for_original_dataset(relative_path)
 
 
 def oracle_verdict(row: dict[str, str]) -> str:

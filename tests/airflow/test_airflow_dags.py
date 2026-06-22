@@ -27,8 +27,8 @@ def test_iqa_lifecycle_dag_imports_without_error() -> None:
 
 
 @pytest.mark.docker_contract
-def test_iqa_lifecycle_dag_has_eight_tasks() -> None:
-    """Test that iqa_lifecycle DAG has all 8 pipeline tasks."""
+def test_iqa_lifecycle_dag_has_application_lifecycle_task() -> None:
+    """Test that iqa_lifecycle DAG exposes the application lifecycle task."""
     try:
         import iqa_lifecycle
     except ImportError as e:
@@ -38,70 +38,35 @@ def test_iqa_lifecycle_dag_has_eight_tasks() -> None:
     if dag is None:
         pytest.skip("DAG is None (Airflow not available)")
 
-    task_ids = {task.task_id for task in dag.tasks}
-    expected_tasks = {"lifecycle_decision", "dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"}
-
-    assert expected_tasks <= task_ids, f"Missing tasks: {expected_tasks - task_ids}"
+    assert {task.task_id for task in dag.tasks} == {"run_application_lifecycle"}
 
 
 @pytest.mark.unit
-def test_iqa_lifecycle_dag_source_declares_eight_tasks() -> None:
-    """Test that DAG source declares all 8 tasks (code-level check)."""
+def test_iqa_lifecycle_dag_source_declares_application_lifecycle_task() -> None:
+    """The DAG runs the application Feature-AE lifecycle, not the legacy split pipeline."""
     source = _read_dag_source()
-    task_ids = ["lifecycle_decision", "dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"]
 
-    for task_id in task_ids:
-        assert f'task_id="{task_id}"' in source, f"Task {task_id} not declared in DAG source"
+    assert 'task_id="run_application_lifecycle"' in source
+    assert "iqa-run-replay-lifecycle-cycle" in source
+    for expected in [
+        "--mode",
+        "progressive-train",
+        "--max-cycles",
+        "--lifecycle-interval",
+        "--promotion-min-delta",
+        "--publish-minio",
+        "--wait-for-gpu",
+    ]:
+        assert expected in source
 
 
 @pytest.mark.unit
-def test_iqa_lifecycle_dag_source_declares_dependencies() -> None:
-    """Test that DAG source declares linear dependencies (code-level check)."""
+def test_iqa_lifecycle_dag_source_does_not_call_legacy_lifecycle_commands() -> None:
+    """Airflow no longer duplicates the internal lifecycle chain as separate tasks."""
     source = _read_dag_source()
 
-    # Check for the dependency chain pattern: lifecycle_decision >> dataset >> train >> eval >> gates >> mlflow >> promotion >> reload
-    # Support both old (task_*) and new (op_*) variable naming
-    assert (
-        "op_lifecycle_decision >> op_dataset" in source
-        or "lifecycle_decision >> dataset" in source
-        or "task_lifecycle_decision >> task_dataset" in source
-    )
-    assert (
-        ">> op_train >>" in source
-        or "op_dataset >> op_train" in source
-        or ">> task_train >>" in source
-        or "task_dataset >> task_train" in source
-    )
-    assert (
-        ">> op_eval >>" in source
-        or "op_train >> op_eval" in source
-        or ">> task_eval >>" in source
-        or "task_train >> task_eval" in source
-    )
-    assert (
-        ">> op_gates >>" in source
-        or "op_eval >> op_gates" in source
-        or ">> task_gates >>" in source
-        or "task_eval >> task_gates" in source
-    )
-    assert (
-        ">> op_mlflow >>" in source
-        or "op_gates >> op_mlflow" in source
-        or ">> task_mlflow >>" in source
-        or "task_gates >> task_mlflow" in source
-    )
-    assert (
-        ">> op_promotion >>" in source
-        or "op_mlflow >> op_promotion" in source
-        or ">> task_promotion >>" in source
-        or "task_mlflow >> task_promotion" in source
-    )
-    assert (
-        ">> op_reload" in source
-        or "op_promotion >> op_reload" in source
-        or ">> task_reload" in source
-        or "task_promotion >> task_reload" in source
-    )
+    for legacy in ["iqa-run-train", "iqa-run-eval", "iqa-run-gates", "iqa-run-promotion", "iqa-run-reload"]:
+        assert legacy not in source
 
 
 @pytest.mark.unit
@@ -158,82 +123,54 @@ def test_monitoring_dag_containerises_via_factory() -> None:
 
 
 @pytest.mark.unit
-def test_lifecycle_dag_containerises_decision_and_dataset_via_factory() -> None:
-    """Lifecycle DAG (issue 08) runs lifecycle_decision + dataset as containers.
-
-    The two leading stages move to the data image via the operator factory
-    (issue 11 later containerises the whole tail, removing every PythonOperator).
-    """
+def test_lifecycle_dag_runs_reference_application_pipeline_via_factory() -> None:
+    """Lifecycle DAG runs the reference Feature-AE application pipeline container."""
     source = _read_dag_source("iqa_lifecycle.py")
 
     assert "make_container_task(" in source
-    # Decision + dataset call the data-image boundary scripts with templated argv.
-    assert '"iqa-run-lifecycle-decision"' in source
-    assert '"iqa-run-dataset"' in source
-    assert '"{{ params.scenario_id }}"' in source
-    assert '"{{ params.manifest }}"' in source
-    # These two tasks no longer route through the iqa lifecycle_tasks callables.
-    assert "task_lifecycle_decision" not in source
-    assert "task_dataset" not in source
+    assert "iqa-run-replay-lifecycle-cycle" in source
+    assert "{{ params.scenario_id }}" in source
+    assert "{{ params.repo_root }}/data/raw/hss-iad" in source
+    assert "{{ params.mode }}" in source
+    assert "pipeline" in source.lower()
 
 
 @pytest.mark.unit
-def test_lifecycle_dag_containerises_train_and_eval_on_ml_image_with_gpu_lock() -> None:
-    """Lifecycle DAG (issue 09) runs train + eval as GPU-locked ml containers.
-
-    train/eval move to the ml image via the factory with the iqa_gpu pool and the
-    shared single-GPU lock; the tail (gates..reload) stays on PythonOperator.
-    """
+def test_lifecycle_dag_runs_on_ml_image_with_gpu_lock() -> None:
+    """Application lifecycle runs on the ml image with the GPU pool and lock."""
     source = _read_dag_source("iqa_lifecycle.py")
 
-    assert '"iqa-run-train"' in source
-    assert '"iqa-run-eval"' in source
     assert '"{{ params.ml_image }}"' in source
-    # GPU-bound: factory mounts the shared lock and the iqa_gpu pool (slots=1).
     assert "gpu_lock=True" in source
+    assert "repo_mount=True" in source
+    assert 'working_dir="/opt/iqa/iqa-mlops"' in source
+    assert '"repo_root": "/opt/iqa/iqa-mlops"' in source
     assert "pool=GPU_POOL" in source
-    # These two tasks no longer route through the iqa lifecycle_tasks callables.
-    assert "task_train" not in source
-    assert "task_eval" not in source
+    assert "max_active_runs=1" in source
+    assert "execution_timeout=timedelta(hours=6)" in source
+    assert "retries=0" in source
 
 
 @pytest.mark.unit
-def test_lifecycle_dag_containerises_gates_and_mlflow_via_factory() -> None:
-    """Lifecycle DAG (issue 10) runs gates + mlflow as containers.
-
-    gates evaluates promotion_gates.yaml on the data image (blocks on failure);
-    mlflow resolves the scenario-isolated name on the ml image. Issue 11 then
-    containerises the promotion/reload tail.
-    """
+def test_lifecycle_dag_declares_comparative_promotion_params() -> None:
+    """Lifecycle DAG exposes the fair promotion and registry-relevant params."""
     source = _read_dag_source("iqa_lifecycle.py")
 
-    assert '"iqa-run-gates"' in source
-    assert '"iqa-run-mlflow"' in source
-    assert '"{{ params.gates_config }}"' in source
-    # gates/mlflow no longer route through the iqa lifecycle_tasks callables.
-    assert "task_gates" not in source
-    assert "task_mlflow" not in source
+    assert '"promotion_min_delta": 0.0' in source
+    assert '"require_mlflow_registry": False' in source
+    assert "--promotion-min-delta" in source
+    assert "--require-mlflow-registry" in source
 
 
 @pytest.mark.unit
-def test_lifecycle_dag_containerises_promotion_and_reload_via_factory() -> None:
-    """Lifecycle DAG (issue 11) runs promotion + reload as containers.
-
-    The last two stages move to the factory, so ADR 0008 is fully resolved: no
-    PythonOperator and no iqa lifecycle_tasks import remain in the DAG. promotion
-    runs on the ml image (MLflow is the source of truth); reload runs on the data
-    image and only acts for prod promotions.
-    """
+def test_lifecycle_dag_keeps_scheduler_free_of_runtime_and_legacy_tasks() -> None:
+    """Lifecycle DAG stays lightweight and does not instantiate legacy tasks."""
     source = _read_dag_source("iqa_lifecycle.py")
 
-    assert '"iqa-run-promotion"' in source
-    assert '"iqa-run-reload"' in source
-    assert '"{{ params.target_stage }}"' in source
-    # No PythonOperator instantiation and no lifecycle_tasks callables anymore.
     assert "PythonOperator(" not in source
-    assert "task_promotion" not in source
-    assert "task_reload" not in source
     assert "lifecycle_tasks" not in source
+    for forbidden in ["import torch", "import pandas", "from iqa.inference", "from iqa.training"]:
+        assert forbidden not in source
 
 
 @pytest.mark.unit
@@ -262,8 +199,8 @@ def test_dvc_reproducibility_dag_declares_safe_dvc_gate() -> None:
 
 
 @pytest.mark.docker_contract
-def test_iqa_lifecycle_dag_has_linear_dependencies() -> None:
-    """Test that iqa_lifecycle DAG has linear dependencies: dataset→train→eval→gates→mlflow→promotion→reload."""
+def test_iqa_lifecycle_dag_has_single_application_task() -> None:
+    """Test that iqa_lifecycle DAG runs the lifecycle as one application task."""
     try:
         import iqa_lifecycle
     except ImportError as e:
@@ -273,17 +210,7 @@ def test_iqa_lifecycle_dag_has_linear_dependencies() -> None:
     if dag is None:
         pytest.skip("DAG is None (Airflow not available)")
 
-    # Expected linear chain
-    expected_chain = ["lifecycle_decision", "dataset", "train", "eval", "gates", "mlflow", "promotion", "reload"]
-
-    # Verify downstream dependencies
-    for i in range(len(expected_chain) - 1):
-        task = dag.get_task(expected_chain[i])
-        next_task = dag.get_task(expected_chain[i + 1])
-        downstream_ids = {t.task_id for t in task.downstream_list}
-        assert (
-            next_task.task_id in downstream_ids
-        ), f"{expected_chain[i]} should have {expected_chain[i+1]} as downstream"
+    assert {task.task_id for task in dag.tasks} == {"run_application_lifecycle"}
 
 
 @pytest.mark.docker_contract
@@ -306,7 +233,8 @@ def test_iqa_lifecycle_dag_passes_dagbag_validation() -> None:
 
     dag = dag_bag.get_dag("iqa_lifecycle")
     assert dag is not None, "iqa_lifecycle DAG is None"
-    assert len(dag.tasks) == 8, f"Expected 8 tasks, got {len(dag.tasks)}"
+    assert len(dag.tasks) == 1, f"Expected 1 task, got {len(dag.tasks)}"
+    assert dag.get_task("run_application_lifecycle") is not None
 
 
 @pytest.mark.unit

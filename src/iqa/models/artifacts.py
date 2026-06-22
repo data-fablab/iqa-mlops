@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from iqa.storage.artifacts import resolve_model_artifact_from_manifest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-MODEL_MANIFESTS_DIR = REPO_ROOT / "models" / "manifests"
+DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
+MODEL_MANIFESTS_DIR = DEFAULT_REPO_ROOT / "models" / "manifests"
 DEFAULT_ROI_MODEL_VERSION = "roi_segmenter_v001_fixed"
 DEFAULT_FEATURE_AE_MODEL_VERSION = "rd_feature_ae_gated_v001_bootstrap"
 FEATURE_AE_CHAMPION_CONTRACT_VERSION = "feature_ae_champion_v001"
@@ -30,7 +31,13 @@ FEATURE_AE_CHAMPION_REQUIRED_FIELDS = {
 
 
 def model_manifest_path(model_version: str) -> Path:
-    return MODEL_MANIFESTS_DIR / model_version / "model_manifest.json"
+    configured_repo_root = os.environ.get("IQA_REPO_ROOT")
+    manifests_dir = (
+        Path(configured_repo_root) / "models" / "manifests"
+        if configured_repo_root
+        else MODEL_MANIFESTS_DIR
+    )
+    return manifests_dir / model_version / "model_manifest.json"
 
 
 def load_model_manifest(model_version: str) -> dict[str, Any]:

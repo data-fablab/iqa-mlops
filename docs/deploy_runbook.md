@@ -150,7 +150,10 @@ declenche pas de lifecycle modele.
 ## 5.2 Preuve Airflow container runtime
 
 La preuve Phase 3 Airflow verifie que les DAGs metier orchestrent des conteneurs
-via `DockerOperator`, sans importer le runtime metier dans le scheduler :
+via `DockerOperator`, sans importer le runtime metier dans le scheduler. Docker
+Compose orchestre les services longs ; Airflow orchestre les workflows metier
+applicatifs. Le DAG `iqa_lifecycle` lance le pipeline applicatif Feature-AE de
+reference avec `iqa-run-replay-lifecycle-cycle`.
 
 ```bash
 uv run --extra cpu iqa-check-airflow-container-runtime --json
@@ -160,16 +163,21 @@ docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow pools list
 docker compose exec airflow-webserver airflow dags unpause iqa_dvc_reproducibility
 docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle_trigger
+docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle
 docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibility \
   --conf '{"with_network": false,"skip_regeneration": true}'
 docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle_trigger \
   --conf '{"scenario_id":"production_replay_natural","conforming_validated_count":50,"drift_confirmed":false,"roi_fail_rate":0.0}'
+docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle \
+  --conf '{"mode":"progressive-train","max_events":260,"lifecycle_interval":50,"max_cycles":3,"epochs":10,"target_stage":"test","promotion_min_delta":0.0}'
 ```
 
 Le backend Docker est valide pour la Phase 3. Le socket Docker
 `/var/run/docker.sock` reste un privilege fort a reserver au serveur MVP de
 confiance ; Kubernetes reste Phase 4. Le lifecycle reste declenche par evenement
-data et il n'y a pas de training via CI.
+data ou manuellement par un operateur Airflow, et il n'y a pas de training via
+CI. MLflow Registry est la source de verite modele pour le stage `test`; MinIO
+stocke les checkpoints et artefacts.
 
 ## 6. Acces via le reverse proxy
 

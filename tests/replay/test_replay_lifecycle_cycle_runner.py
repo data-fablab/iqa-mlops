@@ -170,6 +170,15 @@ def test_validation_gt_masks_manifest_supports_pixel_metrics() -> None:
     assert all(row["gt_mask_path"].endswith("_mask.png") for row in rows)
 
 
+def test_original_dataset_gt_mask_contract_matches_split_semantics() -> None:
+    assert runner.gt_mask_path_for_original_dataset("Casting_class1/train/good/part.jpg") == ""
+    assert runner.gt_mask_path_for_original_dataset("Casting_class1/test/good/part.jpg") == ""
+    assert (
+        runner.gt_mask_path_for_original_dataset("Casting_class1/test/defective/part.jpg")
+        == "Casting_class1/ground_truth/defective/part_mask.png"
+    )
+
+
 def test_decision_only_triggers_natural_without_training(tmp_path: Path, monkeypatch) -> None:
     plan = tmp_path / "natural.csv"
     _write_replay(plan, scenario_id=runner.NATURAL_SCENARIO_ID, rows=60)

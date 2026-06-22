@@ -16,9 +16,8 @@ Airflow glue (no ``iqa`` import in the scheduler, ADR 0008):
    short-circuits unless ``trigger_lifecycle`` is true -- so nothing fires on the
    nominal "keep waiting" path.
 3. ``trigger_lifecycle`` -- a ``TriggerDagRunOperator`` that launches
-   ``iqa_lifecycle`` and forwards the raw signal params as ``conf``. The
-   candidate dataset version is re-derived by the target DAG's own
-   ``lifecycle_decision`` task, so the trigger only relays the signal.
+   ``iqa_lifecycle`` and forwards the raw signal plus the application lifecycle
+   parameters as ``conf``.
 
 The thresholds are the existing data-event rule (configurable via params /
 ``min_natural_conforming``); the real observation of the store state
@@ -83,7 +82,14 @@ def _define() -> None:
             "conforming_validated_count": "{{ params.conforming_validated_count }}",
             "drift_confirmed": "{{ params.drift_confirmed }}",
             "roi_fail_rate": "{{ params.roi_fail_rate }}",
+            "image_root": "{{ params.image_root }}",
+            "mode": "{{ params.mode }}",
+            "max_events": "{{ params.max_events }}",
+            "lifecycle_interval": "{{ params.lifecycle_interval }}",
+            "max_cycles": "{{ params.max_cycles }}",
+            "epochs": "{{ params.epochs }}",
             "target_stage": "{{ params.target_stage }}",
+            "promotion_min_delta": "{{ params.promotion_min_delta }}",
         },
     )
 
@@ -100,7 +106,14 @@ dag = build_container_dag(
         "conforming_validated_count": 0,
         "drift_confirmed": False,
         "roi_fail_rate": 0.0,
+        "image_root": "/opt/iqa/iqa-mlops/data/raw/hss-iad",
+        "mode": "progressive-train",
+        "max_events": 260,
+        "lifecycle_interval": 50,
+        "max_cycles": 3,
+        "epochs": 10,
         "target_stage": "test",
+        "promotion_min_delta": 0.0,
         "image": data_image(),
     },
 )
