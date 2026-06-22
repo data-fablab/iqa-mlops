@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -1471,6 +1472,7 @@ def train_progressive_candidate(
     dataset_snapshot_id: str,
 ) -> dict[str, Any]:
     run_dir = Path(".cache/iqa/models") / candidate_version
+    _reset_generated_progressive_candidate_run_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     config = FeatureAETrainingConfig(
         manifest_path=manifest_path,
@@ -1498,6 +1500,15 @@ def train_progressive_candidate(
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
+
+
+def _reset_generated_progressive_candidate_run_dir(run_dir: Path) -> None:
+    """Clear stale artifacts for deterministic progressive candidate versions."""
+    if not run_dir.exists():
+        return
+    if run_dir.resolve().parent != (Path(".cache/iqa/models")).resolve():
+        raise ValueError(f"refusing to reset unexpected candidate run dir: {run_dir}")
+    shutil.rmtree(run_dir)
 
 
 def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDecision) -> dict[str, Any]:

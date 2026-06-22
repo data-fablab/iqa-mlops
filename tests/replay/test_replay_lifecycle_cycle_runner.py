@@ -151,6 +151,63 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
     return train_calls
 
 
+def test_progressive_candidate_training_resets_stale_generated_artifacts(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    candidate_version = "rd_feature_ae_gated_natural_cycle_001"
+    run_dir = Path(".cache/iqa/models") / candidate_version
+    stale_eval_dir = run_dir / "metric_eval" / "epoch_010"
+    stale_eval_dir.mkdir(parents=True)
+    (run_dir / "metric_eval_best.json").write_text(
+        json.dumps(
+            {
+                "pixel_aupimo_1e-5_1e-3": {
+                    "value": 0.99,
+                    "epoch": 10,
+                    "checkpoint": "checkpoint_best_pixel_aupimo_1e-5_1e-3.pt",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (stale_eval_dir / "metrics.json").write_text("{}", encoding="utf-8")
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text("relative_path\nCasting_class1/train/good/part.jpg\n", encoding="utf-8")
+
+    def fake_train(config, git_commit):
+        del git_commit
+        assert config.output_checkpoint.parent == run_dir
+        assert not (run_dir / "metric_eval_best.json").exists()
+        assert not stale_eval_dir.exists()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "metric_eval_best.json").write_text(
+            json.dumps(
+                {
+                    "pixel_aupimo_1e-5_1e-3": {
+                        "value": 0.1,
+                        "epoch": 1,
+                        "checkpoint": "checkpoint_best_pixel_aupimo_1e-5_1e-3.pt",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {"checkpoint": str(config.output_checkpoint), "run_id": "run-001", "run_dir": str(run_dir)}
+
+    monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train)
+    monkeypatch.setattr(runner, "_git_commit", lambda: "test")
+
+    result = runner.train_progressive_candidate(
+        _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train"),
+        candidate_version,
+        manifest,
+        "feature_ae_natural_cycle_001",
+    )
+
+    assert result["run_id"] == "run-001"
+    metric_best = json.loads((run_dir / "metric_eval_best.json").read_text(encoding="utf-8"))
+    assert metric_best["pixel_aupimo_1e-5_1e-3"]["epoch"] == 1
+
+
 def test_replay_lifecycle_cycle_selects_plan_by_scenario(tmp_path: Path, monkeypatch) -> None:
     natural = tmp_path / "natural.csv"
     drift = tmp_path / "drift.csv"
