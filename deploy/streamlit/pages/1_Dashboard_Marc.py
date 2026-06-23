@@ -18,6 +18,13 @@ st.caption(f"iqa-api: {API_URL}")
 
 REPO_ROOT = default_repo_root(__file__)
 DEFAULT_RUN_DIR = os.environ.get("IQA_MARC_REPLAY_RUN_DIR", "")
+LABEL_CONFORME = "Conforme"
+LABEL_A_VERIFIER = "A verifier"
+LABEL_NON_CONFORME = "Non conforme"
+COLOR_CONFORME = "#2ca02c"
+COLOR_A_VERIFIER = "#f5a623"
+COLOR_NON_CONFORME = "#d62728"
+COLOR_GT_DEFECT = "#6b7280"
 
 
 def _resolve_path(value: str | os.PathLike[str] | None) -> Path:
@@ -89,7 +96,7 @@ with tab_run:
         k2.metric("Pieces inspectees", total_pieces)
         k3.metric("Conformite globale", f"{conformity_rate} %")
         k4.metric("Defauts GT", defauts)
-        k5.metric("Orange / Rouge", f"{oranges} / {rouges}")
+        k5.metric("A verifier / Non conforme", f"{oranges} / {rouges}")
         k6.metric("ROI fail rate", f"{round(100 * roi_fail / max(total_pieces, 1), 2)} %")
 
         st.info(
@@ -111,9 +118,9 @@ with tab_run:
                 "pieces": "Pieces",
                 "conformes_gt": "Conformes GT",
                 "defauts_gt": "Defauts GT",
-                "vert": "Vert",
-                "orange": "Orange",
-                "rouge": "Rouge",
+                "vert": LABEL_CONFORME,
+                "orange": LABEL_A_VERIFIER,
+                "rouge": LABEL_NON_CONFORME,
                 "taux_conformite": st.column_config.NumberColumn("Conformite", format="%.1f%%"),
                 "roi_fail_rate": st.column_config.NumberColumn("ROI fail", format="%.2f%%"),
                 "statut_lot": "Statut lot",
@@ -126,24 +133,24 @@ with tab_run:
             st.subheader("Tendance conformite par lot")
             st.line_chart({"Conformite %": {row["lot_id"]: row["taux_conformite"] for row in lots}})
         with chart_b:
-            st.subheader("Defauts et decisions par lot")
+            st.subheader("Defauts GT et decisions par lot")
             st.bar_chart(
                 {
                     "Defauts GT": {row["lot_id"]: row["defauts_gt"] for row in lots},
-                    "Orange": {row["lot_id"]: row["orange"] for row in lots},
-                    "Rouge": {row["lot_id"]: row["rouge"] for row in lots},
+                    LABEL_A_VERIFIER: {row["lot_id"]: row["orange"] for row in lots},
+                    LABEL_NON_CONFORME: {row["lot_id"]: row["rouge"] for row in lots},
                 },
-                color=["#d62728", "#ff7f0e", "#8b0000"],
+                color=[COLOR_GT_DEFECT, COLOR_A_VERIFIER, COLOR_NON_CONFORME],
             )
 
-        st.subheader("Distribution Vert / Orange / Rouge")
+        st.subheader("Distribution Conforme / A verifier / Non conforme")
         st.bar_chart(
             {
-                "Vert": {row["lot_id"]: row["vert"] for row in lots},
-                "Orange": {row["lot_id"]: row["orange"] for row in lots},
-                "Rouge": {row["lot_id"]: row["rouge"] for row in lots},
+                LABEL_CONFORME: {row["lot_id"]: row["vert"] for row in lots},
+                LABEL_A_VERIFIER: {row["lot_id"]: row["orange"] for row in lots},
+                LABEL_NON_CONFORME: {row["lot_id"]: row["rouge"] for row in lots},
             },
-            color=["#2ca02c", "#ff7f0e", "#d62728"],
+            color=[COLOR_CONFORME, COLOR_A_VERIFIER, COLOR_NON_CONFORME],
         )
 
         st.divider()
@@ -279,8 +286,8 @@ with tab_api:
 
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Volume total", total)
-        k2.metric("Oranges", oranges, f"{round(100 * oranges / total, 1)} %")
-        k3.metric("Rouges", rouges, f"{round(100 * rouges / total, 1)} %")
+        k2.metric(LABEL_A_VERIFIER, oranges, f"{round(100 * oranges / total, 1)} %")
+        k3.metric(LABEL_NON_CONFORME, rouges, f"{round(100 * rouges / total, 1)} %")
         k4.metric("Divergences oracle", divergences)
 
         st.dataframe(
@@ -289,20 +296,20 @@ with tab_api:
             column_config={
                 "scenario_id": "Lot",
                 "total": "Volume",
-                "vert": "Vert",
-                "orange": "Orange",
-                "rouge": "Rouge",
-                "taux_orange": st.column_config.NumberColumn("Taux Orange", format="%.1f%%"),
-                "taux_rouge": st.column_config.NumberColumn("Taux Rouge", format="%.1f%%"),
+                "vert": LABEL_CONFORME,
+                "orange": LABEL_A_VERIFIER,
+                "rouge": LABEL_NON_CONFORME,
+                "taux_orange": st.column_config.NumberColumn("Taux a verifier", format="%.1f%%"),
+                "taux_rouge": st.column_config.NumberColumn("Taux non conforme", format="%.1f%%"),
                 "feedback_closed": "Feedback fermes",
                 "divergences": "Divergences",
             },
         )
         st.bar_chart(
             {
-                "Vert": {lot["scenario_id"]: lot["vert"] for lot in api_lots},
-                "Orange": {lot["scenario_id"]: lot["orange"] for lot in api_lots},
-                "Rouge": {lot["scenario_id"]: lot["rouge"] for lot in api_lots},
+                LABEL_CONFORME: {lot["scenario_id"]: lot["vert"] for lot in api_lots},
+                LABEL_A_VERIFIER: {lot["scenario_id"]: lot["orange"] for lot in api_lots},
+                LABEL_NON_CONFORME: {lot["scenario_id"]: lot["rouge"] for lot in api_lots},
             },
-            color=["#2ca02c", "#ff7f0e", "#d62728"],
+            color=[COLOR_CONFORME, COLOR_A_VERIFIER, COLOR_NON_CONFORME],
         )
