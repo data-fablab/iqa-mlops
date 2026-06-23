@@ -21,14 +21,17 @@ consumers:
       - group: monitoring
 
 services:
-  - name: iqa-api
-    url: http://iqa-api:8000
+  - name: iqa-api-health
+    url: http://iqa-api:8000/health
     routes:
       - name: iqa-api-health
         paths:
           - /api/health
         strip_path: true
 
+  - name: iqa-api-admin-reload
+    url: http://iqa-api:8000/admin/reload-model
+    routes:
       - name: iqa-api-admin-reload
         paths:
           - /api/admin/reload-model
@@ -51,6 +54,9 @@ services:
             config:
               allowed_payload_size: 1
 
+  - name: iqa-api-metrics
+    url: http://iqa-api:8000/metrics
+    routes:
       - name: iqa-api-metrics
         paths:
           - /api/metrics
@@ -71,6 +77,9 @@ services:
               minute: 30
               policy: local
 
+  - name: iqa-api
+    url: http://iqa-api:8000
+    routes:
       - name: iqa-api-protected
         paths:
           - /api
