@@ -7,16 +7,18 @@ from typing import Any
 
 from iqa.datasets import FEATURE_AE_CONTEXT_SIZE, FEATURE_AE_TILE_SIZE
 
-FEATURE_AE_PREPROCESSING_CONTRACT_VERSION = "feature_ae_champion_v001"
+FEATURE_AE_PREPROCESSING_CONTRACT_VERSION = "feature_ae_reference_v001"
 FEATURE_AE_BUSINESS_METRIC_PRIORITY = (
     "pixel_aupimo_1e-5_1e-3",
     "pixel_ap",
     "image_ap",
     "image_auroc",
 )
-FEATURE_AE_CHAMPION_LAYER_WEIGHTS = {"layer2": 0.65, "layer3": 0.35}
-FEATURE_AE_CHAMPION_TEACHER_WEIGHTS = "IMAGENET1K_V1"
-FEATURE_AE_CHAMPION_ROI_MODE = "soft_map"
+FEATURE_AE_REFERENCE_LAYER_WEIGHTS = {"layer2": 0.65, "layer3": 0.35}
+FEATURE_AE_REFERENCE_TEACHER_WEIGHTS = "IMAGENET1K_V1"
+FEATURE_AE_REFERENCE_ROI_MODE = "soft_map"
+FEATURE_AE_REFERENCE_SCORE_MODE = "sqrt_l2_plus_cosine"
+FEATURE_AE_REFERENCE_LAYER_NORMALIZATION = "good_p99"
 
 
 @dataclass(frozen=True)
@@ -28,9 +30,9 @@ class FeatureAEPreprocessingContract:
     tile_stride: int = FEATURE_AE_TILE_SIZE
     normalization: str = "imagenet"
     tile_train_sampling: str = "all"
-    teacher_weights: str = FEATURE_AE_CHAMPION_TEACHER_WEIGHTS
+    teacher_weights: str = FEATURE_AE_REFERENCE_TEACHER_WEIGHTS
     layer_weights: dict[str, float] | None = None
-    roi_mode: str = FEATURE_AE_CHAMPION_ROI_MODE
+    roi_mode: str = FEATURE_AE_REFERENCE_ROI_MODE
     roi_threshold: float = 0.50
     min_roi_ratio: float = 0.03
     score_region: str = "functional_surface_prediction"
@@ -38,10 +40,14 @@ class FeatureAEPreprocessingContract:
     score_image: str = "topk_mean"
     topk_fraction: float = 0.005
     augmentation_profile: str = "none"
+    layer_score_mode: str = FEATURE_AE_REFERENCE_SCORE_MODE
+    layer_normalization: str = FEATURE_AE_REFERENCE_LAYER_NORMALIZATION
+    layer_normalization_stats: dict[str, float] | None = None
+    cosine_weight: float = 0.5
 
 
 CANONICAL_FEATURE_AE_PREPROCESSING = FeatureAEPreprocessingContract(
-    layer_weights=FEATURE_AE_CHAMPION_LAYER_WEIGHTS.copy()
+    layer_weights=FEATURE_AE_REFERENCE_LAYER_WEIGHTS.copy()
 )
 
 
@@ -119,3 +125,4 @@ __all__ = [
     "assert_canonical_feature_ae_preprocessing",
     "canonical_feature_ae_preprocessing_dict",
 ]
+

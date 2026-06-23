@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -24,6 +26,7 @@ from iqa.models.artifacts import (
 from iqa.monitoring import LifecycleDecision, LifecycleSignal, evaluate_lifecycle_signal
 from iqa.runtime import gpu_lock
 from iqa.storage.object_store import ObjectStore
+from iqa.storage.artifacts import sha256_file
 from iqa.storage.visual_artifacts import (
     VisualArtifactContext,
     create_visual_object_store,
@@ -32,7 +35,12 @@ from iqa.storage.visual_artifacts import (
 )
 from iqa.training.bootstrap import upload_checkpoint_to_s3
 from iqa.training.feature_ae import FeatureAETrainingConfig
-from iqa.training.feature_ae_evaluation import FeatureAEEvaluationConfig, evaluate_feature_ae_checkpoint
+from iqa.training.feature_ae_evaluation import (
+    PREDICTION_SCHEMA_VERSION,
+    FeatureAEEvaluationConfig,
+    compute_decision_metrics,
+    evaluate_feature_ae_checkpoint,
+)
 from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING, FEATURE_AE_BUSINESS_METRIC_PRIORITY
 from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
 from iqa.registry import register_run_to_model, registered_model_name
@@ -49,10 +57,12 @@ CANDIDATE_DATASETS = {
 }
 VALIDATION_MANIFEST = Path("data/validation/validation_set_v001.csv")
 VALIDATION_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
+DEFAULT_ANCHOR_GOOD_MANIFEST = Path("data/model_datasets/feature_ae_good_v002.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/replay_lifecycle")
 Mode = Literal["decision-only", "train-on-trigger", "progressive-decision", "progressive-train"]
 PROGRESSIVE_MODES = {"progressive-decision", "progressive-train"}
 ACTIVE_REPLAY_SCENARIOS = Path("data/metadata/replay_scenarios.csv")
+PROGRESSIVE_PROMOTION_POLICY = "candidate_must_pass_reference_guardrail_and_progressive_factory_panel"
 
 
 @dataclass
@@ -188,7 +198,7 @@ class CycleState:
                     "promotion_chain": self.promotion_chain,
                     "registry_stage": self.cycles[-1]["registry_stage"] if self.cycles else "",
                     "registry_model_name": registered_model_name(self.scenario_id),
-                    "promotion_policy": "candidate_must_improve_active_on_same_eval_set",
+                    "promotion_policy": PROGRESSIVE_PROMOTION_POLICY,
                     "promotion_min_delta": getattr(self, "promotion_min_delta", 0.0),
                     "comparison_history": [
                         {
@@ -273,6 +283,7 @@ class LifecycleArtifacts:
     summary_path: Path
     progress_path: Path
     lifecycle_events_path: Path
+    timings_path: Path
 
 
 def parse_args() -> argparse.Namespace:
@@ -300,6 +311,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-stage", default="test")
     parser.add_argument("--promotion-min-delta", type=float, default=0.0)
     parser.add_argument("--require-mlflow-registry", action="store_true")
+    parser.add_argument("--anchor-good-manifest", type=Path, default=DEFAULT_ANCHOR_GOOD_MANIFEST)
+    parser.add_argument("--anchor-good-max-per-class", type=int, default=256)
+    parser.add_argument("--hard-good-max-per-class", type=int, default=64)
+    parser.add_argument("--reference-eval-manifest", type=Path, default=VALIDATION_MANIFEST)
+    parser.add_argument("--reference-gt-masks-manifest", type=Path, default=VALIDATION_GT_MASKS_MANIFEST)
+    parser.add_argument("--progressive-min-defects-for-decision", type=int, default=5)
+    parser.add_argument("--candidate-init-policy", choices=["stable_base", "active", "fresh"], default="stable_base")
     return parser.parse_args()
 
 
@@ -363,6 +381,7 @@ def summary_with_runtime(
             "progress_path": str(artifacts.progress_path),
             "lifecycle_events_path": str(artifacts.lifecycle_events_path),
             "cycles_path": str(artifacts.cycles_path),
+            "timings_path": str(artifacts.timings_path),
         }
     )
     return payload
@@ -385,6 +404,18 @@ def record_lifecycle_event(
             "events_processed": state.events_processed,
             "lots_processed": state.lots_processed,
             "active_model_version": active_runtime.version,
+            "timestamp": datetime.now(UTC).isoformat(),
+            **payload,
+        },
+    )
+
+
+def record_timing(artifacts: LifecycleArtifacts, phase: str, *, duration_seconds: float, **payload: Any) -> None:
+    append_jsonl(
+        artifacts.timings_path,
+        {
+            "phase": phase,
+            "duration_seconds": duration_seconds,
             "timestamp": datetime.now(UTC).isoformat(),
             **payload,
         },
@@ -423,6 +454,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
         summary_path=state.output_dir / "summary.json",
         progress_path=state.output_dir / "progress.json",
         lifecycle_events_path=state.output_dir / "lifecycle_events.jsonl",
+        timings_path=state.output_dir / "timings.jsonl",
     )
     write_progress(artifacts, state, active_runtime, phase="started")
     record_lifecycle_event(artifacts, state, active_runtime, "run_started", args=vars(args))
@@ -592,22 +624,16 @@ def process_replay_event(
         heatmap_path=str(heatmap_path),
         heatmap_uri=heatmap_uri,
         active_model_version=active_model_version,
-        score_contract_version=getattr(feature, "score_contract_version", "feature_ae_champion_v001"),
+        score_contract_version=getattr(feature, "score_contract_version", "feature_ae_reference_v001"),
     )
 
 
 def resolve_runtime_thresholds(model_version: str) -> dict[str, Any]:
     thresholds = load_feature_ae_decision_thresholds(model_version)
-    if thresholds:
-        return {
-            "threshold_orange": float(thresholds["threshold_orange"]),
-            "threshold_red": float(thresholds["threshold_red"]),
-            "threshold_source": f"manifest:{thresholds.get('method', 'decision_thresholds')}",
-        }
     return {
-        "threshold_orange": 0.02,
-        "threshold_red": 0.05,
-        "threshold_source": "legacy_default",
+        "threshold_orange": float(thresholds["threshold_orange"]),
+        "threshold_red": float(thresholds["threshold_red"]),
+        "threshold_source": f"manifest:{thresholds.get('method', 'decision_thresholds')}",
     }
 
 
@@ -704,7 +730,14 @@ def handle_lifecycle_decision(
         phase="cycle_running",
         extra={"current_cycle": cycle_number, "trigger_reason": decision.trigger_reason},
     )
-    cycle_result = build_progressive_cycle(args, state, decision, cycle_number, active_runtime=active_runtime)
+    cycle_result = build_progressive_cycle(
+        args,
+        state,
+        decision,
+        cycle_number,
+        active_runtime=active_runtime,
+        artifacts=artifacts,
+    )
     state.last_cycle_conforming_validated_count = state.total_conforming_validated_count
     if cycle_result.get("mlflow_run_id"):
         record_lifecycle_event(
@@ -716,10 +749,28 @@ def handle_lifecycle_decision(
             candidate_version=cycle_result.get("candidate_version"),
             candidate_checkpoint=cycle_result.get("candidate_checkpoint"),
             mlflow_run_id=cycle_result.get("mlflow_run_id"),
+            mlflow_dataset_logged=cycle_result.get("mlflow_dataset_logged"),
+            mlflow_model_logged=cycle_result.get("mlflow_model_logged"),
             selected_metric=cycle_result.get("selected_metric"),
             selected_metric_value=cycle_result.get("selected_metric_value"),
         )
+    if cycle_result.get("evaluation_completed_at"):
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "evaluation_completed",
+            cycle_id=cycle_id,
+            candidate_version=cycle_result.get("candidate_version"),
+            selected_metric=cycle_result.get("selected_metric"),
+            active_metric_value=cycle_result.get("active_metric_value"),
+            candidate_metric_value=cycle_result.get("candidate_metric_value"),
+            metric_delta=cycle_result.get("metric_delta"),
+            evaluation_duration_seconds=cycle_result.get("evaluation_duration_seconds"),
+            aupimo_stability=cycle_result.get("candidate_aupimo_stability"),
+        )
     if cycle_result.get("promotion_status") == "promoted":
+        activation_started = datetime.now(UTC)
         promoted = str(cycle_result["candidate_version"])
         state.active_model_final = promoted
         state.promotion_chain.append(promoted)
@@ -757,6 +808,7 @@ def handle_lifecycle_decision(
             metric_delta=cycle_result.get("metric_delta"),
             promotion_status=cycle_result.get("promotion_status"),
             registry_status=cycle_result.get("registry_status"),
+            aupimo_stability=cycle_result.get("candidate_aupimo_stability"),
         )
         if cycle_result.get("registry_status") == "failed":
             record_lifecycle_event(
@@ -779,6 +831,13 @@ def handle_lifecycle_decision(
             active_thresholds=active_runtime.decision_thresholds,
             activation_scope=cycle_result["activation_scope"],
         )
+        record_timing(
+            artifacts,
+            "activation",
+            duration_seconds=(datetime.now(UTC) - activation_started).total_seconds(),
+            cycle_id=cycle_id,
+            active_model_version=active_runtime.version,
+        )
     elif args.mode == "progressive-train":
         state.status = "rejected"
         cycle_result["activated_for_next_events"] = False
@@ -799,6 +858,8 @@ def handle_lifecycle_decision(
             metric_delta=cycle_result.get("metric_delta"),
             gate_reason=cycle_result.get("gate_reason"),
             promotion_status=cycle_result.get("promotion_status"),
+            aupimo_stability=cycle_result.get("candidate_aupimo_stability"),
+            operational_alerts=cycle_result.get("operational_alerts"),
         )
     else:
         cycle_result["activated_for_next_events"] = False
@@ -831,40 +892,62 @@ def build_progressive_cycle(
     cycle_number: int,
     *,
     active_runtime: ActiveRuntimeModel,
+    artifacts: LifecycleArtifacts,
 ) -> dict[str, Any]:
     candidate_version = f"rd_feature_ae_gated_natural_cycle_{cycle_number:03d}"
     dataset_snapshot_id = f"feature_ae_natural_cycle_{cycle_number:03d}"
     calibration_set_id = f"calibration_natural_cycle_{cycle_number:03d}"
-    evaluation_set_id = f"progressive_eval_cycle_{cycle_number:03d}"
+    reference_evaluation_set_id = f"reference_eval_cycle_{cycle_number:03d}"
+    progressive_evaluation_set_id = f"progressive_eval_cycle_{cycle_number:03d}"
     active_model_before = active_runtime.version
     active_checkpoint = active_runtime.checkpoint
     cycle_dir = state.output_dir / "cycles" / f"cycle_{cycle_number:03d}"
     cycle_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = write_seen_dataset_snapshot(
+    seen_snapshot_path = write_seen_dataset_snapshot(
         state.seen_events,
         cycle_dir / f"{dataset_snapshot_id}.csv",
         dataset_snapshot_id=dataset_snapshot_id,
         scenario_id=state.scenario_id,
     )
-    evaluation_set_path = write_seen_evaluation_set(
+    training_manifest_path, training_manifest_stats = write_progressive_training_manifest(
+        seen_snapshot_path=seen_snapshot_path,
+        anchor_good_manifest=args.anchor_good_manifest,
+        hard_good_buffer_path=state.output_dir / "hard_good_buffer.csv",
+        output_path=cycle_dir / "training_manifest.csv",
+        dataset_snapshot_id=dataset_snapshot_id,
+        scenario_id=state.scenario_id,
+        anchor_good_max_per_class=args.anchor_good_max_per_class,
+        hard_good_max_per_class=args.hard_good_max_per_class,
+    )
+    progressive_evaluation_set_path = write_seen_evaluation_set(
         state.seen_events,
-        cycle_dir / "evaluation_set.csv",
-        evaluation_set_id=evaluation_set_id,
+        cycle_dir / "progressive_evaluation_set.csv",
+        evaluation_set_id=progressive_evaluation_set_id,
         scenario_id=state.scenario_id,
     )
+    shutil.copy2(progressive_evaluation_set_path, cycle_dir / "evaluation_set.csv")
+    reference_evaluation_set_path = cycle_dir / "reference_evaluation_set.csv"
+    shutil.copy2(args.reference_eval_manifest, reference_evaluation_set_path)
     result: dict[str, Any] = {
         "cycle_id": f"cycle_{cycle_number:03d}",
-        "promotion_policy": "candidate_must_improve_active_on_same_eval_set",
+        "promotion_policy": PROGRESSIVE_PROMOTION_POLICY,
         "promotion_min_delta": float(args.promotion_min_delta),
         "active_model_before": active_model_before,
         "active_runtime_before": active_runtime.to_dict(),
         "active_thresholds_before": active_runtime.decision_thresholds,
         "candidate_version": candidate_version,
         "dataset_snapshot_id": dataset_snapshot_id,
-        "dataset_snapshot_path": str(manifest_path),
+        "dataset_snapshot_path": str(seen_snapshot_path),
+        "training_manifest_path": str(training_manifest_path),
+        "training_manifest_stats": training_manifest_stats,
+        "candidate_init_policy": args.candidate_init_policy,
         "calibration_set_id": calibration_set_id,
-        "evaluation_set_id": evaluation_set_id,
-        "evaluation_set_path": str(evaluation_set_path),
+        "evaluation_set_id": progressive_evaluation_set_id,
+        "evaluation_set_path": str(progressive_evaluation_set_path),
+        "reference_evaluation_set_id": reference_evaluation_set_id,
+        "reference_evaluation_set_path": str(reference_evaluation_set_path),
+        "progressive_evaluation_set_id": progressive_evaluation_set_id,
+        "progressive_evaluation_set_path": str(progressive_evaluation_set_path),
         "evaluation_seen_events": len(state.seen_events),
         "seen_events": len(state.seen_events),
         "seen_conforming": sum(1 for event in state.seen_events if event.oracle_verdict == "conforme"),
@@ -892,26 +975,92 @@ def build_progressive_cycle(
         "operational_alerts": [],
     }
     if args.mode == "progressive-train":
-        train_result = train_progressive_candidate(args, candidate_version, manifest_path, dataset_snapshot_id)
+        train_started = datetime.now(UTC)
+        initial_checkpoint_path = resolve_candidate_initial_checkpoint(
+            args,
+            active_runtime=active_runtime,
+        )
+        train_result = train_progressive_candidate(
+            args,
+            candidate_version,
+            training_manifest_path,
+            dataset_snapshot_id,
+            initial_checkpoint_path=initial_checkpoint_path,
+        )
+        train_completed = datetime.now(UTC)
+        record_timing(
+            artifacts,
+            "train",
+            duration_seconds=(train_completed - train_started).total_seconds(),
+            cycle_id=f"cycle_{cycle_number:03d}",
+            candidate_version=candidate_version,
+        )
         result["candidate_checkpoint"] = str(train_result.get("checkpoint") or "")
+        result["candidate_initial_checkpoint"] = str(initial_checkpoint_path) if initial_checkpoint_path else ""
         result["mlflow_run_id"] = str(train_result.get("run_id") or "")
+        result["mlflow_dataset_logged"] = bool(train_result.get("mlflow_dataset_logged"))
+        result["mlflow_training_dataset_logged"] = bool(train_result.get("mlflow_training_dataset_logged"))
+        result["mlflow_metric_eval_dataset_logged"] = bool(train_result.get("mlflow_metric_eval_dataset_logged"))
+        result["mlflow_model_logged"] = bool(train_result.get("mlflow_model_logged"))
         candidate_training_evidence = metric_evidence_from_training_result(train_result)
         result.update(candidate_training_evidence)
+        result["epoch_selected_metric"] = result.get("selected_metric")
+        result["epoch_selected_metric_value"] = result.get("selected_metric_value")
+        result["epoch_selected_epoch"] = result.get("selected_epoch")
+        result["epoch_selected_checkpoint"] = result.get("selected_checkpoint")
+        write_progress(
+            artifacts,
+            state,
+            active_runtime,
+            phase="candidate_trained",
+            extra={
+                "current_cycle": cycle_number,
+                "current_epoch": result.get("selected_epoch"),
+                "best_epoch": result.get("selected_epoch"),
+                "best_business_metric": result.get("selected_metric"),
+                "best_business_metric_value": result.get("selected_metric_value"),
+                "mlflow_run_id": result.get("mlflow_run_id"),
+                "mlflow_dataset_logged": result.get("mlflow_dataset_logged"),
+                "mlflow_model_logged": result.get("mlflow_model_logged"),
+                "last_epoch_metrics": (result.get("epoch_metric_history") or [])[-1]
+                if result.get("epoch_metric_history")
+                else {},
+            },
+        )
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "candidate_trained",
+            cycle_id=f"cycle_{cycle_number:03d}",
+            candidate_version=candidate_version,
+            selected_epoch=result.get("selected_epoch"),
+            selected_metric=result.get("selected_metric"),
+            selected_metric_value=result.get("selected_metric_value"),
+            mlflow_run_id=result.get("mlflow_run_id"),
+            mlflow_dataset_logged=result.get("mlflow_dataset_logged"),
+            mlflow_model_logged=result.get("mlflow_model_logged"),
+        )
         comparison = evaluate_progressive_promotion_comparison(
             args,
             cycle_dir=cycle_dir,
-            evaluation_set_path=evaluation_set_path,
-            evaluation_set_id=evaluation_set_id,
+            reference_evaluation_set_path=reference_evaluation_set_path,
+            reference_evaluation_set_id=reference_evaluation_set_id,
+            progressive_evaluation_set_path=progressive_evaluation_set_path,
+            progressive_evaluation_set_id=progressive_evaluation_set_id,
             active_model_version=active_model_before,
             active_checkpoint_path=Path(active_checkpoint),
             candidate_version=candidate_version,
             candidate_checkpoint_path=Path(str(result["candidate_checkpoint"])),
+            artifacts=artifacts,
+            state=state,
+            active_runtime=active_runtime,
         )
         result.update(comparison)
         if comparison["gate_decision"] == "passed":
             result["promotion_status"] = "promoted"
             result["gate_decision"] = "passed"
-            result["gate_reason"] = "candidate_improved_active_on_same_eval_set"
+            result["gate_reason"] = comparison["gate_reason"]
         else:
             result["promotion_status"] = comparison["promotion_status"]
             result["gate_decision"] = "rejected"
@@ -922,7 +1071,24 @@ def build_progressive_cycle(
                 f"s3://iqa-models/{candidate_version}/checkpoint.pt",
             )
         if result["promotion_status"] == "promoted":
+            registry_started = datetime.now(UTC)
             result.update(register_promoted_cycle(args, state, result))
+            registry_completed = datetime.now(UTC)
+            record_timing(
+                artifacts,
+                "registry",
+                duration_seconds=(registry_completed - registry_started).total_seconds(),
+                cycle_id=f"cycle_{cycle_number:03d}",
+                candidate_version=candidate_version,
+                registry_status=result.get("registry_status"),
+            )
+        result["hard_good_added_count"] = update_hard_good_buffer(
+            run_buffer_path=state.output_dir / "hard_good_buffer.csv",
+            cycle_buffer_path=cycle_dir / "hard_good_buffer.csv",
+            metrics_path=Path(str(result.get("progressive_candidate_eval_metrics_path") or result.get("candidate_eval_metrics_path") or "")),
+            decision_thresholds=result.get("candidate_decision_thresholds"),
+            max_per_class=args.hard_good_max_per_class,
+        )
         tag_mlflow_promotion_evidence(result)
     else:
         result["candidate_checkpoint"] = None
@@ -943,6 +1109,8 @@ def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[s
 
     best_path = next((path for path in candidates if path.is_file()), None)
     best = json.loads(best_path.read_text(encoding="utf-8")) if best_path else {}
+    history_path = next((path.parent / "metric_eval_history.json" for path in candidates if (path.parent / "metric_eval_history.json").is_file()), None)
+    epoch_metric_history = json.loads(history_path.read_text(encoding="utf-8")) if history_path else train_result.get("epoch_metric_history", [])
     metrics = {
         metric: float(record["value"])
         for metric, record in best.items()
@@ -971,41 +1139,131 @@ def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[s
         "selected_epoch": int(selected_record.get("epoch") or 0) if selected_record else None,
         "selected_checkpoint": str(selected_record.get("checkpoint") or "") if selected_record else None,
         "val_loss": val_loss,
+        "epoch_metric_history": epoch_metric_history,
+        "checkpoint_selection_policy": train_result.get("checkpoint_selection_policy") or "business_metric_only",
     }
 
 
-def evaluate_progressive_promotion_comparison(
+def evaluate_model_pair_on_panel(
     args: argparse.Namespace,
     *,
     cycle_dir: Path,
+    panel_name: str,
     evaluation_set_path: Path,
     evaluation_set_id: str,
     active_model_version: str,
     active_checkpoint_path: Path,
     candidate_version: str,
     candidate_checkpoint_path: Path,
+    artifacts: LifecycleArtifacts,
+    state: CycleState,
+    active_runtime: ActiveRuntimeModel,
+    active_decision_thresholds: dict[str, Any],
+    gt_masks_manifest: Path,
 ) -> dict[str, Any]:
+    started_at = datetime.now(UTC)
     active = evaluate_progressive_model_on_set(
         args,
         model_version=active_model_version,
         checkpoint_path=active_checkpoint_path,
         evaluation_set_path=evaluation_set_path,
-        output_dir=cycle_dir / "evaluation" / "active_before",
+        output_dir=cycle_dir / "evaluation" / panel_name / "active_before",
+        evaluation_set_id=evaluation_set_id,
+        cache_root=cycle_dir.parents[1] / "prediction_cache",
+        decision_thresholds=active_decision_thresholds,
+        gt_masks_manifest=gt_masks_manifest,
     )
     candidate = evaluate_progressive_model_on_set(
         args,
         model_version=candidate_version,
         checkpoint_path=candidate_checkpoint_path,
         evaluation_set_path=evaluation_set_path,
-        output_dir=cycle_dir / "evaluation" / "candidate",
+        output_dir=cycle_dir / "evaluation" / panel_name / "candidate",
+        evaluation_set_id=evaluation_set_id,
+        cache_root=cycle_dir.parents[1] / "prediction_cache",
+        gt_masks_manifest=gt_masks_manifest,
     )
     candidate_decision_thresholds = thresholds_from_evaluation_scores(
         candidate["metrics_path"],
         evaluation_set_id=evaluation_set_id,
     )
+    candidate = apply_decision_thresholds_to_evaluation(
+        candidate,
+        decision_thresholds=candidate_decision_thresholds,
+    )
+    completed_at = datetime.now(UTC)
+    duration = (completed_at - started_at).total_seconds()
+    for role, payload in (("active_before", active), ("candidate", candidate)):
+        if payload.get("eval_inference_seconds") is not None and not payload.get("cache_hit"):
+            record_timing(
+                artifacts,
+                "eval_inference",
+                duration_seconds=float(payload.get("eval_inference_seconds") or 0.0),
+                cycle_id=cycle_dir.name,
+                panel=panel_name,
+                role=role,
+                cache_status=payload.get("cache_status"),
+            )
+        metric_timings = payload.get("metric_timings") or {}
+        if metric_timings.get("aupimo_compute_seconds") is not None:
+            record_timing(
+                artifacts,
+                "aupimo_compute",
+                duration_seconds=float(metric_timings.get("aupimo_compute_seconds") or 0.0),
+                cycle_id=cycle_dir.name,
+                panel=panel_name,
+                role=role,
+                cache_status=payload.get("cache_status"),
+            )
+        if metric_timings.get("pixel_rank_metrics_seconds") is not None:
+            record_timing(
+                artifacts,
+                "pixel_rank_metrics",
+                duration_seconds=float(metric_timings.get("pixel_rank_metrics_seconds") or 0.0),
+                cycle_id=cycle_dir.name,
+                panel=panel_name,
+                role=role,
+                cache_status=payload.get("cache_status"),
+            )
+    record_timing(
+        artifacts,
+        "comparative_eval",
+        duration_seconds=duration,
+        cycle_id=cycle_dir.name,
+        panel=panel_name,
+        active_cache_status=active.get("cache_status"),
+        candidate_cache_status=candidate.get("cache_status"),
+        active_metric_timings=active.get("metric_timings"),
+        candidate_metric_timings=candidate.get("metric_timings"),
+    )
+    for role, payload in (("active_before", active), ("candidate", candidate)):
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "prediction_cache_hit" if payload.get("cache_hit") else "prediction_cache_miss",
+            cycle_id=cycle_dir.name,
+            panel=panel_name,
+            role=role,
+            model_version=payload.get("model_version"),
+            cache_key=payload.get("cache_key"),
+            cache_status=payload.get("cache_status"),
+        )
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "evaluation_completed",
+        cycle_id=cycle_dir.name,
+        panel=panel_name,
+        active_model_version=active_model_version,
+        candidate_version=candidate_version,
+        duration_seconds=duration,
+    )
     selected_metric = select_comparable_business_metric(active["metrics"], candidate["metrics"])
     if selected_metric is None:
         return {
+            "panel": panel_name,
             "metrics": candidate["metrics"],
             "active_metrics_on_eval_set": active["metrics"],
             "candidate_metrics_on_eval_set": candidate["metrics"],
@@ -1019,11 +1277,27 @@ def evaluate_progressive_promotion_comparison(
             "promotion_status": "rejected_missing_comparable_metric",
             "active_eval_metrics_path": active["metrics_path"],
             "candidate_eval_metrics_path": candidate["metrics_path"],
+            "active_cache_status": active.get("cache_status"),
+            "candidate_cache_status": candidate.get("cache_status"),
+            "active_cache_key": active.get("cache_key"),
+            "candidate_cache_key": candidate.get("cache_key"),
+            "cache_status": candidate.get("cache_status"),
+            "cache_key": candidate.get("cache_key"),
+            "cache_hit": candidate.get("cache_hit"),
+            "cache_source": candidate.get("cache_source"),
             "candidate_decision_thresholds": candidate_decision_thresholds,
+            "prediction_schema_version": candidate.get("prediction_schema_version"),
+            "candidate_metric_timings": candidate.get("metric_timings", {}),
+            "active_metric_timings": active.get("metric_timings", {}),
             "threshold_source": (
                 candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
             ),
             "operational_alerts": ["missing_comparable_business_metric"],
+            "evaluation_started_at": started_at.isoformat(),
+            "evaluation_completed_at": completed_at.isoformat(),
+            "evaluation_duration_seconds": (completed_at - started_at).total_seconds(),
+            "defective_count": count_defective_rows(evaluation_set_path),
+            "per_class_regressions": [],
         }
     active_value = float(active["metrics"][selected_metric])
     candidate_value = float(candidate["metrics"][selected_metric])
@@ -1035,25 +1309,19 @@ def evaluate_progressive_promotion_comparison(
         operational_alerts.append("candidate_increases_false_negatives")
     if candidate_decision_thresholds is None:
         operational_alerts.append("missing_candidate_runtime_thresholds")
-
-    metric_improved = delta > float(args.promotion_min_delta)
-    passed = metric_improved and candidate_decision_thresholds is not None and candidate_false_negatives <= active_false_negatives
-    if passed:
-        gate_reason = "candidate_improved_active_on_same_eval_set"
-        promotion_status = "promoted"
-    elif not metric_improved:
-        gate_reason = "candidate_did_not_improve_active_on_same_eval_set"
-        promotion_status = "rejected_no_improvement"
-    elif candidate_false_negatives > active_false_negatives:
-        gate_reason = "candidate_increases_false_negatives"
-        promotion_status = "rejected_operational_guardrail"
-    elif candidate_decision_thresholds is None:
-        gate_reason = "missing_candidate_runtime_thresholds"
-        promotion_status = "rejected_missing_runtime_thresholds"
-    else:
-        gate_reason = "candidate_did_not_improve_active_on_same_eval_set"
-        promotion_status = "rejected_no_improvement"
+    candidate_stability = candidate.get("aupimo_stability") or {}
+    if candidate_stability.get("aupimo_unstable"):
+        operational_alerts.append("candidate_aupimo_unstable")
+    class_regressions = per_class_regressions(
+        active.get("per_class_metrics", {}),
+        candidate.get("per_class_metrics", {}),
+        metric=selected_metric,
+        min_delta=float(args.promotion_min_delta),
+    )
+    if class_regressions:
+        operational_alerts.append("candidate_per_class_regression")
     return {
+        "panel": panel_name,
         "metrics": candidate["metrics"],
         "active_metrics_on_eval_set": active["metrics"],
         "candidate_metrics_on_eval_set": candidate["metrics"],
@@ -1062,17 +1330,257 @@ def evaluate_progressive_promotion_comparison(
         "metric_delta": delta,
         "selected_metric": selected_metric,
         "selected_metric_value": candidate_value,
-        "gate_decision": "passed" if passed else "rejected",
-        "gate_reason": gate_reason,
-        "promotion_status": promotion_status,
+        "gate_decision": "not_aggregated",
+        "gate_reason": "panel_evaluated",
+        "promotion_status": "panel_evaluated",
         "active_eval_metrics_path": active["metrics_path"],
         "candidate_eval_metrics_path": candidate["metrics_path"],
+        "active_cache_status": active.get("cache_status"),
+        "candidate_cache_status": candidate.get("cache_status"),
+        "active_cache_key": active.get("cache_key"),
+        "candidate_cache_key": candidate.get("cache_key"),
+        "cache_status": candidate.get("cache_status"),
+        "cache_key": candidate.get("cache_key"),
+        "cache_hit": candidate.get("cache_hit"),
+        "cache_source": candidate.get("cache_source"),
         "candidate_decision_thresholds": candidate_decision_thresholds,
+        "prediction_schema_version": candidate.get("prediction_schema_version"),
+        "candidate_metric_timings": candidate.get("metric_timings", {}),
+        "active_metric_timings": active.get("metric_timings", {}),
         "threshold_source": (
             candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
         ),
         "candidate_false_negatives": candidate_false_negatives,
         "active_false_negatives": active_false_negatives,
+        "active_per_class_metrics": active.get("per_class_metrics", {}),
+        "candidate_per_class_metrics": candidate.get("per_class_metrics", {}),
+        "candidate_aupimo_stability": candidate.get("aupimo_stability", {}),
+        "active_aupimo_stability": active.get("aupimo_stability", {}),
+        "candidate_predictions_path": candidate.get("predictions_path"),
+        "active_predictions_path": active.get("predictions_path"),
+        "evaluation_started_at": started_at.isoformat(),
+        "evaluation_completed_at": completed_at.isoformat(),
+        "evaluation_duration_seconds": (completed_at - started_at).total_seconds(),
+        "operational_alerts": operational_alerts,
+        "defective_count": count_defective_rows(evaluation_set_path),
+        "per_class_regressions": class_regressions,
+    }
+
+
+def evaluate_progressive_promotion_comparison(
+    args: argparse.Namespace,
+    *,
+    cycle_dir: Path,
+    reference_evaluation_set_path: Path,
+    reference_evaluation_set_id: str,
+    progressive_evaluation_set_path: Path,
+    progressive_evaluation_set_id: str,
+    active_model_version: str,
+    active_checkpoint_path: Path,
+    candidate_version: str,
+    candidate_checkpoint_path: Path,
+    artifacts: LifecycleArtifacts,
+    state: CycleState,
+    active_runtime: ActiveRuntimeModel,
+) -> dict[str, Any]:
+    started_at = datetime.now(UTC)
+    reference = evaluate_model_pair_on_panel(
+        args,
+        cycle_dir=cycle_dir,
+        panel_name="reference",
+        evaluation_set_path=reference_evaluation_set_path,
+        evaluation_set_id=reference_evaluation_set_id,
+        active_model_version=active_model_version,
+        active_checkpoint_path=active_checkpoint_path,
+        candidate_version=candidate_version,
+        candidate_checkpoint_path=candidate_checkpoint_path,
+        artifacts=artifacts,
+        state=state,
+        active_runtime=active_runtime,
+        active_decision_thresholds=active_runtime.decision_thresholds,
+        gt_masks_manifest=args.reference_gt_masks_manifest,
+    )
+    progressive = evaluate_model_pair_on_panel(
+        args,
+        cycle_dir=cycle_dir,
+        panel_name="progressive",
+        evaluation_set_path=progressive_evaluation_set_path,
+        evaluation_set_id=progressive_evaluation_set_id,
+        active_model_version=active_model_version,
+        active_checkpoint_path=active_checkpoint_path,
+        candidate_version=candidate_version,
+        candidate_checkpoint_path=candidate_checkpoint_path,
+        artifacts=artifacts,
+        state=state,
+        active_runtime=active_runtime,
+        active_decision_thresholds=active_runtime.decision_thresholds,
+        gt_masks_manifest=args.reference_gt_masks_manifest,
+    )
+    completed_at = datetime.now(UTC)
+
+    reference_delta = reference.get("metric_delta")
+    progressive_delta = progressive.get("metric_delta")
+    reference_false_negatives_ok = int(reference.get("candidate_false_negatives") or 0) <= int(
+        reference.get("active_false_negatives") or 0
+    )
+    progressive_false_negatives_ok = int(progressive.get("candidate_false_negatives") or 0) <= int(
+        progressive.get("active_false_negatives") or 0
+    )
+    reference_passed = (
+        reference.get("selected_metric") is not None
+        and reference_delta is not None
+        and float(reference_delta) >= -abs(float(args.promotion_min_delta))
+        and reference_false_negatives_ok
+        and not reference.get("per_class_regressions")
+    )
+    progressive_has_enough_defects = int(progressive.get("defective_count") or 0) >= int(
+        args.progressive_min_defects_for_decision
+    )
+    progressive_monitor_only = not progressive_has_enough_defects
+    progressive_passed = True
+    if progressive_has_enough_defects:
+        progressive_passed = (
+            progressive.get("selected_metric") is not None
+            and progressive_delta is not None
+            and float(progressive_delta) > float(args.promotion_min_delta)
+            and progressive_false_negatives_ok
+            and not progressive.get("per_class_regressions")
+        )
+    candidate_thresholds = progressive.get("candidate_decision_thresholds") or reference.get("candidate_decision_thresholds")
+    thresholds_ok = candidate_thresholds is not None
+    passed = bool(reference_passed and progressive_passed and thresholds_ok)
+
+    reference_gate = {
+        "decision": "passed" if reference_passed else "rejected",
+        "selected_metric": reference.get("selected_metric"),
+        "active_metric_value": reference.get("active_metric_value"),
+        "candidate_metric_value": reference.get("candidate_metric_value"),
+        "metric_delta": reference.get("metric_delta"),
+        "false_negatives_ok": reference_false_negatives_ok,
+        "per_class_regressions": reference.get("per_class_regressions") or [],
+    }
+    progressive_gate = {
+        "decision": "monitor_only" if progressive_monitor_only else ("passed" if progressive_passed else "rejected"),
+        "selected_metric": progressive.get("selected_metric"),
+        "active_metric_value": progressive.get("active_metric_value"),
+        "candidate_metric_value": progressive.get("candidate_metric_value"),
+        "metric_delta": progressive.get("metric_delta"),
+        "defective_count": progressive.get("defective_count"),
+        "min_defects_for_decision": args.progressive_min_defects_for_decision,
+        "aupimo_unstable": progressive_monitor_only
+        or bool((progressive.get("candidate_aupimo_stability") or {}).get("aupimo_unstable")),
+        "false_negatives_ok": progressive_false_negatives_ok,
+        "per_class_regressions": progressive.get("per_class_regressions") or [],
+    }
+
+    missing_comparable_metric = reference.get("selected_metric") is None and progressive.get("selected_metric") is None
+    if missing_comparable_metric:
+        gate_reason = "rejected_missing_comparable_metric"
+        promotion_status = "rejected_missing_comparable_metric"
+        passed = False
+    elif passed:
+        gate_reason = (
+            "candidate_passed_reference_and_progressive_panels"
+            if not progressive_monitor_only
+            else "candidate_passed_reference_progressive_monitor_only"
+        )
+        promotion_status = "promoted"
+    elif not reference_false_negatives_ok or (progressive_has_enough_defects and not progressive_false_negatives_ok):
+        gate_reason = "candidate_increases_false_negatives"
+        promotion_status = "rejected_operational_guardrail"
+    elif not reference_passed:
+        gate_reason = "candidate_regressed_on_reference_panel"
+        promotion_status = "rejected_reference_regression"
+    elif not progressive_passed:
+        gate_reason = "candidate_did_not_improve_progressive_panel"
+        promotion_status = "rejected_progressive_no_improvement"
+    elif not thresholds_ok:
+        gate_reason = "missing_candidate_runtime_thresholds"
+        promotion_status = "rejected_missing_runtime_thresholds"
+    else:
+        gate_reason = "candidate_rejected_by_panel_gate"
+        promotion_status = "rejected_panel_gate"
+
+    operational_alerts = [
+        *(reference.get("operational_alerts") or []),
+        *(progressive.get("operational_alerts") or []),
+    ]
+    if progressive_monitor_only:
+        operational_alerts.append("progressive_panel_not_enough_defects_for_decision")
+
+    return {
+        "metrics": progressive.get("metrics") or {},
+        "active_metrics_on_eval_set": progressive.get("active_metrics_on_eval_set") or {},
+        "candidate_metrics_on_eval_set": progressive.get("candidate_metrics_on_eval_set") or {},
+        "reference_active_metrics_on_eval_set": reference.get("active_metrics_on_eval_set") or {},
+        "reference_candidate_metrics_on_eval_set": reference.get("candidate_metrics_on_eval_set") or {},
+        "progressive_active_metrics_on_eval_set": progressive.get("active_metrics_on_eval_set") or {},
+        "progressive_candidate_metrics_on_eval_set": progressive.get("candidate_metrics_on_eval_set") or {},
+        "reference_selected_metric": reference.get("selected_metric"),
+        "progressive_selected_metric": progressive.get("selected_metric"),
+        "selected_metric": progressive.get("selected_metric") or reference.get("selected_metric"),
+        "selected_metric_value": progressive.get("candidate_metric_value") or reference.get("candidate_metric_value"),
+        "active_metric_value": progressive.get("active_metric_value"),
+        "candidate_metric_value": progressive.get("candidate_metric_value"),
+        "metric_delta": progressive.get("metric_delta"),
+        "reference_active_metric_value": reference.get("active_metric_value"),
+        "reference_candidate_metric_value": reference.get("candidate_metric_value"),
+        "reference_metric_delta": reference.get("metric_delta"),
+        "progressive_active_metric_value": progressive.get("active_metric_value"),
+        "progressive_candidate_metric_value": progressive.get("candidate_metric_value"),
+        "progressive_metric_delta": progressive.get("metric_delta"),
+        "gate_decision": "passed" if passed else "rejected",
+        "gate_reason": gate_reason,
+        "promotion_status": promotion_status,
+        "promotion_panel_decision": {
+            "reference_gate": reference_gate,
+            "progressive_gate": progressive_gate,
+            "thresholds_ok": thresholds_ok,
+        },
+        "reference_gate": reference_gate,
+        "progressive_gate": progressive_gate,
+        "active_eval_metrics_path": progressive.get("active_eval_metrics_path"),
+        "candidate_eval_metrics_path": progressive.get("candidate_eval_metrics_path"),
+        "reference_active_eval_metrics_path": reference.get("active_eval_metrics_path"),
+        "reference_candidate_eval_metrics_path": reference.get("candidate_eval_metrics_path"),
+        "progressive_active_eval_metrics_path": progressive.get("active_eval_metrics_path"),
+        "progressive_candidate_eval_metrics_path": progressive.get("candidate_eval_metrics_path"),
+        "active_cache_status": progressive.get("active_cache_status"),
+        "candidate_cache_status": progressive.get("candidate_cache_status"),
+        "active_cache_key": progressive.get("active_cache_key"),
+        "candidate_cache_key": progressive.get("candidate_cache_key"),
+        "cache_status": progressive.get("cache_status"),
+        "cache_key": progressive.get("cache_key"),
+        "cache_hit": progressive.get("cache_hit"),
+        "cache_source": progressive.get("cache_source"),
+        "candidate_decision_thresholds": candidate_thresholds,
+        "prediction_schema_version": progressive.get("prediction_schema_version"),
+        "candidate_metric_timings": progressive.get("candidate_metric_timings", {}),
+        "active_metric_timings": progressive.get("active_metric_timings", {}),
+        "threshold_source": candidate_thresholds.get("threshold_source") if candidate_thresholds else "",
+        "candidate_false_negatives": progressive.get("candidate_false_negatives"),
+        "active_false_negatives": progressive.get("active_false_negatives"),
+        "reference_candidate_false_negatives": reference.get("candidate_false_negatives"),
+        "reference_active_false_negatives": reference.get("active_false_negatives"),
+        "active_per_class_metrics": progressive.get("active_per_class_metrics", {}),
+        "candidate_per_class_metrics": progressive.get("candidate_per_class_metrics", {}),
+        "reference_active_per_class_metrics": reference.get("active_per_class_metrics", {}),
+        "reference_candidate_per_class_metrics": reference.get("candidate_per_class_metrics", {}),
+        "per_class_regressions": [
+            *(reference.get("per_class_regressions") or []),
+            *(progressive.get("per_class_regressions") or []),
+        ],
+        "candidate_aupimo_stability": progressive.get("candidate_aupimo_stability", {}),
+        "active_aupimo_stability": progressive.get("active_aupimo_stability", {}),
+        "reference_candidate_aupimo_stability": reference.get("candidate_aupimo_stability", {}),
+        "progressive_candidate_aupimo_stability": progressive.get("candidate_aupimo_stability", {}),
+        "candidate_predictions_path": progressive.get("candidate_predictions_path"),
+        "active_predictions_path": progressive.get("active_predictions_path"),
+        "reference_candidate_predictions_path": reference.get("candidate_predictions_path"),
+        "progressive_candidate_predictions_path": progressive.get("candidate_predictions_path"),
+        "evaluation_started_at": started_at.isoformat(),
+        "evaluation_completed_at": completed_at.isoformat(),
+        "evaluation_duration_seconds": (completed_at - started_at).total_seconds(),
         "operational_alerts": operational_alerts,
     }
 
@@ -1084,14 +1592,43 @@ def evaluate_progressive_model_on_set(
     checkpoint_path: Path,
     evaluation_set_path: Path,
     output_dir: Path,
+    evaluation_set_id: str,
+    cache_root: Path,
+    decision_thresholds: dict[str, Any] | None = None,
+    gt_masks_manifest: Path | None = None,
 ) -> dict[str, Any]:
+    threshold_orange = float((decision_thresholds or {}).get("threshold_orange") or 0.02)
+    threshold_red = float((decision_thresholds or {}).get("threshold_red") or 0.05)
+    cache_key = prediction_cache_key(
+        model_version=model_version,
+        checkpoint_path=checkpoint_path,
+        evaluation_set_path=evaluation_set_path,
+        evaluation_set_id=evaluation_set_id,
+        threshold_orange=threshold_orange,
+        threshold_red=threshold_red,
+        roi_signature=f"functional_surface_prediction:{CANONICAL_FEATURE_AE_PREPROCESSING.roi_threshold:.12g}",
+        calibration_signature="none",
+    )
+    cached = load_prediction_cache(cache_root, cache_key, output_dir)
+    if cached is not None:
+        cached.update(
+            {
+                "model_version": model_version,
+                "checkpoint_path": str(checkpoint_path),
+                "cache_status": "hit",
+                "cache_hit": True,
+                "cache_key": cache_key,
+                "cache_source": str(cache_root / cache_key),
+            }
+        )
+        return cached
     result = evaluate_feature_ae_checkpoint(
         FeatureAEEvaluationConfig(
             checkpoint_path=checkpoint_path,
             manifest_path=evaluation_set_path,
             image_root=args.image_root,
             output_dir=output_dir,
-            gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
+            gt_masks_manifest=gt_masks_manifest or args.reference_gt_masks_manifest,
             validation_set_id=evaluation_set_path.stem,
             batch_size=args.batch_size,
             device=args.device,
@@ -1100,8 +1637,12 @@ def evaluate_progressive_model_on_set(
             score_smoothing=CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
             score_image=CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
             topk_fraction=CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
+            threshold_orange=threshold_orange,
+            threshold_red=threshold_red,
         )
     )
+    params = json.loads((output_dir / "params.json").read_text(encoding="utf-8")) if (output_dir / "params.json").is_file() else {}
+    store_prediction_cache(cache_root, cache_key, output_dir)
     metrics = {
         metric: float(value)
         for metric, value in (result.get("metrics") or {}).items()
@@ -1119,8 +1660,105 @@ def evaluate_progressive_model_on_set(
         "model_version": model_version,
         "checkpoint_path": str(checkpoint_path),
         "metrics": metrics,
+        "per_class_metrics": result.get("per_class_metrics") or {},
+        "aupimo_stability": result.get("aupimo_stability") or {},
+        "predictions_path": result.get("predictions_path"),
         "metrics_path": str(output_dir / "metrics.json"),
+        "params_path": str(output_dir / "params.json"),
+        "prediction_schema_version": PREDICTION_SCHEMA_VERSION,
+        "metric_timings": result.get("metric_timings") or {},
+        "eval_inference_seconds": params.get("duration_seconds"),
+        "cache_status": "miss_stored",
+        "cache_hit": False,
+        "cache_key": cache_key,
+        "cache_source": str(cache_root / cache_key),
     }
+
+
+def prediction_cache_key(
+    *,
+    model_version: str,
+    checkpoint_path: Path,
+    evaluation_set_path: Path,
+    evaluation_set_id: str,
+    threshold_orange: float,
+    threshold_red: float,
+    roi_signature: str,
+    calibration_signature: str,
+) -> str:
+    payload = {
+        "model_version": model_version,
+        "checkpoint_sha256": sha256_file(checkpoint_path),
+        "evaluation_set_id": evaluation_set_id,
+        "evaluation_set_sha256": sha256_file(evaluation_set_path),
+        "score_contract_version": CANONICAL_FEATURE_AE_PREPROCESSING.version,
+        "prediction_schema_version": PREDICTION_SCHEMA_VERSION,
+        "roi_signature": roi_signature,
+        "calibration_signature": calibration_signature,
+        "threshold_signature": f"{threshold_orange:.12g}:{threshold_red:.12g}",
+    }
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def load_prediction_cache(cache_root: Path, cache_key: str, output_dir: Path) -> dict[str, Any] | None:
+    cache_dir = cache_root / cache_key
+    metrics_path = cache_dir / "metrics.json"
+    predictions_path = cache_dir / "predictions.npz"
+    if not metrics_path.is_file() or not predictions_path.is_file():
+        return None
+    params_path = cache_dir / "params.json"
+    if not params_path.is_file():
+        return None
+    params: dict[str, Any] = json.loads(params_path.read_text(encoding="utf-8"))
+    if params.get("prediction_schema_version") != PREDICTION_SCHEMA_VERSION:
+        return None
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("metrics.json", "predictions.npz", "params.json"):
+        source = cache_dir / name
+        if source.is_file():
+            shutil.copy2(source, output_dir / name)
+    payload = json.loads((output_dir / "metrics.json").read_text(encoding="utf-8"))
+    metrics = {
+        metric: float(value)
+        for metric, value in (payload.get("metrics") or {}).items()
+        if value is not None
+        and metric
+        in {
+            *FEATURE_AE_BUSINESS_METRIC_PRIORITY,
+            "pixel_auroc",
+            "image_recall",
+            "false_negatives",
+            "orange_rate",
+        }
+    }
+    return {
+        "metrics": metrics,
+        "per_class_metrics": payload.get("per_class_metrics") or {},
+        "aupimo_stability": payload.get("aupimo_stability") or {},
+        "predictions_path": str(output_dir / "predictions.npz"),
+        "metrics_path": str(output_dir / "metrics.json"),
+        "params_path": str(output_dir / "params.json"),
+        "prediction_schema_version": PREDICTION_SCHEMA_VERSION,
+        "metric_timings": payload.get("metric_timings") or {},
+        "eval_inference_seconds": params.get("duration_seconds"),
+    }
+
+
+def store_prediction_cache(cache_root: Path, cache_key: str, output_dir: Path) -> None:
+    cache_dir = cache_root / cache_key
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("metrics.json", "predictions.npz", "params.json"):
+        source = output_dir / name
+        if source.is_file():
+            shutil.copy2(source, cache_dir / name)
+    index_path = cache_root / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+    index[cache_key] = {
+        "cache_dir": str(cache_dir),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    write_json(index_path, index)
 
 
 def select_comparable_business_metric(
@@ -1131,6 +1769,96 @@ def select_comparable_business_metric(
         if active_metrics.get(metric) is not None and candidate_metrics.get(metric) is not None:
             return metric
     return None
+
+
+def apply_decision_thresholds_to_evaluation(
+    evaluation: dict[str, Any],
+    *,
+    decision_thresholds: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Refresh operational metrics from per-image scores without re-running inference."""
+    if not decision_thresholds:
+        return evaluation
+    metrics_path = Path(str(evaluation.get("metrics_path") or ""))
+    if not metrics_path.is_file():
+        return evaluation
+    payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    images = payload.get("images") or payload.get("predictions") or []
+    labels = [bool(record.get("is_defective")) for record in images if record.get("score") is not None]
+    scores = [float(record["score"]) for record in images if record.get("score") is not None]
+    existing_metrics = payload.get("metrics") or {}
+    if labels and not any(labels) and int(existing_metrics.get("false_negatives") or 0) > 0:
+        return evaluation
+    decision = compute_decision_metrics(
+        labels,
+        scores,
+        threshold_orange=float(decision_thresholds["threshold_orange"]),
+        threshold_red=float(decision_thresholds["threshold_red"]),
+    )
+    payload.setdefault("metrics", {})
+    payload["metrics"]["image_recall"] = decision["recall"]
+    payload["metrics"]["false_negatives"] = decision["false_negatives"]
+    payload["metrics"]["orange_rate"] = decision["orange_rate"]
+    payload["metrics"]["latency_ms"] = decision["latency_ms"]
+    payload["decision_thresholds"] = decision_thresholds
+    metrics_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    evaluation_metrics = dict(evaluation.get("metrics") or {})
+    evaluation_metrics.update(
+        {
+            "image_recall": float(decision["recall"]),
+            "false_negatives": float(decision["false_negatives"]),
+            "orange_rate": float(decision["orange_rate"]),
+            "latency_ms": float(decision["latency_ms"]),
+        }
+    )
+    evaluation["metrics"] = evaluation_metrics
+    return evaluation
+
+
+def count_defective_rows(manifest_path: Path) -> int:
+    if not manifest_path.is_file():
+        return 0
+    count = 0
+    with manifest_path.open(newline="", encoding="utf-8") as file:
+        for row in csv.DictReader(file):
+            oracle = str(row.get("oracle_verdict") or "").lower()
+            label = str(row.get("label") or "").lower()
+            is_defective = str(row.get("is_defective") or "").lower()
+            if oracle in {"defective", "defaut", "defectueux", "non_conforme"} or label == "defective" or is_defective == "true":
+                count += 1
+    return count
+
+
+def per_class_regressions(
+    active_per_class: dict[str, Any],
+    candidate_per_class: dict[str, Any],
+    *,
+    metric: str | None,
+    min_delta: float,
+) -> list[dict[str, Any]]:
+    if not metric:
+        return []
+    regressions: list[dict[str, Any]] = []
+    for source_class, active_metrics in active_per_class.items():
+        candidate_metrics = candidate_per_class.get(source_class)
+        if not isinstance(active_metrics, dict) or not isinstance(candidate_metrics, dict):
+            continue
+        active_value = active_metrics.get(metric)
+        candidate_value = candidate_metrics.get(metric)
+        if active_value is None or candidate_value is None:
+            continue
+        delta = float(candidate_value) - float(active_value)
+        if delta < -abs(min_delta):
+            regressions.append(
+                {
+                    "source_class": source_class,
+                    "metric": metric,
+                    "active_value": float(active_value),
+                    "candidate_value": float(candidate_value),
+                    "delta": delta,
+                }
+            )
+    return regressions
 
 
 def thresholds_from_evaluation_scores(
@@ -1159,6 +1887,7 @@ def thresholds_from_evaluation_scores(
         "threshold_red": threshold_red,
         "threshold_source": f"progressive_eval_good_quantiles:{evaluation_set_id}",
         "method": "progressive_eval_good_quantiles",
+        "score_contract_version": CANONICAL_FEATURE_AE_PREPROCESSING.version,
         "orange_quantile": orange_quantile,
         "red_quantile": red_quantile,
     }
@@ -1194,8 +1923,9 @@ def register_promoted_cycle(
     except Exception as exc:
         if args.require_mlflow_registry:
             raise
+        status = "failed_missing_mlflow_model" if "missing_mlflow_model_artifact" in str(exc) else "failed"
         return {
-            "registry_status": "failed",
+            "registry_status": status,
             "registry_reason": str(exc),
             "registered_model_name": registered_model_name(state.scenario_id),
             "registry_stage": args.target_stage,
@@ -1297,6 +2027,156 @@ def _best_candidate_seen(cycles: list[dict[str, Any]]) -> str | None:
         return None
     best = max(candidates, key=lambda cycle: float(cycle["candidate_metric_value"]))
     return str(best.get("candidate_version") or "")
+
+
+def resolve_candidate_initial_checkpoint(args: argparse.Namespace, *, active_runtime: ActiveRuntimeModel) -> Path | None:
+    if args.candidate_init_policy == "fresh":
+        return None
+    if args.candidate_init_policy == "active":
+        return active_runtime.checkpoint
+    return resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True)
+
+
+def read_csv_rows(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open(newline="", encoding="utf-8") as file:
+        return [dict(row) for row in csv.DictReader(file)]
+
+
+def row_relative_path(row: dict[str, str]) -> str:
+    return str(row.get("relative_path") or row.get("relative_paths") or "")
+
+
+def row_source_class(row: dict[str, str]) -> str:
+    return str(row.get("source_class") or row.get("source_classes") or "unknown")
+
+
+def is_good_training_row(row: dict[str, str]) -> bool:
+    label = str(row.get("label") or "").lower()
+    oracle = str(row.get("oracle_verdict") or "").lower()
+    is_defective = str(row.get("is_defective") or "").lower()
+    return label == "good" or oracle == "conforme" or is_defective == "false"
+
+
+def cap_rows_by_source_class(rows: list[dict[str, str]], max_per_class: int) -> list[dict[str, str]]:
+    if max_per_class <= 0:
+        return []
+    counts: dict[str, int] = {}
+    capped: list[dict[str, str]] = []
+    for row in rows:
+        source_class = row_source_class(row)
+        if counts.get(source_class, 0) >= max_per_class:
+            continue
+        counts[source_class] = counts.get(source_class, 0) + 1
+        capped.append(row)
+    return capped
+
+
+def normalize_training_row(row: dict[str, str], *, dataset_snapshot_id: str, scenario_id: str, source: str) -> dict[str, str]:
+    relative_path = row_relative_path(row)
+    image_id = str(row.get("image_id") or row.get("image_ids") or Path(relative_path).stem)
+    normalized = dict(row)
+    normalized.update(
+        {
+            "image_id": image_id,
+            "image_ids": image_id,
+            "relative_path": relative_path,
+            "relative_paths": relative_path,
+            "source_class": row_source_class(row),
+            "split_set": str(row.get("split_set") or scenario_id),
+            "label": "good",
+            "is_defective": "false",
+            "scenario_id": scenario_id,
+            "dataset_version": dataset_snapshot_id,
+            "manifest_version": f"{dataset_snapshot_id}_manifest_v001",
+            "gt_mask_path": "",
+            "oracle_verdict": "conforme",
+            "train_eligible": "true",
+            "train_eligibility_source": source,
+            "quarantine_reason": "",
+        }
+    )
+    return normalized
+
+
+def write_progressive_training_manifest(
+    *,
+    seen_snapshot_path: Path,
+    anchor_good_manifest: Path,
+    hard_good_buffer_path: Path,
+    output_path: Path,
+    dataset_snapshot_id: str,
+    scenario_id: str,
+    anchor_good_max_per_class: int,
+    hard_good_max_per_class: int,
+) -> tuple[Path, dict[str, Any]]:
+    seen_rows = [
+        normalize_training_row(row, dataset_snapshot_id=dataset_snapshot_id, scenario_id=scenario_id, source="oracle_gt_seen_lots")
+        for row in read_csv_rows(seen_snapshot_path)
+        if is_good_training_row(row)
+    ]
+    hard_rows = cap_rows_by_source_class(
+        [
+            normalize_training_row(row, dataset_snapshot_id=dataset_snapshot_id, scenario_id=scenario_id, source="hard_good_outlier")
+            for row in read_csv_rows(hard_good_buffer_path)
+            if is_good_training_row(row)
+        ],
+        hard_good_max_per_class,
+    )
+    anchor_rows = cap_rows_by_source_class(
+        [
+            normalize_training_row(row, dataset_snapshot_id=dataset_snapshot_id, scenario_id=scenario_id, source="anchor_good_reference")
+            for row in read_csv_rows(anchor_good_manifest)
+            if is_good_training_row(row)
+        ],
+        anchor_good_max_per_class,
+    )
+    merged: list[dict[str, str]] = []
+    seen_relative_paths: set[str] = set()
+    for row in [*seen_rows, *hard_rows, *anchor_rows]:
+        relative_path = row_relative_path(row)
+        if not relative_path or relative_path in seen_relative_paths:
+            continue
+        seen_relative_paths.add(relative_path)
+        merged.append(row)
+    fieldnames = [
+        "image_id",
+        "image_ids",
+        "relative_path",
+        "relative_paths",
+        "event_id",
+        "source_class",
+        "split_set",
+        "label",
+        "is_defective",
+        "scenario_id",
+        "dataset_version",
+        "manifest_version",
+        "gt_mask_path",
+        "oracle_verdict",
+        "train_eligible",
+        "train_eligibility_source",
+        "quarantine_reason",
+    ]
+    for row in merged:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in merged:
+            writer.writerow(row)
+    return output_path, {
+        "seen_conforming_count": len(seen_rows),
+        "hard_good_count": len(hard_rows),
+        "anchor_good_count": len(anchor_rows),
+        "total_count": len(merged),
+        "anchor_good_manifest": str(anchor_good_manifest),
+        "hard_good_buffer_path": str(hard_good_buffer_path),
+    }
 
 
 def write_seen_dataset_snapshot(
@@ -1422,13 +2302,105 @@ def write_seen_evaluation_set(
     return output_path
 
 
+def update_hard_good_buffer(
+    *,
+    run_buffer_path: Path,
+    cycle_buffer_path: Path,
+    metrics_path: Path,
+    decision_thresholds: dict[str, Any] | None,
+    max_per_class: int,
+) -> int:
+    if not metrics_path.is_file() or not decision_thresholds:
+        cycle_buffer_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_hard_good_rows(cycle_buffer_path, [])
+        return 0
+    payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    threshold = float(decision_thresholds.get("threshold_red") or decision_thresholds.get("threshold_orange") or 0.0)
+    rows: list[dict[str, str]] = []
+    for record in payload.get("images") or payload.get("predictions") or []:
+        if bool(record.get("is_defective")) or record.get("score") is None:
+            continue
+        if float(record["score"]) < threshold:
+            continue
+        relative_path = str(record.get("relative_path") or "")
+        if not relative_path:
+            continue
+        image_id = str(record.get("image_id") or Path(relative_path).stem)
+        rows.append(
+            {
+                "image_id": image_id,
+                "image_ids": image_id,
+                "relative_path": relative_path,
+                "relative_paths": relative_path,
+                "event_id": f"hard_good_{image_id}",
+                "source_class": str(record.get("source_class") or "unknown"),
+                "split_set": "hard_good_buffer",
+                "label": "good",
+                "is_defective": "false",
+                "scenario_id": "",
+                "dataset_version": "hard_good_buffer",
+                "manifest_version": "hard_good_buffer_v001",
+                "gt_mask_path": "",
+                "oracle_verdict": "conforme",
+                "train_eligible": "true",
+                "train_eligibility_source": "hard_good_outlier",
+                "quarantine_reason": "",
+                "hard_good_score": str(record["score"]),
+            }
+        )
+    rows = cap_rows_by_source_class(rows, max_per_class)
+    existing = read_csv_rows(run_buffer_path)
+    seen = {row_relative_path(row) for row in existing}
+    new_rows = [row for row in rows if row_relative_path(row) and row_relative_path(row) not in seen]
+    merged = [*existing, *new_rows]
+    _write_hard_good_rows(cycle_buffer_path, new_rows)
+    _write_hard_good_rows(run_buffer_path, merged)
+    return len(new_rows)
+
+
+def _write_hard_good_rows(path: Path, rows: list[dict[str, str]]) -> None:
+    fieldnames = [
+        "image_id",
+        "image_ids",
+        "relative_path",
+        "relative_paths",
+        "event_id",
+        "source_class",
+        "split_set",
+        "label",
+        "is_defective",
+        "scenario_id",
+        "dataset_version",
+        "manifest_version",
+        "gt_mask_path",
+        "oracle_verdict",
+        "train_eligible",
+        "train_eligibility_source",
+        "quarantine_reason",
+        "hard_good_score",
+    ]
+    for row in rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
 def train_progressive_candidate(
     args: argparse.Namespace,
     candidate_version: str,
     manifest_path: Path,
     dataset_snapshot_id: str,
+    *,
+    initial_checkpoint_path: Path | None = None,
 ) -> dict[str, Any]:
     run_dir = Path(".cache/iqa/models") / candidate_version
+    _reset_generated_progressive_candidate_run_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     config = FeatureAETrainingConfig(
         manifest_path=manifest_path,
@@ -1440,6 +2412,8 @@ def train_progressive_candidate(
         candidate_version=candidate_version,
         roi_model_version=DEFAULT_ROI_MODEL_VERSION,
         feature_ae_version=DEFAULT_FEATURE_AE_MODEL_VERSION,
+        initial_checkpoint_path=initial_checkpoint_path,
+        initial_checkpoint_policy=args.candidate_init_policy,
         run_name=f"{candidate_version}_{args.target_stage}",
         device=args.device,
         batch_size=args.batch_size,
@@ -1452,10 +2426,19 @@ def train_progressive_candidate(
         metric_eval_start_epoch=1,
         metric_eval_calibrate_normal=False,
         metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
-        metric_eval_apply_score_region_to_map=False,
+        metric_eval_apply_score_region_to_map=True,
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
+
+
+def _reset_generated_progressive_candidate_run_dir(run_dir: Path) -> None:
+    """Clear stale artifacts for deterministic progressive candidate versions."""
+    if not run_dir.exists():
+        return
+    if run_dir.resolve().parent != (Path(".cache/iqa/models")).resolve():
+        raise ValueError(f"refusing to reset unexpected candidate run dir: {run_dir}")
+    shutil.rmtree(run_dir)
 
 
 def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDecision) -> dict[str, Any]:
@@ -1487,7 +2470,7 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         metric_eval_start_epoch=1,
         metric_eval_calibrate_normal=False,
         metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
-        metric_eval_apply_score_region_to_map=False,
+        metric_eval_apply_score_region_to_map=True,
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())

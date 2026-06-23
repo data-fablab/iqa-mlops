@@ -12,7 +12,7 @@ from iqa.training.bootstrap import (
     BOOTSTRAP_ARTIFACT_URI,
     BOOTSTRAP_MODEL_VERSION,
     materialize_bootstrap_checkpoint,
-    select_bootstrap_champion,
+    select_bootstrap_reference,
     sync_bootstrap_runtime_cache,
     update_bootstrap_manifest,
     upload_checkpoint_to_s3,
@@ -75,14 +75,14 @@ def main() -> None:
         _ensure_roi_predictions(args)
         _train_bootstrap(args)
 
-    champion = select_bootstrap_champion(run_dir)
-    canonical_checkpoint = materialize_bootstrap_checkpoint(champion, run_dir / "checkpoint.pt")
+    reference = select_bootstrap_reference(run_dir)
+    canonical_checkpoint = materialize_bootstrap_checkpoint(reference, run_dir / "checkpoint.pt")
     runtime_cache_checkpoint = sync_bootstrap_runtime_cache(canonical_checkpoint)
     if args.publish_minio:
         upload_checkpoint_to_s3(canonical_checkpoint, args.artifact_uri)
     manifest = update_bootstrap_manifest(
         args.manifest_output,
-        champion,
+        reference,
         artifact_uri=args.artifact_uri,
         dataset_version="feature_ae_good_v001_bootstrap",
         validation_set_id="validation_set_v001",
@@ -97,9 +97,9 @@ def main() -> None:
                 "model_version": BOOTSTRAP_MODEL_VERSION,
                 "published_minio": bool(args.publish_minio),
                 "runtime_cache_checkpoint": str(runtime_cache_checkpoint),
-                "selected_epoch": champion.selected_epoch,
-                "selected_metric": champion.selected_metric,
-                "selected_metric_value": champion.selected_metric_value,
+                "selected_epoch": reference.selected_epoch,
+                "selected_metric": reference.selected_metric,
+                "selected_metric_value": reference.selected_metric_value,
                 "sha256": manifest["sha256"],
             },
             indent=2,
@@ -121,7 +121,8 @@ def _dry_run_plan(args: argparse.Namespace) -> dict[str, object]:
         "preprocessing_contract": canonical_feature_ae_preprocessing_dict(),
         "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
         "publish_minio": bool(args.publish_minio),
-        "ranking_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss stability only",
+        "checkpoint_selection_policy": "business_metric_only",
+        "ranking_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss informational only",
         "roi_model_version": args.roi_model_version,
         "run_dir": str(args.existing_run_dir or args.run_dir),
         "validation_manifest": str(args.validation_manifest),
@@ -171,7 +172,7 @@ def _train_bootstrap(args: argparse.Namespace) -> dict[str, object]:
             require_business_metric_for_early_stopping=True,
             allow_noncanonical_preprocessing=args.allow_noncanonical_preprocessing,
             metric_eval_calibrate_normal=False,
-            metric_eval_apply_score_region_to_map=False,
+            metric_eval_apply_score_region_to_map=True,
             metric_eval_score_region=CANONICAL_FEATURE_AE_PREPROCESSING.score_region,
             metric_eval_score_smoothing=CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing,
             metric_eval_score_image=CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
@@ -189,3 +190,4 @@ def _train_bootstrap(args: argparse.Namespace) -> dict[str, object]:
 
 if __name__ == "__main__":
     main()
+

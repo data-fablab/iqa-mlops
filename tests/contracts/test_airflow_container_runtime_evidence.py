@@ -26,7 +26,7 @@ def test_airflow_container_runtime_static_checks_pass() -> None:
     assert evidence["lifecycle_command"] == "iqa-run-replay-lifecycle-cycle"
     assert evidence["lifecycle_mode"] == "progressive-train"
     assert evidence["network"] == "iqa_net"
-    assert evidence["promotion_policy"] == "candidate_must_improve_active_on_same_eval_set"
+    assert evidence["promotion_policy"] == "candidate_must_pass_reference_guardrail_and_progressive_factory_panel"
     assert evidence["registry_stage"] == "test"
     assert evidence["gpu_device_request"] == "all"
     assert set(evidence["container_dags"]) >= {

@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, random_split
 
 from iqa.datasets import TiledFeatureAEDataset
 from iqa.models.feature_ae import (
-    CHAMPION_FEATURE_AE_CONTRACT,
+    REFERENCE_FEATURE_AE_CONTRACT,
     DEFAULT_FEATURE_LAYERS,
     FEATURE_AE_MODEL_TYPE,
     ReverseDistillationGatedDualContextResNet18,
@@ -85,6 +85,8 @@ class FeatureAETrainingConfig:
     roi_model_version: str = ""
     feature_ae_version: str = ""
     run_name: str = ""
+    initial_checkpoint_path: Path | None = None
+    initial_checkpoint_policy: str = "fresh"
     metric_eval_manifest_path: Path | None = None
     metric_eval_device: str | None = None
     metric_eval_roi_predictions_dirs: tuple[Path, ...] = ()
@@ -134,6 +136,8 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0) if val_dataset else None
 
     model = ReverseDistillationGatedDualContextResNet18(layers=layers).to(device)
+    if config.initial_checkpoint_path is not None:
+        _load_initial_checkpoint(model, config.initial_checkpoint_path, map_location=device)
     teacher = ResNetTeacherFeatures(layers=layers, pretrained=config.pretrained_teacher).to(device)
     teacher.eval()
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
@@ -160,6 +164,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
     best_business_metric_value: float | None = None
     metric_no_improve_epochs = 0
     metric_early_stopped = False
+    epoch_metric_history: list[dict[str, Any]] = []
     step = 0
     last_checkpoint = run_dir / "checkpoint_last.pt"
 
@@ -212,7 +217,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
             best_epoch=best_epoch,
             best_loss=best_loss,
         )
-        if config.output_checkpoint != last_checkpoint:
+        if config.output_checkpoint != last_checkpoint and not metric_eval_configured:
             shutil.copy2(last_checkpoint, config.output_checkpoint)
 
         if val_loss < best_loss:
@@ -221,7 +226,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
             no_improve_epochs = 0
             if config.save_best:
                 shutil.copy2(last_checkpoint, run_dir / "checkpoint_best_loss.pt")
-                if not _has_metric_best(run_dir):
+                if not metric_eval_configured and not _has_metric_best(run_dir):
                     shutil.copy2(last_checkpoint, run_dir / "checkpoint.pt")
         else:
             no_improve_epochs += 1
@@ -249,7 +254,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     layers=layers,
                     pretrained_teacher=config.pretrained_teacher,
                     layer_weights=config.metric_eval_layer_weights
-                    or CHAMPION_FEATURE_AE_CONTRACT.normalized_layer_weights(),
+                    or REFERENCE_FEATURE_AE_CONTRACT.normalized_layer_weights(),
                     calibrate_normal=config.metric_eval_calibrate_normal,
                     calibration_mode=config.metric_eval_calibration_mode,
                     calibration_stat=config.metric_eval_calibration_stat,
@@ -265,6 +270,17 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     max_previews=config.metric_eval_max_previews,
                 )
             )
+            epoch_metric_history.append(
+                {
+                    "epoch": epoch,
+                    "checkpoint": str(checkpoint),
+                    "metrics": eval_result.get("metrics") or {},
+                    "per_class_metrics": eval_result.get("per_class_metrics") or {},
+                    "aupimo_stability": eval_result.get("aupimo_stability") or {},
+                    "predictions_path": eval_result.get("predictions_path"),
+                }
+            )
+            _append_jsonl(run_dir / "epoch_metrics.jsonl", epoch_metric_history[-1])
             update_metric_best_checkpoints(
                 run_dir=run_dir,
                 candidate_checkpoint=checkpoint,
@@ -307,6 +323,10 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
         )
 
     _write_history(run_dir / "loss_history.csv", history)
+    (run_dir / "metric_eval_history.json").write_text(
+        json.dumps(epoch_metric_history, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     (run_dir / "params.json").write_text(json.dumps(_metadata(config, layers), indent=2, sort_keys=True), encoding="utf-8")
     return {
         "model_type": FEATURE_AE_MODEL_TYPE,
@@ -319,6 +339,8 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
         "best_loss": best_loss,
         "best_business_metric": best_business_metric,
         "best_business_metric_value": best_business_metric_value,
+        "epoch_metric_history": epoch_metric_history,
+        "checkpoint_selection_policy": "business_metric_only" if metric_eval_configured else "loss_only_no_metric_eval",
         "metric_early_stopped": metric_early_stopped,
         "preprocessing_mode": config.preprocessing_mode,
         "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
@@ -457,6 +479,17 @@ def _save_checkpoint(
     return path
 
 
+def _load_initial_checkpoint(
+    model: ReverseDistillationGatedDualContextResNet18,
+    checkpoint_path: Path,
+    *,
+    map_location: torch.device,
+) -> None:
+    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+    model.load_state_dict(state_dict)
+
+
 def _metadata(config: FeatureAETrainingConfig, layers: tuple[str, ...]) -> dict[str, Any]:
     data = asdict(config)
     for key, value in list(data.items()):
@@ -482,6 +515,11 @@ def _write_history(path: Path, history: list[dict[str, float | int]]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(payload, sort_keys=True) + "\n")
+
+
 def _validate_config(config: FeatureAETrainingConfig) -> None:
     assert_canonical_feature_ae_preprocessing(
         preprocessing_mode=config.preprocessing_mode,
@@ -498,7 +536,11 @@ def _validate_config(config: FeatureAETrainingConfig) -> None:
         allow_noncanonical_preprocessing=config.allow_noncanonical_preprocessing,
     )
     if config.loss != "l2_cosine":
-        raise ValueError("Feature-AE champion training only supports loss='l2_cosine'.")
+        raise ValueError("Feature-AE reference training only supports loss='l2_cosine'.")
+    if config.metric_eval_manifest_path is not None and config.metric_eval_every_epochs != 1:
+        raise ValueError("Feature-AE metric evaluation must run every epoch; set metric_eval_every_epochs=1.")
+    if config.initial_checkpoint_path is not None and not Path(config.initial_checkpoint_path).is_file():
+        raise FileNotFoundError(f"Feature-AE initial checkpoint not found: {config.initial_checkpoint_path}")
     if config.scenario_id in REPLAY_SCENARIOS:
         missing = [
             name

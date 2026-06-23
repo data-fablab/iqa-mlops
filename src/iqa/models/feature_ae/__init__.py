@@ -1,13 +1,14 @@
 """RD Feature-AE runtime package."""
 
 from iqa.models.feature_ae.losses import feature_anomaly_map, feature_reconstruction_loss
-from iqa.models.feature_ae.champion import (
-    CHAMPION_FEATURE_AE_CONTRACT,
-    FeatureAEChampionContract,
-    apply_champion_roi,
+from iqa.models.feature_ae.reference import (
+    REFERENCE_FEATURE_AE_CONTRACT,
+    FeatureAEReferenceContract,
+    apply_reference_roi,
     feature_layer_anomaly_maps,
     fuse_layer_anomaly_maps,
     fuse_numpy_layer_maps,
+    good_p99_layer_normalization_stats,
     load_roi_probability_map,
     reconstruct_tiled_feature_maps,
     score_numpy_map_topk,
@@ -29,16 +30,17 @@ __all__ = [
     "FEATURE_AE_MODEL_TYPE",
     "SUPPORTED_TEACHER_BACKBONE",
     "TEACHER_LAYER_CHANNELS",
-    "CHAMPION_FEATURE_AE_CONTRACT",
-    "FeatureAEChampionContract",
+    "REFERENCE_FEATURE_AE_CONTRACT",
+    "FeatureAEReferenceContract",
     "ReverseDistillationGatedDualContextResNet18",
     "ResNetTeacherFeatures",
-    "apply_champion_roi",
+    "apply_reference_roi",
     "feature_anomaly_map",
     "feature_layer_anomaly_maps",
     "feature_reconstruction_loss",
     "fuse_layer_anomaly_maps",
     "fuse_numpy_layer_maps",
+    "good_p99_layer_normalization_stats",
     "load_roi_probability_map",
     "load_rd_feature_ae_gated",
     "normalize_feature_layers",
@@ -46,3 +48,4 @@ __all__ = [
     "score_numpy_map_topk",
     "smooth_numpy_score_map",
 ]
+

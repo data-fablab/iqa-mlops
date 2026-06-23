@@ -113,6 +113,36 @@ class TestMLflowRunLoggerBasic:
         run_id = logger.end_run()
         assert run_id is not None
 
+    def test_log_feature_ae_model_writes_mlflow_model(self, tmp_path: Path, mlflow_tracking_uri: str) -> None:
+        """Test that Feature-AE checkpoints are logged as real MLflow Models."""
+        import mlflow
+
+        config = FeatureAETrainingConfig(
+            manifest_path=tmp_path / "manifest.csv",
+            image_root=tmp_path / "images",
+            output_checkpoint=tmp_path / "checkpoint.pt",
+            scenario_id="test_scenario",
+            dataset_version="dataset_v1",
+            candidate_version="candidate_v1",
+        )
+        checkpoint_path = tmp_path / "checkpoint.pt"
+        torch.save({"state_dict": {}}, checkpoint_path)
+        logger = MLflowRunLogger(
+            run_name="model_logging_test",
+            scenario_id="test_scenario",
+            tracking_uri=mlflow_tracking_uri,
+        )
+
+        assert logger.log_feature_ae_model(config, checkpoint_path) is True
+        run_id = logger.end_run()
+
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        client = mlflow.tracking.MlflowClient(tracking_uri=mlflow_tracking_uri)
+        model_files = {item.path for item in client.list_artifacts(run_id, "model")}
+        assert "model/MLmodel" in model_files
+        artifact_files = {item.path for item in client.list_artifacts(run_id, "model/artifacts")}
+        assert "model/artifacts/score_contract.json" in artifact_files
+
     def test_set_tags(self, mlflow_tracking_uri: str) -> None:
         """Test that logger sets traceability tags."""
         logger = MLflowRunLogger(
@@ -271,6 +301,7 @@ class TestAirflowWrapper:
             manifest_version="v1_manifest_v001",
             run_name="test_wrapper",
         )
+        config.manifest_path.write_text("image_path,is_defective\nfoo.jpg,false\n", encoding="utf-8")
 
         # Create dummy checkpoint
         config.output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -303,3 +334,6 @@ class TestAirflowWrapper:
             # Verify result is returned
             assert result["model_type"] == "feature_ae"
             assert result["checkpoint"] == str(config.output_checkpoint)
+            assert result["mlflow_dataset_logged"] is True
+            assert result["mlflow_training_dataset_logged"] is True
+            assert result["mlflow_model_logged"] is True

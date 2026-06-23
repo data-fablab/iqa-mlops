@@ -12,12 +12,12 @@ from PIL import Image
 
 from iqa.inference.helpers import compute_status, measure_inference_time
 from iqa.models.feature_ae import (
-    CHAMPION_FEATURE_AE_CONTRACT,
-    FeatureAEChampionContract,
+    REFERENCE_FEATURE_AE_CONTRACT,
+    FeatureAEReferenceContract,
     DEFAULT_FEATURE_LAYERS,
     FEATURE_AE_MODEL_TYPE,
     ResNetTeacherFeatures,
-    apply_champion_roi,
+    apply_reference_roi,
     fuse_numpy_layer_maps,
     load_roi_probability_map,
     load_rd_feature_ae_gated,
@@ -41,7 +41,7 @@ class FeatureAEPrediction:
     roi_status: str | None = None
     heatmap_uri: str | None = None
     threshold_source: str = "explicit_or_default"
-    score_contract_version: str = CHAMPION_FEATURE_AE_CONTRACT.version
+    score_contract_version: str = REFERENCE_FEATURE_AE_CONTRACT.version
 
     def to_dict(self) -> dict[str, float | str | None]:
         return asdict(self)
@@ -54,7 +54,7 @@ class FeatureAEScoreMaps:
     score_map: np.ndarray
     roi_probability: np.ndarray | None
     score: float
-    contract: FeatureAEChampionContract
+    contract: FeatureAEReferenceContract
 
 
 def predict_feature_ae_image(
@@ -77,7 +77,7 @@ def predict_feature_ae_image(
     device: str = "cpu",
     pretrained_teacher: bool = True,
     layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
-    champion_contract: FeatureAEChampionContract = CHAMPION_FEATURE_AE_CONTRACT,
+    reference_contract: FeatureAEReferenceContract = REFERENCE_FEATURE_AE_CONTRACT,
 ) -> FeatureAEPrediction:
     with measure_inference_time() as timing:
         maps = compute_feature_ae_score_maps(
@@ -94,7 +94,7 @@ def predict_feature_ae_image(
             device=device,
             pretrained_teacher=pretrained_teacher,
             layers=layers,
-            champion_contract=champion_contract,
+            reference_contract=reference_contract,
         )
     score_map_array = maps.score_map
     if heatmap_output_path is not None:
@@ -138,7 +138,7 @@ def compute_feature_ae_score_maps(
     device: str = "cpu",
     pretrained_teacher: bool = True,
     layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
-    champion_contract: FeatureAEChampionContract = CHAMPION_FEATURE_AE_CONTRACT,
+    reference_contract: FeatureAEReferenceContract = REFERENCE_FEATURE_AE_CONTRACT,
 ) -> FeatureAEScoreMaps:
     layers = normalize_feature_layers(layers)
     torch_device = torch.device(device)
@@ -148,19 +148,23 @@ def compute_feature_ae_score_maps(
     teacher = ResNetTeacherFeatures(layers=layers, pretrained=pretrained_teacher).to(torch_device)
     model.eval()
     teacher.eval()
-    contract = FeatureAEChampionContract(
-        version=champion_contract.version,
-        teacher_weights=champion_contract.teacher_weights,
+    contract = FeatureAEReferenceContract(
+        version=reference_contract.version,
+        teacher_weights=reference_contract.teacher_weights,
         tile_size=int(image_size),
         context_size=int(context_size if preprocessing_mode == "tiled_context" else image_size),
-        tile_stride=champion_contract.tile_stride,
+        tile_stride=reference_contract.tile_stride,
         layers=layers,
-        layer_weights=champion_contract.normalized_layer_weights(),
+        layer_weights=reference_contract.normalized_layer_weights(),
         score_smoothing=score_smoothing,
-        roi_mode=champion_contract.roi_mode,
-        roi_threshold=champion_contract.roi_threshold,
+        roi_mode=reference_contract.roi_mode,
+        roi_threshold=reference_contract.roi_threshold,
         score_image=score_image,
         topk_fraction=topk_fraction,
+        layer_score_mode=reference_contract.layer_score_mode,
+        layer_normalization=reference_contract.layer_normalization,
+        layer_normalization_stats=reference_contract.layer_normalization_stats,
+        cosine_weight=reference_contract.cosine_weight,
     )
     layer_maps = reconstruct_tiled_feature_maps(
         image_path=image_path,
@@ -169,7 +173,11 @@ def compute_feature_ae_score_maps(
         device=torch_device,
         contract=contract,
     )
-    fused_map = fuse_numpy_layer_maps(layer_maps, layer_weights=contract.normalized_layer_weights())
+    fused_map = fuse_numpy_layer_maps(
+        layer_maps,
+        layer_weights=contract.normalized_layer_weights(),
+        layer_normalization_stats=contract.layer_normalization_stats,
+    )
     smoothed_map = smooth_numpy_score_map(fused_map, score_smoothing)
     roi_source = roi_probability_path or roi_mask_path
     roi_probability = load_roi_probability_map(
@@ -177,7 +185,7 @@ def compute_feature_ae_score_maps(
         target_shape=smoothed_map.shape,
         threshold=contract.roi_threshold,
     )
-    score_map_array = apply_champion_roi(
+    score_map_array = apply_reference_roi(
         smoothed_map,
         roi_probability=roi_probability,
         roi_mode=contract.roi_mode,
@@ -287,7 +295,7 @@ def save_feature_ae_heatmap_overlay(
     """Save an operator anomaly overlay PNG.
 
     Decision thresholds are kept in the signature for traceability, but the
-    visual overlay uses the champion preview contract: ROI-local percentile
+    visual overlay uses the reference preview contract: ROI-local percentile
     normalization plus a display threshold. This keeps low calibrated decision
     thresholds from painting the whole ROI red.
     """
@@ -370,3 +378,4 @@ __all__ = [
     "score_image_map",
     "smooth_score_map",
 ]
+

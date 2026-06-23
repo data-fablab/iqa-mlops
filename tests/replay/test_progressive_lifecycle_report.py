@@ -26,6 +26,19 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "registry_stage": "test",
             "registered_model_version": "1",
             "mlflow_run_id": "run-001",
+            "mlflow_dataset_logged": True,
+            "mlflow_model_logged": True,
+            "candidate_metrics_on_eval_set": {"pixel_ap": 0.12},
+            "candidate_aupimo_stability": {"aupimo_unstable": False},
+            "cache_status": "miss_stored",
+            "cache_hit": False,
+            "epoch_metric_history": [
+                {
+                    "epoch": 1,
+                    "metrics": {"pixel_aupimo_1e-5_1e-3": 0.91, "pixel_ap": 0.12},
+                    "predictions_path": "metric_eval/epoch_001/predictions.npz",
+                }
+            ],
         },
         {
             "cycle_id": "cycle_002",
@@ -41,6 +54,8 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "registry_stage": "test",
             "registry_status": "not_registered",
             "mlflow_run_id": "run-002",
+            "mlflow_dataset_logged": False,
+            "mlflow_model_logged": False,
         },
     ]
     (run_dir / "cycles.jsonl").write_text(
@@ -48,7 +63,7 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    report = render_report(run_dir)
+    report = render_report(run_dir, show_epochs=True, show_cache=True, show_mlflow=True)
 
     assert "cycle" in report
     assert "active_before" in report
@@ -58,6 +73,12 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
     assert "-0.08" in report
     assert "test:v1" in report
     assert "not_registered" in report
+    assert "miss_stored" in report
+    assert "run_id" in report
+    assert "run-001" in report
+    assert "yes" in report
+    assert "no" in report
+    assert "epoch metrics" in report
 
 
 def test_progressive_lifecycle_report_fails_without_cycles_jsonl(tmp_path: Path) -> None:

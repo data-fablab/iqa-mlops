@@ -90,6 +90,13 @@ def _define() -> None:
             "epochs": "{{ params.epochs }}",
             "target_stage": "{{ params.target_stage }}",
             "promotion_min_delta": "{{ params.promotion_min_delta }}",
+            "anchor_good_manifest": "{{ params.anchor_good_manifest }}",
+            "anchor_good_max_per_class": "{{ params.anchor_good_max_per_class }}",
+            "hard_good_max_per_class": "{{ params.hard_good_max_per_class }}",
+            "reference_eval_manifest": "{{ params.reference_eval_manifest }}",
+            "reference_gt_masks_manifest": "{{ params.reference_gt_masks_manifest }}",
+            "progressive_min_defects_for_decision": "{{ params.progressive_min_defects_for_decision }}",
+            "candidate_init_policy": "{{ params.candidate_init_policy }}",
         },
     )
 
@@ -114,6 +121,13 @@ dag = build_container_dag(
         "epochs": 10,
         "target_stage": "test",
         "promotion_min_delta": 0.0,
+        "anchor_good_manifest": "data/model_datasets/feature_ae_good_v002.csv",
+        "anchor_good_max_per_class": 256,
+        "hard_good_max_per_class": 64,
+        "reference_eval_manifest": "data/validation/validation_set_v001.csv",
+        "reference_gt_masks_manifest": "data/validation/validation_gt_masks_v001.csv",
+        "progressive_min_defects_for_decision": 5,
+        "candidate_init_policy": "stable_base",
         "image": data_image(),
     },
 )

@@ -26,7 +26,7 @@ BUSINESS_METRIC_PRIORITY = FEATURE_AE_BUSINESS_METRIC_PRIORITY
 
 
 @dataclass(frozen=True)
-class BootstrapChampion:
+class BootstrapReference:
     checkpoint_path: Path
     checkpoint_name: str
     selected_metric: str
@@ -48,7 +48,7 @@ class BootstrapChampion:
         return fields
 
 
-def select_bootstrap_champion(run_dir: str | Path) -> BootstrapChampion:
+def select_bootstrap_reference(run_dir: str | Path) -> BootstrapReference:
     """Select a bootstrap checkpoint by business metrics, never by loss first."""
     path = Path(run_dir)
     best_path = path / "metric_eval_best.json"
@@ -71,7 +71,7 @@ def select_bootstrap_champion(run_dir: str | Path) -> BootstrapChampion:
         if not checkpoint_path.is_file():
             raise FileNotFoundError(f"Selected checkpoint for {metric} is missing: {checkpoint_path}")
         epoch = int(record.get("epoch") or 0)
-        return BootstrapChampion(
+        return BootstrapReference(
             checkpoint_path=checkpoint_path,
             checkpoint_name=checkpoint_name,
             selected_metric=metric,
@@ -87,14 +87,14 @@ def select_bootstrap_champion(run_dir: str | Path) -> BootstrapChampion:
     )
 
 
-def materialize_bootstrap_checkpoint(champion: BootstrapChampion, output_checkpoint: str | Path) -> Path:
-    """Copy the selected champion to the canonical checkpoint path."""
+def materialize_bootstrap_checkpoint(reference: BootstrapReference, output_checkpoint: str | Path) -> Path:
+    """Copy the selected reference to the canonical checkpoint path."""
     destination = Path(output_checkpoint)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(champion.checkpoint_path, destination)
+    shutil.copy2(reference.checkpoint_path, destination)
     copied_sha256 = sha256_file(destination)
-    if copied_sha256 != champion.sha256:
-        raise ValueError(f"Copied bootstrap checkpoint checksum mismatch: expected {champion.sha256}, got {copied_sha256}.")
+    if copied_sha256 != reference.sha256:
+        raise ValueError(f"Copied bootstrap checkpoint checksum mismatch: expected {reference.sha256}, got {copied_sha256}.")
     return destination
 
 
@@ -102,7 +102,7 @@ def sync_bootstrap_runtime_cache(
     source_checkpoint: str | Path,
     runtime_checkpoint: str | Path = BOOTSTRAP_RUNTIME_CACHE_CHECKPOINT,
 ) -> Path:
-    """Keep the model resolver cache aligned with the freshly selected bootstrap champion."""
+    """Keep the model resolver cache aligned with the freshly selected bootstrap reference."""
     source = Path(source_checkpoint)
     destination = Path(runtime_checkpoint)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -118,7 +118,7 @@ def sync_bootstrap_runtime_cache(
 
 def update_bootstrap_manifest(
     manifest_path: str | Path,
-    champion: BootstrapChampion,
+    reference: BootstrapReference,
     *,
     artifact_uri: str = BOOTSTRAP_ARTIFACT_URI,
     dataset_version: str = "feature_ae_good_v001_bootstrap",
@@ -137,10 +137,11 @@ def update_bootstrap_manifest(
             "roi_model_version": roi_model_version,
             "preprocessing_contract": canonical_feature_ae_preprocessing_dict(),
             "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
-            "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss stability only",
+            "checkpoint_selection_policy": "business_metric_only",
+            "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss informational only",
         }
     )
-    payload.update(champion.to_manifest_fields())
+    payload.update(reference.to_manifest_fields())
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return payload
 
@@ -187,10 +188,11 @@ __all__ = [
     "BOOTSTRAP_MODEL_VERSION",
     "BOOTSTRAP_RUNTIME_CACHE_CHECKPOINT",
     "BUSINESS_METRIC_PRIORITY",
-    "BootstrapChampion",
+    "BootstrapReference",
     "materialize_bootstrap_checkpoint",
-    "select_bootstrap_champion",
+    "select_bootstrap_reference",
     "sync_bootstrap_runtime_cache",
     "update_bootstrap_manifest",
     "upload_checkpoint_to_s3",
 ]
+

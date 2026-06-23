@@ -11,15 +11,18 @@ from typing import Any
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--epochs", action="store_true", help="Print per-epoch metric history when available.")
+    parser.add_argument("--cache", action="store_true", help="Print prediction cache status when available.")
+    parser.add_argument("--mlflow", action="store_true", help="Print MLflow dataset/model logging evidence when available.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    print(render_report(args.run_dir))
+    print(render_report(args.run_dir, show_epochs=args.epochs, show_cache=args.cache, show_mlflow=args.mlflow))
 
 
-def render_report(run_dir: Path) -> str:
+def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool = False, show_mlflow: bool = False) -> str:
     cycles_path = run_dir / "cycles.jsonl"
     if not cycles_path.is_file():
         progress_path = run_dir / "progress.json"
@@ -34,37 +37,116 @@ def render_report(run_dir: Path) -> str:
             f"lots={progress.get('lots_processed', 0)}"
         )
     cycles = [json.loads(line) for line in cycles_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    rows = [
-        ("cycle", "active_before", "candidate", "eval_n", "active", "candidate_metric", "delta", "gate", "registry"),
-        *[_row(cycle) for cycle in cycles],
-    ]
+    header = (
+        "cycle",
+        "active_before",
+        "candidate",
+        "eval_n",
+        "epoch",
+        "active_aupimo",
+        "candidate_aupimo",
+        "delta",
+        "ref_delta",
+        "prog_delta",
+        "pixel_ap",
+        "unstable",
+        "gate",
+        "registry",
+    )
+    if show_cache:
+        header = header + ("cache", "hit", "schema", "aupimo_s", "pixel_s")
+    if show_mlflow:
+        header = header + ("run_id", "dataset", "model")
+    rows = [header, *[_row(cycle, show_cache=show_cache, show_mlflow=show_mlflow) for cycle in cycles]]
     widths = [max(len(str(row[index])) for row in rows) for index in range(len(rows[0]))]
-    return "\n".join(
+    report = "\n".join(
         "  ".join(str(value).ljust(widths[index]) for index, value in enumerate(row)).rstrip()
         for row in rows
     )
+    if show_epochs:
+        epoch_lines = _epoch_lines(cycles)
+        if epoch_lines:
+            report = report + "\n\n" + "\n".join(epoch_lines)
+    return report
 
 
-def _row(cycle: dict[str, Any]) -> tuple[str, str, str, str, str, str, str, str, str]:
+def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool = False) -> tuple[str, ...]:
     active_value = cycle.get("active_metric_value")
     candidate_value = cycle.get("candidate_metric_value", cycle.get("selected_metric_value"))
     delta = cycle.get("metric_delta")
+    candidate_metrics = cycle.get("candidate_metrics_on_eval_set") or cycle.get("metrics") or {}
+    pixel_ap = candidate_metrics.get("pixel_ap")
+    stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
+    reference_delta = cycle.get("reference_metric_delta")
+    progressive_delta = cycle.get("progressive_metric_delta", delta)
     registry = cycle.get("registry_alias") or cycle.get("registry_stage") or ""
     if cycle.get("registered_model_version"):
         registry = f"{registry}:v{cycle['registered_model_version']}"
     elif cycle.get("registry_status") in {"failed", "not_registered", "skipped"}:
         registry = str(cycle.get("registry_status") or "")
-    return (
+    row = (
         str(cycle.get("cycle_id") or ""),
         str(cycle.get("active_model_before") or ""),
         str(cycle.get("candidate_version") or ""),
         str(cycle.get("evaluation_seen_events") or cycle.get("seen_events") or ""),
+        str(cycle.get("selected_epoch") or ""),
         "" if active_value is None else f"{float(active_value):.6g}",
         "" if candidate_value is None else f"{float(candidate_value):.6g}",
         "" if delta is None else f"{float(delta):+.6g}",
+        "" if reference_delta is None else f"{float(reference_delta):+.6g}",
+        "" if progressive_delta is None else f"{float(progressive_delta):+.6g}",
+        "" if pixel_ap is None else f"{float(pixel_ap):.6g}",
+        "yes" if stability.get("aupimo_unstable") else "no",
         str(cycle.get("gate_decision") or ""),
         registry,
     )
+    if show_cache:
+        timings = cycle.get("candidate_metric_timings") or {}
+        row = row + (
+            str(cycle.get("cache_status") or ""),
+            str(cycle.get("cache_hit") or ""),
+            str(cycle.get("prediction_schema_version") or ""),
+            _duration(timings.get("aupimo_compute_seconds")),
+            _duration(timings.get("pixel_rank_metrics_seconds")),
+        )
+    if show_mlflow:
+        row = row + (
+            str(cycle.get("mlflow_run_id") or ""),
+            _bool_status(cycle.get("mlflow_dataset_logged")),
+            _bool_status(cycle.get("mlflow_model_logged")),
+        )
+    return row
+
+
+def _bool_status(value: Any) -> str:
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return ""
+
+
+def _duration(value: Any) -> str:
+    if value is None:
+        return ""
+    return f"{float(value):.3f}"
+
+
+def _epoch_lines(cycles: list[dict[str, Any]]) -> list[str]:
+    lines = ["epoch metrics"]
+    found = False
+    for cycle in cycles:
+        history = cycle.get("epoch_metric_history") or []
+        for item in history:
+            metrics = item.get("metrics") or {}
+            found = True
+            lines.append(
+                f"{cycle.get('cycle_id')} epoch={item.get('epoch')} "
+                f"aupimo={metrics.get('pixel_aupimo_1e-5_1e-3')} "
+                f"pixel_ap={metrics.get('pixel_ap')} "
+                f"predictions={item.get('predictions_path')}"
+            )
+    return lines if found else []
 
 
 if __name__ == "__main__":
