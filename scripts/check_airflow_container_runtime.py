@@ -151,6 +151,8 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "--anchor-good-manifest",
         "--reference-eval-manifest",
         "--progressive-min-defects-for-decision",
+        "--max-good-alert-rate",
+        "--max-good-red-rate",
         "--candidate-init-policy",
         "--publish-minio",
         "--wait-for-gpu",

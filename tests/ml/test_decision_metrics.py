@@ -49,6 +49,23 @@ class TestComputeDecisionMetrics:
 
         assert metrics["orange_rate"] == 0.5
 
+    def test_alert_rates_count_orange_and_red_good_false_positives(self) -> None:
+        """Operational alert rates expose good images sent to orange or red."""
+        # good green, good orange, good red, defective red.
+        scores = [0.001, 0.03, 0.09, 0.09]
+        labels = [False, False, False, True]
+
+        metrics = compute_decision_metrics(
+            labels, scores, threshold_orange=0.02, threshold_red=0.05
+        )
+
+        assert metrics["orange_rate"] == 0.25
+        assert metrics["alert_rate"] == 0.75
+        assert metrics["red_rate"] == 0.5
+        assert metrics["good_alert_rate"] == 2 / 3
+        assert metrics["good_red_rate"] == 1 / 3
+        assert metrics["false_positive_count"] == 2
+
     def test_latency_ms_is_p95_of_observed_latencies(self) -> None:
         """Latency reported is the p95 of per-image inference latencies."""
         latencies = [10.0] * 19 + [100.0]

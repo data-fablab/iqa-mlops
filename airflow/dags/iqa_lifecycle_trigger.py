@@ -96,6 +96,8 @@ def _define() -> None:
             "reference_eval_manifest": "{{ params.reference_eval_manifest }}",
             "reference_gt_masks_manifest": "{{ params.reference_gt_masks_manifest }}",
             "progressive_min_defects_for_decision": "{{ params.progressive_min_defects_for_decision }}",
+            "max_good_alert_rate": "{{ params.max_good_alert_rate }}",
+            "max_good_red_rate": "{{ params.max_good_red_rate }}",
             "candidate_init_policy": "{{ params.candidate_init_policy }}",
         },
     )
@@ -127,6 +129,8 @@ dag = build_container_dag(
         "reference_eval_manifest": "data/validation/validation_set_v001.csv",
         "reference_gt_masks_manifest": "data/validation/validation_gt_masks_v001.csv",
         "progressive_min_defects_for_decision": 5,
+        "max_good_alert_rate": 0.10,
+        "max_good_red_rate": 0.02,
         "candidate_init_policy": "stable_base",
         "image": data_image(),
     },

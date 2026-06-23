@@ -317,6 +317,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference-eval-manifest", type=Path, default=VALIDATION_MANIFEST)
     parser.add_argument("--reference-gt-masks-manifest", type=Path, default=VALIDATION_GT_MASKS_MANIFEST)
     parser.add_argument("--progressive-min-defects-for-decision", type=int, default=5)
+    parser.add_argument("--max-good-alert-rate", type=float, default=0.10)
+    parser.add_argument("--max-good-red-rate", type=float, default=0.02)
     parser.add_argument("--candidate-init-policy", choices=["stable_base", "active", "fresh"], default="stable_base")
     return parser.parse_args()
 
@@ -1170,7 +1172,6 @@ def evaluate_model_pair_on_panel(
         output_dir=cycle_dir / "evaluation" / panel_name / "active_before",
         evaluation_set_id=evaluation_set_id,
         cache_root=cycle_dir.parents[1] / "prediction_cache",
-        decision_thresholds=active_decision_thresholds,
         gt_masks_manifest=gt_masks_manifest,
     )
     candidate = evaluate_progressive_model_on_set(
@@ -1183,9 +1184,21 @@ def evaluate_model_pair_on_panel(
         cache_root=cycle_dir.parents[1] / "prediction_cache",
         gt_masks_manifest=gt_masks_manifest,
     )
+    active_calibrated_thresholds = thresholds_from_evaluation_scores(
+        active["metrics_path"],
+        evaluation_set_id=evaluation_set_id,
+        model_version=active_model_version,
+        role="active_before",
+    )
+    active = apply_decision_thresholds_to_evaluation(
+        active,
+        decision_thresholds=active_calibrated_thresholds,
+    )
     candidate_decision_thresholds = thresholds_from_evaluation_scores(
         candidate["metrics_path"],
         evaluation_set_id=evaluation_set_id,
+        model_version=candidate_version,
+        role="candidate",
     )
     candidate = apply_decision_thresholds_to_evaluation(
         candidate,
@@ -1286,6 +1299,7 @@ def evaluate_model_pair_on_panel(
             "cache_hit": candidate.get("cache_hit"),
             "cache_source": candidate.get("cache_source"),
             "candidate_decision_thresholds": candidate_decision_thresholds,
+            "active_decision_thresholds": active_calibrated_thresholds,
             "prediction_schema_version": candidate.get("prediction_schema_version"),
             "candidate_metric_timings": candidate.get("metric_timings", {}),
             "active_metric_timings": active.get("metric_timings", {}),
@@ -1307,8 +1321,22 @@ def evaluate_model_pair_on_panel(
     operational_alerts: list[str] = []
     if candidate_false_negatives > active_false_negatives:
         operational_alerts.append("candidate_increases_false_negatives")
+    active_good_alert_rate = float(active["metrics"].get("good_alert_rate") or 0.0)
+    candidate_good_alert_rate = float(candidate["metrics"].get("good_alert_rate") or 0.0)
+    active_good_red_rate = float(active["metrics"].get("good_red_rate") or 0.0)
+    candidate_good_red_rate = float(candidate["metrics"].get("good_red_rate") or 0.0)
+    if active_good_alert_rate > float(args.max_good_alert_rate):
+        operational_alerts.append("active_alert_rate_exceeds_budget")
+    if active_good_red_rate > float(args.max_good_red_rate):
+        operational_alerts.append("active_red_rate_exceeds_budget")
+    if candidate_good_alert_rate > float(args.max_good_alert_rate):
+        operational_alerts.append("candidate_alert_rate_exceeds_budget")
+    if candidate_good_red_rate > float(args.max_good_red_rate):
+        operational_alerts.append("candidate_red_rate_exceeds_budget")
     if candidate_decision_thresholds is None:
         operational_alerts.append("missing_candidate_runtime_thresholds")
+    if active_calibrated_thresholds is None:
+        operational_alerts.append("missing_active_runtime_thresholds")
     candidate_stability = candidate.get("aupimo_stability") or {}
     if candidate_stability.get("aupimo_unstable"):
         operational_alerts.append("candidate_aupimo_unstable")
@@ -1344,6 +1372,7 @@ def evaluate_model_pair_on_panel(
         "cache_hit": candidate.get("cache_hit"),
         "cache_source": candidate.get("cache_source"),
         "candidate_decision_thresholds": candidate_decision_thresholds,
+        "active_decision_thresholds": active_calibrated_thresholds,
         "prediction_schema_version": candidate.get("prediction_schema_version"),
         "candidate_metric_timings": candidate.get("metric_timings", {}),
         "active_metric_timings": active.get("metric_timings", {}),
@@ -1352,6 +1381,10 @@ def evaluate_model_pair_on_panel(
         ),
         "candidate_false_negatives": candidate_false_negatives,
         "active_false_negatives": active_false_negatives,
+        "candidate_good_alert_rate": candidate_good_alert_rate,
+        "active_good_alert_rate": active_good_alert_rate,
+        "candidate_good_red_rate": candidate_good_red_rate,
+        "active_good_red_rate": active_good_red_rate,
         "active_per_class_metrics": active.get("per_class_metrics", {}),
         "candidate_per_class_metrics": candidate.get("per_class_metrics", {}),
         "candidate_aupimo_stability": candidate.get("aupimo_stability", {}),
@@ -1426,11 +1459,22 @@ def evaluate_progressive_promotion_comparison(
     progressive_false_negatives_ok = int(progressive.get("candidate_false_negatives") or 0) <= int(
         progressive.get("active_false_negatives") or 0
     )
+    max_good_alert_rate = float(args.max_good_alert_rate)
+    max_good_red_rate = float(args.max_good_red_rate)
+    reference_alert_budget_ok = (
+        float(reference.get("candidate_good_alert_rate") or 0.0) <= max_good_alert_rate
+        and float(reference.get("candidate_good_red_rate") or 0.0) <= max_good_red_rate
+    )
+    progressive_alert_budget_ok = (
+        float(progressive.get("candidate_good_alert_rate") or 0.0) <= max_good_alert_rate
+        and float(progressive.get("candidate_good_red_rate") or 0.0) <= max_good_red_rate
+    )
     reference_passed = (
         reference.get("selected_metric") is not None
         and reference_delta is not None
         and float(reference_delta) >= -abs(float(args.promotion_min_delta))
         and reference_false_negatives_ok
+        and reference_alert_budget_ok
         and not reference.get("per_class_regressions")
     )
     progressive_has_enough_defects = int(progressive.get("defective_count") or 0) >= int(
@@ -1444,10 +1488,12 @@ def evaluate_progressive_promotion_comparison(
             and progressive_delta is not None
             and float(progressive_delta) > float(args.promotion_min_delta)
             and progressive_false_negatives_ok
+            and progressive_alert_budget_ok
             and not progressive.get("per_class_regressions")
         )
     candidate_thresholds = progressive.get("candidate_decision_thresholds") or reference.get("candidate_decision_thresholds")
-    thresholds_ok = candidate_thresholds is not None
+    active_thresholds = progressive.get("active_decision_thresholds") or reference.get("active_decision_thresholds")
+    thresholds_ok = candidate_thresholds is not None and active_thresholds is not None
     passed = bool(reference_passed and progressive_passed and thresholds_ok)
 
     reference_gate = {
@@ -1457,6 +1503,13 @@ def evaluate_progressive_promotion_comparison(
         "candidate_metric_value": reference.get("candidate_metric_value"),
         "metric_delta": reference.get("metric_delta"),
         "false_negatives_ok": reference_false_negatives_ok,
+        "alert_budget_ok": reference_alert_budget_ok,
+        "active_good_alert_rate": reference.get("active_good_alert_rate"),
+        "candidate_good_alert_rate": reference.get("candidate_good_alert_rate"),
+        "active_good_red_rate": reference.get("active_good_red_rate"),
+        "candidate_good_red_rate": reference.get("candidate_good_red_rate"),
+        "max_good_alert_rate": max_good_alert_rate,
+        "max_good_red_rate": max_good_red_rate,
         "per_class_regressions": reference.get("per_class_regressions") or [],
     }
     progressive_gate = {
@@ -1470,6 +1523,13 @@ def evaluate_progressive_promotion_comparison(
         "aupimo_unstable": progressive_monitor_only
         or bool((progressive.get("candidate_aupimo_stability") or {}).get("aupimo_unstable")),
         "false_negatives_ok": progressive_false_negatives_ok,
+        "alert_budget_ok": progressive_alert_budget_ok,
+        "active_good_alert_rate": progressive.get("active_good_alert_rate"),
+        "candidate_good_alert_rate": progressive.get("candidate_good_alert_rate"),
+        "active_good_red_rate": progressive.get("active_good_red_rate"),
+        "candidate_good_red_rate": progressive.get("candidate_good_red_rate"),
+        "max_good_alert_rate": max_good_alert_rate,
+        "max_good_red_rate": max_good_red_rate,
         "per_class_regressions": progressive.get("per_class_regressions") or [],
     }
 
@@ -1487,6 +1547,9 @@ def evaluate_progressive_promotion_comparison(
         promotion_status = "promoted"
     elif not reference_false_negatives_ok or (progressive_has_enough_defects and not progressive_false_negatives_ok):
         gate_reason = "candidate_increases_false_negatives"
+        promotion_status = "rejected_operational_guardrail"
+    elif not reference_alert_budget_ok or (progressive_has_enough_defects and not progressive_alert_budget_ok):
+        gate_reason = "candidate_alert_rate_exceeds_budget"
         promotion_status = "rejected_operational_guardrail"
     elif not reference_passed:
         gate_reason = "candidate_regressed_on_reference_panel"
@@ -1539,6 +1602,7 @@ def evaluate_progressive_promotion_comparison(
         },
         "reference_gate": reference_gate,
         "progressive_gate": progressive_gate,
+        "active_decision_thresholds": active_thresholds,
         "active_eval_metrics_path": progressive.get("active_eval_metrics_path"),
         "candidate_eval_metrics_path": progressive.get("candidate_eval_metrics_path"),
         "reference_active_eval_metrics_path": reference.get("active_eval_metrics_path"),
@@ -1554,6 +1618,14 @@ def evaluate_progressive_promotion_comparison(
         "cache_hit": progressive.get("cache_hit"),
         "cache_source": progressive.get("cache_source"),
         "candidate_decision_thresholds": candidate_thresholds,
+        "active_good_alert_rate": progressive.get("active_good_alert_rate"),
+        "candidate_good_alert_rate": progressive.get("candidate_good_alert_rate"),
+        "active_good_red_rate": progressive.get("active_good_red_rate"),
+        "candidate_good_red_rate": progressive.get("candidate_good_red_rate"),
+        "reference_active_good_alert_rate": reference.get("active_good_alert_rate"),
+        "reference_candidate_good_alert_rate": reference.get("candidate_good_alert_rate"),
+        "reference_active_good_red_rate": reference.get("active_good_red_rate"),
+        "reference_candidate_good_red_rate": reference.get("candidate_good_red_rate"),
         "prediction_schema_version": progressive.get("prediction_schema_version"),
         "candidate_metric_timings": progressive.get("candidate_metric_timings", {}),
         "active_metric_timings": progressive.get("active_metric_timings", {}),
@@ -1798,16 +1870,46 @@ def apply_decision_thresholds_to_evaluation(
     payload.setdefault("metrics", {})
     payload["metrics"]["image_recall"] = decision["recall"]
     payload["metrics"]["false_negatives"] = decision["false_negatives"]
+    payload["metrics"]["false_positive_count"] = decision["false_positive_count"]
+    payload["metrics"]["alert_count"] = decision["alert_count"]
+    payload["metrics"]["red_count"] = decision["red_count"]
     payload["metrics"]["orange_rate"] = decision["orange_rate"]
+    payload["metrics"]["alert_rate"] = decision["alert_rate"]
+    payload["metrics"]["red_rate"] = decision["red_rate"]
+    payload["metrics"]["good_alert_rate"] = decision["good_alert_rate"]
+    payload["metrics"]["good_red_rate"] = decision["good_red_rate"]
     payload["metrics"]["latency_ms"] = decision["latency_ms"]
     payload["decision_thresholds"] = decision_thresholds
+    threshold_orange = float(decision_thresholds["threshold_orange"])
+    threshold_red = float(decision_thresholds["threshold_red"])
+    for record in images:
+        if record.get("score") is None:
+            continue
+        score = float(record["score"])
+        is_defective = bool(record.get("is_defective"))
+        is_alert = score >= threshold_orange
+        is_red = score >= threshold_red
+        record["threshold_orange"] = threshold_orange
+        record["threshold_red"] = threshold_red
+        record["is_alert"] = is_alert
+        record["is_red"] = is_red
+        record["decision"] = "red" if is_red else ("orange" if is_alert else "green")
+        record["is_false_positive"] = bool((not is_defective) and is_alert)
+        record["is_false_negative"] = bool(is_defective and not is_alert)
     metrics_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     evaluation_metrics = dict(evaluation.get("metrics") or {})
     evaluation_metrics.update(
         {
             "image_recall": float(decision["recall"]),
             "false_negatives": float(decision["false_negatives"]),
+            "false_positive_count": float(decision["false_positive_count"]),
+            "alert_count": float(decision["alert_count"]),
+            "red_count": float(decision["red_count"]),
             "orange_rate": float(decision["orange_rate"]),
+            "alert_rate": float(decision["alert_rate"]),
+            "red_rate": float(decision["red_rate"]),
+            "good_alert_rate": float(decision["good_alert_rate"]),
+            "good_red_rate": float(decision["good_red_rate"]),
             "latency_ms": float(decision["latency_ms"]),
         }
     )
@@ -1865,6 +1967,8 @@ def thresholds_from_evaluation_scores(
     metrics_path: str | Path,
     *,
     evaluation_set_id: str,
+    model_version: str = "",
+    role: str = "",
     orange_quantile: float = 0.95,
     red_quantile: float = 0.99,
 ) -> dict[str, Any] | None:
@@ -1882,14 +1986,22 @@ def thresholds_from_evaluation_scores(
         return None
     threshold_orange = _interpolated_quantile(conforming_scores, orange_quantile)
     threshold_red = max(threshold_orange, _interpolated_quantile(conforming_scores, red_quantile))
+    calibration_signature = (
+        f"{CANONICAL_FEATURE_AE_PREPROCESSING.version}:"
+        f"{evaluation_set_id}:{model_version}:{role}:"
+        f"good_quantiles:{orange_quantile:.6g}:{red_quantile:.6g}"
+    )
     return {
         "threshold_orange": threshold_orange,
         "threshold_red": threshold_red,
-        "threshold_source": f"progressive_eval_good_quantiles:{evaluation_set_id}",
-        "method": "progressive_eval_good_quantiles",
+        "threshold_source": f"panel_good_quantiles:{evaluation_set_id}:{role}",
+        "method": "panel_good_quantiles",
         "score_contract_version": CANONICAL_FEATURE_AE_PREPROCESSING.version,
         "orange_quantile": orange_quantile,
         "red_quantile": red_quantile,
+        "model_version": model_version,
+        "role": role,
+        "calibration_signature": calibration_signature,
     }
 
 

@@ -38,6 +38,8 @@ def _define() -> None:
             "--reference-eval-manifest {{ params.reference_eval_manifest }} "
             "--reference-gt-masks-manifest {{ params.reference_gt_masks_manifest }} "
             "--progressive-min-defects-for-decision {{ params.progressive_min_defects_for_decision }} "
+            "--max-good-alert-rate {{ params.max_good_alert_rate }} "
+            "--max-good-red-rate {{ params.max_good_red_rate }} "
             "--candidate-init-policy {{ params.candidate_init_policy }} "
             "--publish-minio "
             "--wait-for-gpu"
@@ -79,6 +81,8 @@ dag = build_container_dag(
         "reference_eval_manifest": "data/validation/validation_set_v001.csv",
         "reference_gt_masks_manifest": "data/validation/validation_gt_masks_v001.csv",
         "progressive_min_defects_for_decision": 5,
+        "max_good_alert_rate": 0.10,
+        "max_good_red_rate": 0.02,
         "candidate_init_policy": "stable_base",
         "require_mlflow_registry": False,
         "mlflow_tracking_uri": "http://mlflow:5000",

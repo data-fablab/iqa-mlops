@@ -49,6 +49,10 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
         "ref_delta",
         "prog_delta",
         "pixel_ap",
+        "alert",
+        "good_alert",
+        "good_red",
+        "fn",
         "unstable",
         "gate",
         "registry",
@@ -76,6 +80,10 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
     delta = cycle.get("metric_delta")
     candidate_metrics = cycle.get("candidate_metrics_on_eval_set") or cycle.get("metrics") or {}
     pixel_ap = candidate_metrics.get("pixel_ap")
+    alert_rate = candidate_metrics.get("alert_rate")
+    good_alert_rate = candidate_metrics.get("good_alert_rate")
+    good_red_rate = candidate_metrics.get("good_red_rate")
+    false_negatives = candidate_metrics.get("false_negatives", cycle.get("candidate_false_negatives"))
     stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
     reference_delta = cycle.get("reference_metric_delta")
     progressive_delta = cycle.get("progressive_metric_delta", delta)
@@ -96,6 +104,10 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
         "" if reference_delta is None else f"{float(reference_delta):+.6g}",
         "" if progressive_delta is None else f"{float(progressive_delta):+.6g}",
         "" if pixel_ap is None else f"{float(pixel_ap):.6g}",
+        "" if alert_rate is None else f"{float(alert_rate):.3g}",
+        "" if good_alert_rate is None else f"{float(good_alert_rate):.3g}",
+        "" if good_red_rate is None else f"{float(good_red_rate):.3g}",
+        "" if false_negatives is None else f"{float(false_negatives):.0f}",
         "yes" if stability.get("aupimo_unstable") else "no",
         str(cycle.get("gate_decision") or ""),
         registry,

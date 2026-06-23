@@ -28,7 +28,13 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "mlflow_run_id": "run-001",
             "mlflow_dataset_logged": True,
             "mlflow_model_logged": True,
-            "candidate_metrics_on_eval_set": {"pixel_ap": 0.12},
+            "candidate_metrics_on_eval_set": {
+                "pixel_ap": 0.12,
+                "alert_rate": 0.2,
+                "good_alert_rate": 0.1,
+                "good_red_rate": 0.0,
+                "false_negatives": 0,
+            },
             "candidate_aupimo_stability": {"aupimo_unstable": False},
             "cache_status": "miss_stored",
             "cache_hit": False,
@@ -75,6 +81,8 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
     assert "not_registered" in report
     assert "miss_stored" in report
     assert "run_id" in report
+    assert "good_alert" in report
+    assert "fn" in report
     assert "run-001" in report
     assert "yes" in report
     assert "no" in report
