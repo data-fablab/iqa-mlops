@@ -10,13 +10,13 @@ import requests
 import streamlit as st
 from iqa_client import API_URL, get
 from marc_lifecycle import aggregate_lots, lifecycle_rows, production_alerts, read_json, read_jsonl
+from repo_paths import default_repo_root
 
 st.set_page_config(page_title="IQA - Dashboard Marc", layout="wide")
 st.title("Dashboard Marc - pilotage production")
 st.caption(f"iqa-api: {API_URL}")
 
-DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
-REPO_ROOT = Path(os.environ.get("IQA_REPO_ROOT", DEFAULT_REPO_ROOT)).resolve()
+REPO_ROOT = default_repo_root(__file__)
 DEFAULT_RUN_DIR = os.environ.get("IQA_MARC_REPLAY_RUN_DIR", "")
 
 
