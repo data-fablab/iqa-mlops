@@ -298,8 +298,18 @@ def compute_decision_metrics(
     false_negatives = int((labels & ~detected).sum())
     recall = 1.0 if defect_count == 0 else float((labels & detected).sum() / defect_count)
 
-    orange = (scores >= threshold_orange) & (scores < threshold_red)
+    alert = scores >= threshold_orange
+    red = scores >= threshold_red
+    orange = alert & ~red
+    good = ~labels
+    false_positives = good & alert
+    good_red = good & red
     orange_rate = float(orange.mean()) if scores.size else 0.0
+    alert_rate = float(alert.mean()) if scores.size else 0.0
+    red_rate = float(red.mean()) if scores.size else 0.0
+    good_count = int(good.sum())
+    good_alert_rate = float(false_positives.sum() / good_count) if good_count else 0.0
+    good_red_rate = float(good_red.sum() / good_count) if good_count else 0.0
 
     latency_ms = (
         float(np.percentile(np.asarray(latencies_ms, dtype=np.float64), 95))
@@ -310,7 +320,16 @@ def compute_decision_metrics(
     return {
         "recall": recall,
         "false_negatives": false_negatives,
+        "false_positive_count": int(false_positives.sum()),
+        "good_alert_count": int(false_positives.sum()),
+        "good_red_count": int(good_red.sum()),
+        "alert_count": int(alert.sum()),
+        "red_count": int(red.sum()),
         "orange_rate": orange_rate,
+        "alert_rate": alert_rate,
+        "red_rate": red_rate,
+        "good_alert_rate": good_alert_rate,
+        "good_red_rate": good_red_rate,
         "latency_ms": latency_ms,
     }
 
@@ -534,8 +553,29 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
     )
     metrics["image_recall"] = decision["recall"]
     metrics["false_negatives"] = decision["false_negatives"]
+    metrics["false_positive_count"] = decision["false_positive_count"]
+    metrics["good_alert_count"] = decision["good_alert_count"]
+    metrics["good_red_count"] = decision["good_red_count"]
+    metrics["alert_count"] = decision["alert_count"]
+    metrics["red_count"] = decision["red_count"]
     metrics["orange_rate"] = decision["orange_rate"]
+    metrics["alert_rate"] = decision["alert_rate"]
+    metrics["red_rate"] = decision["red_rate"]
+    metrics["good_alert_rate"] = decision["good_alert_rate"]
+    metrics["good_red_rate"] = decision["good_red_rate"]
     metrics["latency_ms"] = decision["latency_ms"]
+    for record in per_image:
+        score = float(record.get("score") or 0.0)
+        is_defective = bool(record.get("is_defective"))
+        is_alert = score >= config.threshold_orange
+        is_red = score >= config.threshold_red
+        record["threshold_orange"] = float(config.threshold_orange)
+        record["threshold_red"] = float(config.threshold_red)
+        record["is_alert"] = is_alert
+        record["is_red"] = is_red
+        record["decision"] = "red" if is_red else ("orange" if is_alert else "green")
+        record["is_false_positive"] = bool((not is_defective) and is_alert)
+        record["is_false_negative"] = bool(is_defective and not is_alert)
     per_class_metrics = compute_per_class_metrics(per_image, pixel_labels_by_image, pixel_scores_by_image)
     aupimo_stability = compute_aupimo_stability(per_image, pixel_scores_by_image)
     predictions_path = config.output_dir / "predictions.npz"
@@ -743,8 +783,29 @@ def evaluate_feature_ae_predictions(
     )
     metrics["image_recall"] = decision["recall"]
     metrics["false_negatives"] = decision["false_negatives"]
+    metrics["false_positive_count"] = decision["false_positive_count"]
+    metrics["good_alert_count"] = decision["good_alert_count"]
+    metrics["good_red_count"] = decision["good_red_count"]
+    metrics["alert_count"] = decision["alert_count"]
+    metrics["red_count"] = decision["red_count"]
     metrics["orange_rate"] = decision["orange_rate"]
+    metrics["alert_rate"] = decision["alert_rate"]
+    metrics["red_rate"] = decision["red_rate"]
+    metrics["good_alert_rate"] = decision["good_alert_rate"]
+    metrics["good_red_rate"] = decision["good_red_rate"]
     metrics["latency_ms"] = decision["latency_ms"]
+    for record in records:
+        score = float(record.get("score") or 0.0)
+        is_defective = bool(record.get("is_defective"))
+        is_alert = score >= threshold_orange
+        is_red = score >= threshold_red
+        record["threshold_orange"] = float(threshold_orange)
+        record["threshold_red"] = float(threshold_red)
+        record["is_alert"] = is_alert
+        record["is_red"] = is_red
+        record["decision"] = "red" if is_red else ("orange" if is_alert else "green")
+        record["is_false_positive"] = bool((not is_defective) and is_alert)
+        record["is_false_negative"] = bool(is_defective and not is_alert)
     return {
         "metrics": metrics,
         "metric_timings": metric_timings,
