@@ -14,7 +14,26 @@ operational procedures in `docs/`.
 - Optional cells can load an existing replay lifecycle `summary.json` if
   `RUN_DIR` points to a local run directory.
 
-## Run On The Server
+## Phase 2 to Phase 3 Transition Notebook
+
+* `phase2_to_phase3_transition.ipynb` summarizes the validated Phase 2 outcomes and the transition to Phase 3.
+* It documents governance, traceability, PostgreSQL validation, Kong runtime evidence, and the Phase 3 target architecture.
+* Its Python cells perform read only repository checks and do not start services or modify project files.
+* The notebook was validated on CubeAI and on the IQA server at commit `2c1541e`.
+* Five code cells executed successfully with zero errors and no sensitive output.
+* The notebook is intended for the final presentation, mentor review, and project handover.
+
+## Open the Phase 2 to Phase 3 Notebook on CubeAI
+
+Recommended with VS Code Remote SSH:
+
+```text
+/mnt/nvme/mlops/iqa-mlops/notebooks/phase2_to_phase3_transition.ipynb
+```
+
+Select the repository Python environment as the notebook kernel.
+
+## Run the Phase 3 Lineage Notebook on the Server
 
 Recommended from your local machine:
 
