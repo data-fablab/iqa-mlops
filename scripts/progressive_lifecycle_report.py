@@ -46,15 +46,16 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
         "active_aupimo",
         "candidate_aupimo",
         "delta",
-        "ref_delta",
-        "prog_delta",
         "pixel_ap",
-        "alert",
-        "good_alert",
-        "good_red",
-        "fn",
+        "active_fn",
+        "candidate_fn",
+        "active_good_red",
+        "candidate_good_red",
+        "fn_delta",
+        "good_red_delta",
         "unstable",
         "gate",
+        "reason",
         "registry",
     )
     if show_cache:
@@ -79,14 +80,15 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
     candidate_value = cycle.get("candidate_metric_value", cycle.get("selected_metric_value"))
     delta = cycle.get("metric_delta")
     candidate_metrics = cycle.get("candidate_metrics_on_eval_set") or cycle.get("metrics") or {}
+    active_metrics = cycle.get("active_metrics_on_eval_set") or cycle.get("progressive_active_metrics_on_eval_set") or {}
     pixel_ap = candidate_metrics.get("pixel_ap")
-    alert_rate = candidate_metrics.get("alert_rate")
-    good_alert_rate = candidate_metrics.get("good_alert_rate")
-    good_red_rate = candidate_metrics.get("good_red_rate")
-    false_negatives = candidate_metrics.get("false_negatives", cycle.get("candidate_false_negatives"))
+    active_false_negatives = cycle.get("active_false_negatives", active_metrics.get("false_negatives"))
+    candidate_false_negatives = cycle.get("candidate_false_negatives", candidate_metrics.get("false_negatives"))
+    active_good_red_count = cycle.get("active_good_red_count", active_metrics.get("good_red_count"))
+    candidate_good_red_count = cycle.get("candidate_good_red_count", candidate_metrics.get("good_red_count"))
     stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
-    reference_delta = cycle.get("reference_metric_delta")
-    progressive_delta = cycle.get("progressive_metric_delta", delta)
+    fn_delta = cycle.get("fn_delta")
+    good_red_delta = cycle.get("good_red_delta")
     registry = cycle.get("registry_alias") or cycle.get("registry_stage") or ""
     if cycle.get("registered_model_version"):
         registry = f"{registry}:v{cycle['registered_model_version']}"
@@ -101,15 +103,16 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
         "" if active_value is None else f"{float(active_value):.6g}",
         "" if candidate_value is None else f"{float(candidate_value):.6g}",
         "" if delta is None else f"{float(delta):+.6g}",
-        "" if reference_delta is None else f"{float(reference_delta):+.6g}",
-        "" if progressive_delta is None else f"{float(progressive_delta):+.6g}",
         "" if pixel_ap is None else f"{float(pixel_ap):.6g}",
-        "" if alert_rate is None else f"{float(alert_rate):.3g}",
-        "" if good_alert_rate is None else f"{float(good_alert_rate):.3g}",
-        "" if good_red_rate is None else f"{float(good_red_rate):.3g}",
-        "" if false_negatives is None else f"{float(false_negatives):.0f}",
+        "" if active_false_negatives is None else f"{float(active_false_negatives):.0f}",
+        "" if candidate_false_negatives is None else f"{float(candidate_false_negatives):.0f}",
+        "" if active_good_red_count is None else f"{float(active_good_red_count):.0f}",
+        "" if candidate_good_red_count is None else f"{float(candidate_good_red_count):.0f}",
+        "" if fn_delta is None else f"{float(fn_delta):+.0f}",
+        "" if good_red_delta is None else f"{float(good_red_delta):+.0f}",
         "yes" if stability.get("aupimo_unstable") else "no",
         str(cycle.get("gate_decision") or ""),
+        str(cycle.get("gate_reason") or ""),
         registry,
     )
     if show_cache:

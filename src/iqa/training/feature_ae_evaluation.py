@@ -321,6 +321,8 @@ def compute_decision_metrics(
         "recall": recall,
         "false_negatives": false_negatives,
         "false_positive_count": int(false_positives.sum()),
+        "good_alert_count": int(false_positives.sum()),
+        "good_red_count": int(good_red.sum()),
         "alert_count": int(alert.sum()),
         "red_count": int(red.sum()),
         "orange_rate": orange_rate,
@@ -552,6 +554,8 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
     metrics["image_recall"] = decision["recall"]
     metrics["false_negatives"] = decision["false_negatives"]
     metrics["false_positive_count"] = decision["false_positive_count"]
+    metrics["good_alert_count"] = decision["good_alert_count"]
+    metrics["good_red_count"] = decision["good_red_count"]
     metrics["alert_count"] = decision["alert_count"]
     metrics["red_count"] = decision["red_count"]
     metrics["orange_rate"] = decision["orange_rate"]
@@ -780,6 +784,8 @@ def evaluate_feature_ae_predictions(
     metrics["image_recall"] = decision["recall"]
     metrics["false_negatives"] = decision["false_negatives"]
     metrics["false_positive_count"] = decision["false_positive_count"]
+    metrics["good_alert_count"] = decision["good_alert_count"]
+    metrics["good_red_count"] = decision["good_red_count"]
     metrics["alert_count"] = decision["alert_count"]
     metrics["red_count"] = decision["red_count"]
     metrics["orange_rate"] = decision["orange_rate"]

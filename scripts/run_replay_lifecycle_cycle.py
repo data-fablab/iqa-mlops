@@ -313,12 +313,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-mlflow-registry", action="store_true")
     parser.add_argument("--anchor-good-manifest", type=Path, default=DEFAULT_ANCHOR_GOOD_MANIFEST)
     parser.add_argument("--anchor-good-max-per-class", type=int, default=256)
-    parser.add_argument("--hard-good-max-per-class", type=int, default=64)
     parser.add_argument("--reference-eval-manifest", type=Path, default=VALIDATION_MANIFEST)
     parser.add_argument("--reference-gt-masks-manifest", type=Path, default=VALIDATION_GT_MASKS_MANIFEST)
     parser.add_argument("--progressive-min-defects-for-decision", type=int, default=5)
-    parser.add_argument("--max-good-alert-rate", type=float, default=0.10)
-    parser.add_argument("--max-good-red-rate", type=float, default=0.02)
+    parser.add_argument("--max-good-red-regression", type=int, default=1)
     parser.add_argument("--candidate-init-policy", choices=["stable_base", "active", "fresh"], default="stable_base")
     return parser.parse_args()
 
@@ -899,7 +897,7 @@ def build_progressive_cycle(
     candidate_version = f"rd_feature_ae_gated_natural_cycle_{cycle_number:03d}"
     dataset_snapshot_id = f"feature_ae_natural_cycle_{cycle_number:03d}"
     calibration_set_id = f"calibration_natural_cycle_{cycle_number:03d}"
-    reference_evaluation_set_id = f"reference_eval_cycle_{cycle_number:03d}"
+    reference_evaluation_set_id = "reference_eval_v001"
     progressive_evaluation_set_id = f"progressive_eval_cycle_{cycle_number:03d}"
     active_model_before = active_runtime.version
     active_checkpoint = active_runtime.checkpoint
@@ -914,12 +912,10 @@ def build_progressive_cycle(
     training_manifest_path, training_manifest_stats = write_progressive_training_manifest(
         seen_snapshot_path=seen_snapshot_path,
         anchor_good_manifest=args.anchor_good_manifest,
-        hard_good_buffer_path=state.output_dir / "hard_good_buffer.csv",
         output_path=cycle_dir / "training_manifest.csv",
         dataset_snapshot_id=dataset_snapshot_id,
         scenario_id=state.scenario_id,
         anchor_good_max_per_class=args.anchor_good_max_per_class,
-        hard_good_max_per_class=args.hard_good_max_per_class,
     )
     progressive_evaluation_set_path = write_seen_evaluation_set(
         state.seen_events,
@@ -1084,13 +1080,6 @@ def build_progressive_cycle(
                 candidate_version=candidate_version,
                 registry_status=result.get("registry_status"),
             )
-        result["hard_good_added_count"] = update_hard_good_buffer(
-            run_buffer_path=state.output_dir / "hard_good_buffer.csv",
-            cycle_buffer_path=cycle_dir / "hard_good_buffer.csv",
-            metrics_path=Path(str(result.get("progressive_candidate_eval_metrics_path") or result.get("candidate_eval_metrics_path") or "")),
-            decision_thresholds=result.get("candidate_decision_thresholds"),
-            max_per_class=args.hard_good_max_per_class,
-        )
         tag_mlflow_promotion_evidence(result)
     else:
         result["candidate_checkpoint"] = None
@@ -1325,29 +1314,10 @@ def evaluate_model_pair_on_panel(
     candidate_good_alert_rate = float(candidate["metrics"].get("good_alert_rate") or 0.0)
     active_good_red_rate = float(active["metrics"].get("good_red_rate") or 0.0)
     candidate_good_red_rate = float(candidate["metrics"].get("good_red_rate") or 0.0)
-    if active_good_alert_rate > float(args.max_good_alert_rate):
-        operational_alerts.append("active_alert_rate_exceeds_budget")
-    if active_good_red_rate > float(args.max_good_red_rate):
-        operational_alerts.append("active_red_rate_exceeds_budget")
-    if candidate_good_alert_rate > float(args.max_good_alert_rate):
-        operational_alerts.append("candidate_alert_rate_exceeds_budget")
-    if candidate_good_red_rate > float(args.max_good_red_rate):
-        operational_alerts.append("candidate_red_rate_exceeds_budget")
     if candidate_decision_thresholds is None:
         operational_alerts.append("missing_candidate_runtime_thresholds")
     if active_calibrated_thresholds is None:
         operational_alerts.append("missing_active_runtime_thresholds")
-    candidate_stability = candidate.get("aupimo_stability") or {}
-    if candidate_stability.get("aupimo_unstable"):
-        operational_alerts.append("candidate_aupimo_unstable")
-    class_regressions = per_class_regressions(
-        active.get("per_class_metrics", {}),
-        candidate.get("per_class_metrics", {}),
-        metric=selected_metric,
-        min_delta=float(args.promotion_min_delta),
-    )
-    if class_regressions:
-        operational_alerts.append("candidate_per_class_regression")
     return {
         "panel": panel_name,
         "metrics": candidate["metrics"],
@@ -1385,6 +1355,8 @@ def evaluate_model_pair_on_panel(
         "active_good_alert_rate": active_good_alert_rate,
         "candidate_good_red_rate": candidate_good_red_rate,
         "active_good_red_rate": active_good_red_rate,
+        "candidate_good_red_count": int(candidate["metrics"].get("good_red_count") or 0),
+        "active_good_red_count": int(active["metrics"].get("good_red_count") or 0),
         "active_per_class_metrics": active.get("per_class_metrics", {}),
         "candidate_per_class_metrics": candidate.get("per_class_metrics", {}),
         "candidate_aupimo_stability": candidate.get("aupimo_stability", {}),
@@ -1396,7 +1368,7 @@ def evaluate_model_pair_on_panel(
         "evaluation_duration_seconds": (completed_at - started_at).total_seconds(),
         "operational_alerts": operational_alerts,
         "defective_count": count_defective_rows(evaluation_set_path),
-        "per_class_regressions": class_regressions,
+        "per_class_regressions": [],
     }
 
 
@@ -1433,130 +1405,92 @@ def evaluate_progressive_promotion_comparison(
         active_decision_thresholds=active_runtime.decision_thresholds,
         gt_masks_manifest=args.reference_gt_masks_manifest,
     )
-    progressive = evaluate_model_pair_on_panel(
-        args,
-        cycle_dir=cycle_dir,
-        panel_name="progressive",
-        evaluation_set_path=progressive_evaluation_set_path,
-        evaluation_set_id=progressive_evaluation_set_id,
-        active_model_version=active_model_version,
-        active_checkpoint_path=active_checkpoint_path,
-        candidate_version=candidate_version,
-        candidate_checkpoint_path=candidate_checkpoint_path,
-        artifacts=artifacts,
-        state=state,
-        active_runtime=active_runtime,
-        active_decision_thresholds=active_runtime.decision_thresholds,
-        gt_masks_manifest=args.reference_gt_masks_manifest,
-    )
+    progressive_defective_count = count_defective_rows(progressive_evaluation_set_path)
+    progressive_has_enough_defects = progressive_defective_count >= int(args.progressive_min_defects_for_decision)
+    progressive: dict[str, Any] | None = None
+    if progressive_has_enough_defects:
+        progressive = evaluate_model_pair_on_panel(
+            args,
+            cycle_dir=cycle_dir,
+            panel_name="progressive",
+            evaluation_set_path=progressive_evaluation_set_path,
+            evaluation_set_id=progressive_evaluation_set_id,
+            active_model_version=active_model_version,
+            active_checkpoint_path=active_checkpoint_path,
+            candidate_version=candidate_version,
+            candidate_checkpoint_path=candidate_checkpoint_path,
+            artifacts=artifacts,
+            state=state,
+            active_runtime=active_runtime,
+            active_decision_thresholds=active_runtime.decision_thresholds,
+            gt_masks_manifest=args.reference_gt_masks_manifest,
+        )
     completed_at = datetime.now(UTC)
 
     reference_delta = reference.get("metric_delta")
-    progressive_delta = progressive.get("metric_delta")
     reference_false_negatives_ok = int(reference.get("candidate_false_negatives") or 0) <= int(
         reference.get("active_false_negatives") or 0
     )
-    progressive_false_negatives_ok = int(progressive.get("candidate_false_negatives") or 0) <= int(
-        progressive.get("active_false_negatives") or 0
-    )
-    max_good_alert_rate = float(args.max_good_alert_rate)
-    max_good_red_rate = float(args.max_good_red_rate)
-    reference_alert_budget_ok = (
-        float(reference.get("candidate_good_alert_rate") or 0.0) <= max_good_alert_rate
-        and float(reference.get("candidate_good_red_rate") or 0.0) <= max_good_red_rate
-    )
-    progressive_alert_budget_ok = (
-        float(progressive.get("candidate_good_alert_rate") or 0.0) <= max_good_alert_rate
-        and float(progressive.get("candidate_good_red_rate") or 0.0) <= max_good_red_rate
-    )
-    reference_passed = (
+    progressive_false_negatives_ok = True
+    if progressive is not None:
+        progressive_false_negatives_ok = int(progressive.get("candidate_false_negatives") or 0) <= int(
+            progressive.get("active_false_negatives") or 0
+        )
+    active_metrics = reference.get("active_metrics_on_eval_set") or {}
+    candidate_metrics = reference.get("candidate_metrics_on_eval_set") or {}
+    active_good_red_count = int(active_metrics.get("good_red_count") or 0)
+    candidate_good_red_count = int(candidate_metrics.get("good_red_count") or 0)
+    good_red_delta = candidate_good_red_count - active_good_red_count
+    good_red_ok = good_red_delta <= int(args.max_good_red_regression)
+    metric_ok = (
         reference.get("selected_metric") is not None
         and reference_delta is not None
-        and float(reference_delta) >= -abs(float(args.promotion_min_delta))
-        and reference_false_negatives_ok
-        and reference_alert_budget_ok
-        and not reference.get("per_class_regressions")
+        and float(reference_delta) > float(args.promotion_min_delta)
     )
-    progressive_has_enough_defects = int(progressive.get("defective_count") or 0) >= int(
-        args.progressive_min_defects_for_decision
-    )
-    progressive_monitor_only = not progressive_has_enough_defects
-    progressive_passed = True
-    if progressive_has_enough_defects:
-        progressive_passed = (
-            progressive.get("selected_metric") is not None
-            and progressive_delta is not None
-            and float(progressive_delta) > float(args.promotion_min_delta)
-            and progressive_false_negatives_ok
-            and progressive_alert_budget_ok
-            and not progressive.get("per_class_regressions")
-        )
-    candidate_thresholds = progressive.get("candidate_decision_thresholds") or reference.get("candidate_decision_thresholds")
-    active_thresholds = progressive.get("active_decision_thresholds") or reference.get("active_decision_thresholds")
+    candidate_thresholds = reference.get("candidate_decision_thresholds")
+    active_thresholds = reference.get("active_decision_thresholds")
     thresholds_ok = candidate_thresholds is not None and active_thresholds is not None
-    passed = bool(reference_passed and progressive_passed and thresholds_ok)
+    passed = bool(metric_ok and reference_false_negatives_ok and progressive_false_negatives_ok and good_red_ok and thresholds_ok)
 
-    reference_gate = {
-        "decision": "passed" if reference_passed else "rejected",
+    simplified_gate = {
+        "decision": "passed" if passed else "rejected",
         "selected_metric": reference.get("selected_metric"),
         "active_metric_value": reference.get("active_metric_value"),
         "candidate_metric_value": reference.get("candidate_metric_value"),
         "metric_delta": reference.get("metric_delta"),
+        "metric_ok": metric_ok,
         "false_negatives_ok": reference_false_negatives_ok,
-        "alert_budget_ok": reference_alert_budget_ok,
-        "active_good_alert_rate": reference.get("active_good_alert_rate"),
-        "candidate_good_alert_rate": reference.get("candidate_good_alert_rate"),
-        "active_good_red_rate": reference.get("active_good_red_rate"),
-        "candidate_good_red_rate": reference.get("candidate_good_red_rate"),
-        "max_good_alert_rate": max_good_alert_rate,
-        "max_good_red_rate": max_good_red_rate,
-        "per_class_regressions": reference.get("per_class_regressions") or [],
-    }
-    progressive_gate = {
-        "decision": "monitor_only" if progressive_monitor_only else ("passed" if progressive_passed else "rejected"),
-        "selected_metric": progressive.get("selected_metric"),
-        "active_metric_value": progressive.get("active_metric_value"),
-        "candidate_metric_value": progressive.get("candidate_metric_value"),
-        "metric_delta": progressive.get("metric_delta"),
-        "defective_count": progressive.get("defective_count"),
-        "min_defects_for_decision": args.progressive_min_defects_for_decision,
-        "aupimo_unstable": progressive_monitor_only
-        or bool((progressive.get("candidate_aupimo_stability") or {}).get("aupimo_unstable")),
-        "false_negatives_ok": progressive_false_negatives_ok,
-        "alert_budget_ok": progressive_alert_budget_ok,
-        "active_good_alert_rate": progressive.get("active_good_alert_rate"),
-        "candidate_good_alert_rate": progressive.get("candidate_good_alert_rate"),
-        "active_good_red_rate": progressive.get("active_good_red_rate"),
-        "candidate_good_red_rate": progressive.get("candidate_good_red_rate"),
-        "max_good_alert_rate": max_good_alert_rate,
-        "max_good_red_rate": max_good_red_rate,
-        "per_class_regressions": progressive.get("per_class_regressions") or [],
+        "progressive_false_negatives_ok": progressive_false_negatives_ok,
+        "active_false_negatives": reference.get("active_false_negatives"),
+        "candidate_false_negatives": reference.get("candidate_false_negatives"),
+        "active_good_red_count": active_good_red_count,
+        "candidate_good_red_count": candidate_good_red_count,
+        "good_red_delta": good_red_delta,
+        "max_good_red_regression": int(args.max_good_red_regression),
+        "good_red_ok": good_red_ok,
+        "thresholds_ok": thresholds_ok,
+        "progressive_monitor_only": not progressive_has_enough_defects,
+        "progressive_defective_count": progressive_defective_count,
+        "progressive_min_defects_for_decision": int(args.progressive_min_defects_for_decision),
     }
 
-    missing_comparable_metric = reference.get("selected_metric") is None and progressive.get("selected_metric") is None
+    missing_comparable_metric = reference.get("selected_metric") is None
     if missing_comparable_metric:
         gate_reason = "rejected_missing_comparable_metric"
         promotion_status = "rejected_missing_comparable_metric"
         passed = False
     elif passed:
-        gate_reason = (
-            "candidate_passed_reference_and_progressive_panels"
-            if not progressive_monitor_only
-            else "candidate_passed_reference_progressive_monitor_only"
-        )
+        gate_reason = "candidate_passed_reference_gate"
         promotion_status = "promoted"
-    elif not reference_false_negatives_ok or (progressive_has_enough_defects and not progressive_false_negatives_ok):
+    elif not reference_false_negatives_ok or not progressive_false_negatives_ok:
         gate_reason = "candidate_increases_false_negatives"
         promotion_status = "rejected_operational_guardrail"
-    elif not reference_alert_budget_ok or (progressive_has_enough_defects and not progressive_alert_budget_ok):
-        gate_reason = "candidate_alert_rate_exceeds_budget"
+    elif not good_red_ok:
+        gate_reason = "candidate_increases_good_red_count"
         promotion_status = "rejected_operational_guardrail"
-    elif not reference_passed:
+    elif not metric_ok:
         gate_reason = "candidate_regressed_on_reference_panel"
         promotion_status = "rejected_reference_regression"
-    elif not progressive_passed:
-        gate_reason = "candidate_did_not_improve_progressive_panel"
-        promotion_status = "rejected_progressive_no_improvement"
     elif not thresholds_ok:
         gate_reason = "missing_candidate_runtime_thresholds"
         promotion_status = "rejected_missing_runtime_thresholds"
@@ -1564,92 +1498,87 @@ def evaluate_progressive_promotion_comparison(
         gate_reason = "candidate_rejected_by_panel_gate"
         promotion_status = "rejected_panel_gate"
 
-    operational_alerts = [
-        *(reference.get("operational_alerts") or []),
-        *(progressive.get("operational_alerts") or []),
-    ]
-    if progressive_monitor_only:
+    operational_alerts = list(reference.get("operational_alerts") or [])
+    if progressive is not None:
+        operational_alerts.extend(progressive.get("operational_alerts") or [])
+    if not progressive_has_enough_defects:
         operational_alerts.append("progressive_panel_not_enough_defects_for_decision")
 
     return {
-        "metrics": progressive.get("metrics") or {},
-        "active_metrics_on_eval_set": progressive.get("active_metrics_on_eval_set") or {},
-        "candidate_metrics_on_eval_set": progressive.get("candidate_metrics_on_eval_set") or {},
+        "metrics": reference.get("metrics") or {},
+        "active_metrics_on_eval_set": reference.get("active_metrics_on_eval_set") or {},
+        "candidate_metrics_on_eval_set": reference.get("candidate_metrics_on_eval_set") or {},
         "reference_active_metrics_on_eval_set": reference.get("active_metrics_on_eval_set") or {},
         "reference_candidate_metrics_on_eval_set": reference.get("candidate_metrics_on_eval_set") or {},
-        "progressive_active_metrics_on_eval_set": progressive.get("active_metrics_on_eval_set") or {},
-        "progressive_candidate_metrics_on_eval_set": progressive.get("candidate_metrics_on_eval_set") or {},
+        "progressive_active_metrics_on_eval_set": (progressive or {}).get("active_metrics_on_eval_set") or {},
+        "progressive_candidate_metrics_on_eval_set": (progressive or {}).get("candidate_metrics_on_eval_set") or {},
         "reference_selected_metric": reference.get("selected_metric"),
-        "progressive_selected_metric": progressive.get("selected_metric"),
-        "selected_metric": progressive.get("selected_metric") or reference.get("selected_metric"),
-        "selected_metric_value": progressive.get("candidate_metric_value") or reference.get("candidate_metric_value"),
-        "active_metric_value": progressive.get("active_metric_value"),
-        "candidate_metric_value": progressive.get("candidate_metric_value"),
-        "metric_delta": progressive.get("metric_delta"),
+        "progressive_selected_metric": (progressive or {}).get("selected_metric"),
+        "selected_metric": reference.get("selected_metric"),
+        "selected_metric_value": reference.get("candidate_metric_value"),
+        "active_metric_value": reference.get("active_metric_value"),
+        "candidate_metric_value": reference.get("candidate_metric_value"),
+        "metric_delta": reference.get("metric_delta"),
+        "fn_delta": int(reference.get("candidate_false_negatives") or 0) - int(reference.get("active_false_negatives") or 0),
+        "good_red_delta": good_red_delta,
         "reference_active_metric_value": reference.get("active_metric_value"),
         "reference_candidate_metric_value": reference.get("candidate_metric_value"),
         "reference_metric_delta": reference.get("metric_delta"),
-        "progressive_active_metric_value": progressive.get("active_metric_value"),
-        "progressive_candidate_metric_value": progressive.get("candidate_metric_value"),
-        "progressive_metric_delta": progressive.get("metric_delta"),
+        "progressive_active_metric_value": (progressive or {}).get("active_metric_value"),
+        "progressive_candidate_metric_value": (progressive or {}).get("candidate_metric_value"),
+        "progressive_metric_delta": (progressive or {}).get("metric_delta"),
         "gate_decision": "passed" if passed else "rejected",
         "gate_reason": gate_reason,
         "promotion_status": promotion_status,
-        "promotion_panel_decision": {
-            "reference_gate": reference_gate,
-            "progressive_gate": progressive_gate,
-            "thresholds_ok": thresholds_ok,
-        },
-        "reference_gate": reference_gate,
-        "progressive_gate": progressive_gate,
+        "promotion_panel_decision": simplified_gate,
+        "simplified_gate": simplified_gate,
         "active_decision_thresholds": active_thresholds,
-        "active_eval_metrics_path": progressive.get("active_eval_metrics_path"),
-        "candidate_eval_metrics_path": progressive.get("candidate_eval_metrics_path"),
+        "active_eval_metrics_path": reference.get("active_eval_metrics_path"),
+        "candidate_eval_metrics_path": reference.get("candidate_eval_metrics_path"),
         "reference_active_eval_metrics_path": reference.get("active_eval_metrics_path"),
         "reference_candidate_eval_metrics_path": reference.get("candidate_eval_metrics_path"),
-        "progressive_active_eval_metrics_path": progressive.get("active_eval_metrics_path"),
-        "progressive_candidate_eval_metrics_path": progressive.get("candidate_eval_metrics_path"),
-        "active_cache_status": progressive.get("active_cache_status"),
-        "candidate_cache_status": progressive.get("candidate_cache_status"),
-        "active_cache_key": progressive.get("active_cache_key"),
-        "candidate_cache_key": progressive.get("candidate_cache_key"),
-        "cache_status": progressive.get("cache_status"),
-        "cache_key": progressive.get("cache_key"),
-        "cache_hit": progressive.get("cache_hit"),
-        "cache_source": progressive.get("cache_source"),
+        "progressive_active_eval_metrics_path": (progressive or {}).get("active_eval_metrics_path"),
+        "progressive_candidate_eval_metrics_path": (progressive or {}).get("candidate_eval_metrics_path"),
+        "active_cache_status": reference.get("active_cache_status"),
+        "candidate_cache_status": reference.get("candidate_cache_status"),
+        "active_cache_key": reference.get("active_cache_key"),
+        "candidate_cache_key": reference.get("candidate_cache_key"),
+        "cache_status": reference.get("cache_status"),
+        "cache_key": reference.get("cache_key"),
+        "cache_hit": reference.get("cache_hit"),
+        "cache_source": reference.get("cache_source"),
         "candidate_decision_thresholds": candidate_thresholds,
-        "active_good_alert_rate": progressive.get("active_good_alert_rate"),
-        "candidate_good_alert_rate": progressive.get("candidate_good_alert_rate"),
-        "active_good_red_rate": progressive.get("active_good_red_rate"),
-        "candidate_good_red_rate": progressive.get("candidate_good_red_rate"),
+        "active_good_alert_rate": reference.get("active_good_alert_rate"),
+        "candidate_good_alert_rate": reference.get("candidate_good_alert_rate"),
+        "active_good_red_rate": reference.get("active_good_red_rate"),
+        "candidate_good_red_rate": reference.get("candidate_good_red_rate"),
+        "active_good_red_count": active_good_red_count,
+        "candidate_good_red_count": candidate_good_red_count,
         "reference_active_good_alert_rate": reference.get("active_good_alert_rate"),
         "reference_candidate_good_alert_rate": reference.get("candidate_good_alert_rate"),
         "reference_active_good_red_rate": reference.get("active_good_red_rate"),
         "reference_candidate_good_red_rate": reference.get("candidate_good_red_rate"),
-        "prediction_schema_version": progressive.get("prediction_schema_version"),
-        "candidate_metric_timings": progressive.get("candidate_metric_timings", {}),
-        "active_metric_timings": progressive.get("active_metric_timings", {}),
+        "prediction_schema_version": reference.get("prediction_schema_version"),
+        "candidate_metric_timings": reference.get("candidate_metric_timings", {}),
+        "active_metric_timings": reference.get("active_metric_timings", {}),
         "threshold_source": candidate_thresholds.get("threshold_source") if candidate_thresholds else "",
-        "candidate_false_negatives": progressive.get("candidate_false_negatives"),
-        "active_false_negatives": progressive.get("active_false_negatives"),
+        "candidate_false_negatives": reference.get("candidate_false_negatives"),
+        "active_false_negatives": reference.get("active_false_negatives"),
         "reference_candidate_false_negatives": reference.get("candidate_false_negatives"),
         "reference_active_false_negatives": reference.get("active_false_negatives"),
-        "active_per_class_metrics": progressive.get("active_per_class_metrics", {}),
-        "candidate_per_class_metrics": progressive.get("candidate_per_class_metrics", {}),
+        "active_per_class_metrics": reference.get("active_per_class_metrics", {}),
+        "candidate_per_class_metrics": reference.get("candidate_per_class_metrics", {}),
         "reference_active_per_class_metrics": reference.get("active_per_class_metrics", {}),
         "reference_candidate_per_class_metrics": reference.get("candidate_per_class_metrics", {}),
-        "per_class_regressions": [
-            *(reference.get("per_class_regressions") or []),
-            *(progressive.get("per_class_regressions") or []),
-        ],
-        "candidate_aupimo_stability": progressive.get("candidate_aupimo_stability", {}),
-        "active_aupimo_stability": progressive.get("active_aupimo_stability", {}),
+        "per_class_regressions": reference.get("per_class_regressions") or [],
+        "candidate_aupimo_stability": reference.get("candidate_aupimo_stability", {}),
+        "active_aupimo_stability": reference.get("active_aupimo_stability", {}),
         "reference_candidate_aupimo_stability": reference.get("candidate_aupimo_stability", {}),
-        "progressive_candidate_aupimo_stability": progressive.get("candidate_aupimo_stability", {}),
-        "candidate_predictions_path": progressive.get("candidate_predictions_path"),
-        "active_predictions_path": progressive.get("active_predictions_path"),
+        "progressive_candidate_aupimo_stability": (progressive or {}).get("candidate_aupimo_stability", {}),
+        "candidate_predictions_path": reference.get("candidate_predictions_path"),
+        "active_predictions_path": reference.get("active_predictions_path"),
         "reference_candidate_predictions_path": reference.get("candidate_predictions_path"),
-        "progressive_candidate_predictions_path": progressive.get("candidate_predictions_path"),
+        "progressive_candidate_predictions_path": (progressive or {}).get("candidate_predictions_path"),
         "evaluation_started_at": started_at.isoformat(),
         "evaluation_completed_at": completed_at.isoformat(),
         "evaluation_duration_seconds": (completed_at - started_at).total_seconds(),
@@ -1873,6 +1802,8 @@ def apply_decision_thresholds_to_evaluation(
     payload["metrics"]["false_positive_count"] = decision["false_positive_count"]
     payload["metrics"]["alert_count"] = decision["alert_count"]
     payload["metrics"]["red_count"] = decision["red_count"]
+    payload["metrics"]["good_alert_count"] = decision["good_alert_count"]
+    payload["metrics"]["good_red_count"] = decision["good_red_count"]
     payload["metrics"]["orange_rate"] = decision["orange_rate"]
     payload["metrics"]["alert_rate"] = decision["alert_rate"]
     payload["metrics"]["red_rate"] = decision["red_rate"]
@@ -1905,6 +1836,8 @@ def apply_decision_thresholds_to_evaluation(
             "false_positive_count": float(decision["false_positive_count"]),
             "alert_count": float(decision["alert_count"]),
             "red_count": float(decision["red_count"]),
+            "good_alert_count": float(decision["good_alert_count"]),
+            "good_red_count": float(decision["good_red_count"]),
             "orange_rate": float(decision["orange_rate"]),
             "alert_rate": float(decision["alert_rate"]),
             "red_rate": float(decision["red_rate"]),
@@ -2216,26 +2149,16 @@ def write_progressive_training_manifest(
     *,
     seen_snapshot_path: Path,
     anchor_good_manifest: Path,
-    hard_good_buffer_path: Path,
     output_path: Path,
     dataset_snapshot_id: str,
     scenario_id: str,
     anchor_good_max_per_class: int,
-    hard_good_max_per_class: int,
 ) -> tuple[Path, dict[str, Any]]:
     seen_rows = [
         normalize_training_row(row, dataset_snapshot_id=dataset_snapshot_id, scenario_id=scenario_id, source="oracle_gt_seen_lots")
         for row in read_csv_rows(seen_snapshot_path)
         if is_good_training_row(row)
     ]
-    hard_rows = cap_rows_by_source_class(
-        [
-            normalize_training_row(row, dataset_snapshot_id=dataset_snapshot_id, scenario_id=scenario_id, source="hard_good_outlier")
-            for row in read_csv_rows(hard_good_buffer_path)
-            if is_good_training_row(row)
-        ],
-        hard_good_max_per_class,
-    )
     anchor_rows = cap_rows_by_source_class(
         [
             normalize_training_row(row, dataset_snapshot_id=dataset_snapshot_id, scenario_id=scenario_id, source="anchor_good_reference")
@@ -2246,7 +2169,7 @@ def write_progressive_training_manifest(
     )
     merged: list[dict[str, str]] = []
     seen_relative_paths: set[str] = set()
-    for row in [*seen_rows, *hard_rows, *anchor_rows]:
+    for row in [*seen_rows, *anchor_rows]:
         relative_path = row_relative_path(row)
         if not relative_path or relative_path in seen_relative_paths:
             continue
@@ -2283,11 +2206,9 @@ def write_progressive_training_manifest(
             writer.writerow(row)
     return output_path, {
         "seen_conforming_count": len(seen_rows),
-        "hard_good_count": len(hard_rows),
         "anchor_good_count": len(anchor_rows),
         "total_count": len(merged),
         "anchor_good_manifest": str(anchor_good_manifest),
-        "hard_good_buffer_path": str(hard_good_buffer_path),
     }
 
 
@@ -2413,94 +2334,6 @@ def write_seen_evaluation_set(
             )
     return output_path
 
-
-def update_hard_good_buffer(
-    *,
-    run_buffer_path: Path,
-    cycle_buffer_path: Path,
-    metrics_path: Path,
-    decision_thresholds: dict[str, Any] | None,
-    max_per_class: int,
-) -> int:
-    if not metrics_path.is_file() or not decision_thresholds:
-        cycle_buffer_path.parent.mkdir(parents=True, exist_ok=True)
-        _write_hard_good_rows(cycle_buffer_path, [])
-        return 0
-    payload = json.loads(metrics_path.read_text(encoding="utf-8"))
-    threshold = float(decision_thresholds.get("threshold_red") or decision_thresholds.get("threshold_orange") or 0.0)
-    rows: list[dict[str, str]] = []
-    for record in payload.get("images") or payload.get("predictions") or []:
-        if bool(record.get("is_defective")) or record.get("score") is None:
-            continue
-        if float(record["score"]) < threshold:
-            continue
-        relative_path = str(record.get("relative_path") or "")
-        if not relative_path:
-            continue
-        image_id = str(record.get("image_id") or Path(relative_path).stem)
-        rows.append(
-            {
-                "image_id": image_id,
-                "image_ids": image_id,
-                "relative_path": relative_path,
-                "relative_paths": relative_path,
-                "event_id": f"hard_good_{image_id}",
-                "source_class": str(record.get("source_class") or "unknown"),
-                "split_set": "hard_good_buffer",
-                "label": "good",
-                "is_defective": "false",
-                "scenario_id": "",
-                "dataset_version": "hard_good_buffer",
-                "manifest_version": "hard_good_buffer_v001",
-                "gt_mask_path": "",
-                "oracle_verdict": "conforme",
-                "train_eligible": "true",
-                "train_eligibility_source": "hard_good_outlier",
-                "quarantine_reason": "",
-                "hard_good_score": str(record["score"]),
-            }
-        )
-    rows = cap_rows_by_source_class(rows, max_per_class)
-    existing = read_csv_rows(run_buffer_path)
-    seen = {row_relative_path(row) for row in existing}
-    new_rows = [row for row in rows if row_relative_path(row) and row_relative_path(row) not in seen]
-    merged = [*existing, *new_rows]
-    _write_hard_good_rows(cycle_buffer_path, new_rows)
-    _write_hard_good_rows(run_buffer_path, merged)
-    return len(new_rows)
-
-
-def _write_hard_good_rows(path: Path, rows: list[dict[str, str]]) -> None:
-    fieldnames = [
-        "image_id",
-        "image_ids",
-        "relative_path",
-        "relative_paths",
-        "event_id",
-        "source_class",
-        "split_set",
-        "label",
-        "is_defective",
-        "scenario_id",
-        "dataset_version",
-        "manifest_version",
-        "gt_mask_path",
-        "oracle_verdict",
-        "train_eligible",
-        "train_eligibility_source",
-        "quarantine_reason",
-        "hard_good_score",
-    ]
-    for row in rows:
-        for key in row:
-            if key not in fieldnames:
-                fieldnames.append(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
 
 
 def train_progressive_candidate(
