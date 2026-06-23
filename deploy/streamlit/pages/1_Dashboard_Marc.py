@@ -104,7 +104,7 @@ with tab_run:
         st.subheader("Conformite des lots")
         st.dataframe(
             lots,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             column_config={
                 "lot_id": "Lot",
@@ -155,7 +155,7 @@ with tab_run:
             )
             st.dataframe(
                 lifecycle,
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "cycle_id": "Cycle",
@@ -217,7 +217,7 @@ with tab_run:
             st.subheader("Journal lifecycle live")
             st.dataframe(
                 lifecycle_events[-20:],
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
 
@@ -244,7 +244,7 @@ with tab_run:
                     "candidate_checkpoint": summary.get("candidate_checkpoint"),
                 }
             ]
-            st.dataframe(lineage_rows, width="stretch", hide_index=True)
+            st.dataframe(lineage_rows, use_container_width=True, hide_index=True)
             if lifecycle:
                 st.dataframe(
                     [
@@ -257,7 +257,7 @@ with tab_run:
                         }
                         for row in lifecycle
                     ],
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True,
                 )
 
@@ -285,7 +285,7 @@ with tab_api:
 
         st.dataframe(
             api_lots,
-            width="stretch",
+            use_container_width=True,
             column_config={
                 "scenario_id": "Lot",
                 "total": "Volume",
