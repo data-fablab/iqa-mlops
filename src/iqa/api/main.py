@@ -57,13 +57,18 @@ AI_SECURITY_METRICS: dict[str, int] = {
 # Decision/latency/ROI metrics fed by the /predict path and exposed on /metrics
 # for the Grafana IQA overview dashboard (Vert/Orange/Rouge, latency, ROI fail).
 PREDICTION_METRICS: dict[str, float] = {
-    "decision_vert_total": 0,
-    "decision_orange_total": 0,
-    "decision_rouge_total": 0,
     "roi_fail_total": 0,
     "predict_latency_seconds_sum": 0.0,
     "predict_latency_seconds_count": 0,
 }
+
+# Known decision labels — bounds the cardinality of iqa_prediction_total.
+PREDICTION_DECISIONS = ("Vert", "Orange", "Rouge")
+
+# Prediction counter segregated by (scenario_id, decision) so the drift regime
+# is distinguishable from natural traffic at the Prometheus level (the proxy
+# drift signal filters scenario_id=~"drift.*").
+PREDICTION_DECISION_COUNTS: dict[tuple[str, str], int] = {}
 
 OPTIONAL_METADATA_TRACEABILITY_FIELDS = (
     "raw_dataset_id",
@@ -306,11 +311,15 @@ def _persist_metadata(
         raise HTTPException(status_code=503, detail=f"PostgreSQL metadata write failed during {operation}.") from exc
 
 
-def _record_prediction_metrics(prediction: dict[str, Any], elapsed_seconds: float) -> None:
-    decision = str(prediction.get("decision", "")).lower()
-    key = f"decision_{decision}_total"
-    if key in PREDICTION_METRICS:
-        PREDICTION_METRICS[key] += 1
+def _record_prediction_metrics(
+    prediction: dict[str, Any], elapsed_seconds: float, scenario_id: str
+) -> None:
+    decision = str(prediction.get("decision", ""))
+    if decision in PREDICTION_DECISIONS:
+        counter_key = (scenario_id, decision)
+        PREDICTION_DECISION_COUNTS[counter_key] = (
+            PREDICTION_DECISION_COUNTS.get(counter_key, 0) + 1
+        )
     if str(prediction.get("roi_status", "")).lower() == "fail":
         PREDICTION_METRICS["roi_fail_total"] += 1
     PREDICTION_METRICS["predict_latency_seconds_sum"] += elapsed_seconds
@@ -397,7 +406,9 @@ def predict(request: PredictRequest) -> dict[str, Any]:
             dataset_version=request.dataset_version,
         )
     )
-    _record_prediction_metrics(inference_result.to_dict(), time.perf_counter() - _started)
+    _record_prediction_metrics(
+        inference_result.to_dict(), time.perf_counter() - _started, request.scenario_id
+    )
 
     prediction_id = f"pred_{uuid4().hex}"
     created_at = datetime.now(timezone.utc).isoformat()
@@ -1040,11 +1051,12 @@ def metrics() -> str:
         "# HELP iqa_reload_refused_total IQA admin reload refusals",
         "# TYPE iqa_reload_refused_total counter",
         f"iqa_reload_refused_total {AI_SECURITY_METRICS['reload_refused_total']}",
-        "# HELP iqa_prediction_total IQA predictions by decision (Vert/Orange/Rouge)",
+        "# HELP iqa_prediction_total IQA predictions by decision (Vert/Orange/Rouge) and scenario",
         "# TYPE iqa_prediction_total counter",
-        f'iqa_prediction_total{{decision="Vert"}} {int(PREDICTION_METRICS["decision_vert_total"])}',
-        f'iqa_prediction_total{{decision="Orange"}} {int(PREDICTION_METRICS["decision_orange_total"])}',
-        f'iqa_prediction_total{{decision="Rouge"}} {int(PREDICTION_METRICS["decision_rouge_total"])}',
+        *(
+            f'iqa_prediction_total{{decision="{decision}",scenario_id="{scenario}"}} {count}'
+            for (scenario, decision), count in sorted(PREDICTION_DECISION_COUNTS.items())
+        ),
         "# HELP iqa_roi_fail_total IQA ROI segmentation failures observed at predict time",
         "# TYPE iqa_roi_fail_total counter",
         f"iqa_roi_fail_total {int(PREDICTION_METRICS['roi_fail_total'])}",
