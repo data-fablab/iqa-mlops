@@ -10,14 +10,14 @@ from typing import Any
 import requests
 import streamlit as st
 from iqa_client import API_URL, get, post
+from repo_paths import default_repo_root
 
 st.set_page_config(page_title="IQA - Poste Sophie", layout="wide")
 st.title("Poste Sophie - controle qualite")
 st.caption(f"iqa-api: {API_URL}")
 st.info("Feedback Sophie display-only : l'oracle GT reste souverain pour fermer le feedback et entrainer.")
 
-DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
-REPO_ROOT = Path(os.environ.get("IQA_REPO_ROOT", DEFAULT_REPO_ROOT)).resolve()
+REPO_ROOT = default_repo_root(__file__)
 DEFAULT_RUN_DIR = os.environ.get("IQA_SOPHIE_REPLAY_RUN_DIR", "")
 
 
