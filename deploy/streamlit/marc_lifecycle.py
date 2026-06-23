@@ -139,7 +139,7 @@ def production_alerts(lots: list[dict[str, Any]], cycles: list[dict[str, Any]]) 
         if int(lot.get("defauts_gt") or 0) > 0:
             alerts.append(f"{lot['lot_id']} contient {lot['defauts_gt']} defaut(s) GT.")
         if int(lot.get("rouge") or 0) > 0 or int(lot.get("orange") or 0) > 0:
-            alerts.append(f"{lot['lot_id']} contient des decisions orange/rouge.")
+            alerts.append(f"{lot['lot_id']} contient des decisions a verifier/non conformes.")
         if float(lot.get("roi_fail_rate") or 0) > 0:
             alerts.append(f"{lot['lot_id']} a un ROI fail rate de {lot['roi_fail_rate']} %.")
     for cycle in cycles:
@@ -163,7 +163,7 @@ def _decision_bucket(value: Any) -> str:
 
 def _lot_status(lot: dict[str, Any]) -> str:
     if int(lot.get("rouge") or 0) > 0 or int(lot.get("defauts_gt") or 0) > 0:
-        return "A revoir"
+        return "Non conforme"
     if int(lot.get("orange") or 0) > 0 or int(lot.get("roi_fail_count") or 0) > 0:
-        return "Sous surveillance"
+        return "A verifier"
     return "Conforme"

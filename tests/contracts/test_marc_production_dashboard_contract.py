@@ -39,6 +39,9 @@ def test_marc_dashboard_exposes_production_and_lineage_terms() -> None:
         "Actif avant",
         "Delta",
         "Registry",
+        "Conforme",
+        "A verifier",
+        "Non conforme",
         "pixel_aupimo_1e-5_1e-3",
         "pixel_ap",
         "MLflow",
@@ -63,7 +66,7 @@ def test_marc_lot_aggregation_counts_conformity_and_alerts() -> None:
     assert lots[0]["conformes_gt"] == 1
     assert lots[0]["defauts_gt"] == 1
     assert lots[0]["rouge"] == 1
-    assert lots[0]["statut_lot"] == "A revoir"
+    assert lots[0]["statut_lot"] == "Non conforme"
     assert lots[1]["orange"] == 1
     assert lots[1]["roi_fail_rate"] == 100.0
     assert "LOT-001 contient 1 defaut(s) GT." in production_alerts(lots, [])
