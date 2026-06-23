@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 
 from iqa.registry import register_run_to_model
 
@@ -27,7 +28,7 @@ class TestRegisterRunToModel:
 
             with mlflow.start_run(run_name="test_run") as run:
                 mlflow.log_param("test_param", "test_value")
-                mlflow.log_artifact(str(checkpoint_path), artifact_path="model")
+                mlflow.log_artifact(str(checkpoint_path), artifact_path="checkpoints")
                 mlflow.pytorch.log_model(
                     pytorch_model=torch.nn.Linear(1, 1),
                     artifact_path="model",
@@ -49,6 +50,27 @@ class TestRegisterRunToModel:
             assert result["registered_model_name"] == f"feature_ae__{scenario_id}"
             assert result["stage"] == "candidate"
             assert "version" in result
+
+    def test_register_run_requires_mlflow_model_artifact(self, mlflow_tracking_uri: str, tmp_path: Path) -> None:
+        """A run with only raw artifacts must not become a registry model version."""
+        import mlflow
+        import torch
+
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        checkpoint_path = tmp_path / "checkpoint.pt"
+        torch.save({"state_dict": {}}, checkpoint_path)
+
+        with mlflow.start_run(run_name="raw_artifact_only") as run:
+            mlflow.log_artifact(str(checkpoint_path), artifact_path="checkpoints")
+            run_id = run.info.run_id
+
+        with pytest.raises(FileNotFoundError, match="missing_mlflow_model_artifact"):
+            register_run_to_model(
+                run_id=run_id,
+                scenario_id="raw_artifact_only",
+                stage="test",
+                tracking_uri=mlflow_tracking_uri,
+            )
 
     def test_register_run_to_test_stage(self, mlflow_tracking_uri: str) -> None:
         """Register a run to test stage."""

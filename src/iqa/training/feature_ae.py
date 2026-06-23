@@ -85,6 +85,8 @@ class FeatureAETrainingConfig:
     roi_model_version: str = ""
     feature_ae_version: str = ""
     run_name: str = ""
+    initial_checkpoint_path: Path | None = None
+    initial_checkpoint_policy: str = "fresh"
     metric_eval_manifest_path: Path | None = None
     metric_eval_device: str | None = None
     metric_eval_roi_predictions_dirs: tuple[Path, ...] = ()
@@ -134,6 +136,8 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0) if val_dataset else None
 
     model = ReverseDistillationGatedDualContextResNet18(layers=layers).to(device)
+    if config.initial_checkpoint_path is not None:
+        _load_initial_checkpoint(model, config.initial_checkpoint_path, map_location=device)
     teacher = ResNetTeacherFeatures(layers=layers, pretrained=config.pretrained_teacher).to(device)
     teacher.eval()
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
@@ -475,6 +479,17 @@ def _save_checkpoint(
     return path
 
 
+def _load_initial_checkpoint(
+    model: ReverseDistillationGatedDualContextResNet18,
+    checkpoint_path: Path,
+    *,
+    map_location: torch.device,
+) -> None:
+    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+    model.load_state_dict(state_dict)
+
+
 def _metadata(config: FeatureAETrainingConfig, layers: tuple[str, ...]) -> dict[str, Any]:
     data = asdict(config)
     for key, value in list(data.items()):
@@ -524,6 +539,8 @@ def _validate_config(config: FeatureAETrainingConfig) -> None:
         raise ValueError("Feature-AE reference training only supports loss='l2_cosine'.")
     if config.metric_eval_manifest_path is not None and config.metric_eval_every_epochs != 1:
         raise ValueError("Feature-AE metric evaluation must run every epoch; set metric_eval_every_epochs=1.")
+    if config.initial_checkpoint_path is not None and not Path(config.initial_checkpoint_path).is_file():
+        raise FileNotFoundError(f"Feature-AE initial checkpoint not found: {config.initial_checkpoint_path}")
     if config.scenario_id in REPLAY_SCENARIOS:
         missing = [
             name
@@ -548,4 +565,3 @@ def _has_metric_best(run_dir: Path) -> bool:
 
 
 __all__ = ["FeatureAETrainingConfig", "REPLAY_SCENARIOS", "train_feature_ae"]
-

@@ -13,15 +13,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--epochs", action="store_true", help="Print per-epoch metric history when available.")
     parser.add_argument("--cache", action="store_true", help="Print prediction cache status when available.")
+    parser.add_argument("--mlflow", action="store_true", help="Print MLflow dataset/model logging evidence when available.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    print(render_report(args.run_dir, show_epochs=args.epochs, show_cache=args.cache))
+    print(render_report(args.run_dir, show_epochs=args.epochs, show_cache=args.cache, show_mlflow=args.mlflow))
 
 
-def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool = False) -> str:
+def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool = False, show_mlflow: bool = False) -> str:
     cycles_path = run_dir / "cycles.jsonl"
     if not cycles_path.is_file():
         progress_path = run_dir / "progress.json"
@@ -45,6 +46,8 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
         "active_aupimo",
         "candidate_aupimo",
         "delta",
+        "ref_delta",
+        "prog_delta",
         "pixel_ap",
         "unstable",
         "gate",
@@ -52,7 +55,9 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
     )
     if show_cache:
         header = header + ("cache", "hit", "schema", "aupimo_s", "pixel_s")
-    rows = [header, *[_row(cycle, show_cache=show_cache) for cycle in cycles]]
+    if show_mlflow:
+        header = header + ("run_id", "dataset", "model")
+    rows = [header, *[_row(cycle, show_cache=show_cache, show_mlflow=show_mlflow) for cycle in cycles]]
     widths = [max(len(str(row[index])) for row in rows) for index in range(len(rows[0]))]
     report = "\n".join(
         "  ".join(str(value).ljust(widths[index]) for index, value in enumerate(row)).rstrip()
@@ -65,13 +70,15 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
     return report
 
 
-def _row(cycle: dict[str, Any], *, show_cache: bool = False) -> tuple[str, ...]:
+def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool = False) -> tuple[str, ...]:
     active_value = cycle.get("active_metric_value")
     candidate_value = cycle.get("candidate_metric_value", cycle.get("selected_metric_value"))
     delta = cycle.get("metric_delta")
     candidate_metrics = cycle.get("candidate_metrics_on_eval_set") or cycle.get("metrics") or {}
     pixel_ap = candidate_metrics.get("pixel_ap")
     stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
+    reference_delta = cycle.get("reference_metric_delta")
+    progressive_delta = cycle.get("progressive_metric_delta", delta)
     registry = cycle.get("registry_alias") or cycle.get("registry_stage") or ""
     if cycle.get("registered_model_version"):
         registry = f"{registry}:v{cycle['registered_model_version']}"
@@ -86,6 +93,8 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False) -> tuple[str, ...]:
         "" if active_value is None else f"{float(active_value):.6g}",
         "" if candidate_value is None else f"{float(candidate_value):.6g}",
         "" if delta is None else f"{float(delta):+.6g}",
+        "" if reference_delta is None else f"{float(reference_delta):+.6g}",
+        "" if progressive_delta is None else f"{float(progressive_delta):+.6g}",
         "" if pixel_ap is None else f"{float(pixel_ap):.6g}",
         "yes" if stability.get("aupimo_unstable") else "no",
         str(cycle.get("gate_decision") or ""),
@@ -100,7 +109,21 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False) -> tuple[str, ...]:
             _duration(timings.get("aupimo_compute_seconds")),
             _duration(timings.get("pixel_rank_metrics_seconds")),
         )
+    if show_mlflow:
+        row = row + (
+            str(cycle.get("mlflow_run_id") or ""),
+            _bool_status(cycle.get("mlflow_dataset_logged")),
+            _bool_status(cycle.get("mlflow_model_logged")),
+        )
     return row
+
+
+def _bool_status(value: Any) -> str:
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return ""
 
 
 def _duration(value: Any) -> str:

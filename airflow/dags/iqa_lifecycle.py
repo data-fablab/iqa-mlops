@@ -32,6 +32,13 @@ def _define() -> None:
             "--epochs {{ params.epochs }} "
             "--target-stage {{ params.target_stage }} "
             "--promotion-min-delta {{ params.promotion_min_delta }} "
+            "--anchor-good-manifest {{ params.anchor_good_manifest }} "
+            "--anchor-good-max-per-class {{ params.anchor_good_max_per_class }} "
+            "--hard-good-max-per-class {{ params.hard_good_max_per_class }} "
+            "--reference-eval-manifest {{ params.reference_eval_manifest }} "
+            "--reference-gt-masks-manifest {{ params.reference_gt_masks_manifest }} "
+            "--progressive-min-defects-for-decision {{ params.progressive_min_defects_for_decision }} "
+            "--candidate-init-policy {{ params.candidate_init_policy }} "
             "--publish-minio "
             "--wait-for-gpu"
             "{% if params.require_mlflow_registry %} --require-mlflow-registry{% endif %}"
@@ -66,6 +73,13 @@ dag = build_container_dag(
         "epochs": 10,
         "target_stage": "test",
         "promotion_min_delta": 0.0,
+        "anchor_good_manifest": "data/model_datasets/feature_ae_good_v002.csv",
+        "anchor_good_max_per_class": 256,
+        "hard_good_max_per_class": 64,
+        "reference_eval_manifest": "data/validation/validation_set_v001.csv",
+        "reference_gt_masks_manifest": "data/validation/validation_gt_masks_v001.csv",
+        "progressive_min_defects_for_decision": 5,
+        "candidate_init_policy": "stable_base",
         "require_mlflow_registry": False,
         "mlflow_tracking_uri": "http://mlflow:5000",
         "ml_image": ml_image(),

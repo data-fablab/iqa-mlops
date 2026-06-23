@@ -2,19 +2,37 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
 try:
     import mlflow
+    import mlflow.pyfunc
     import mlflow.pytorch
     HAS_MLFLOW = True
 except ImportError:
     HAS_MLFLOW = False
 
+from iqa.models.artifacts import model_manifest_path
 from iqa.training.feature_ae import FeatureAETrainingConfig
-from iqa.training.feature_ae_contracts import FEATURE_AE_PREPROCESSING_CONTRACT_VERSION
+from iqa.training.feature_ae_contracts import (
+    FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
+    canonical_feature_ae_preprocessing_dict,
+)
 from iqa.training.feature_ae_evaluation import EvaluationReport
+
+
+class FeatureAEReferencePyfuncModel(mlflow.pyfunc.PythonModel if HAS_MLFLOW else object):
+    """Traceability wrapper for Feature-AE model versions in MLflow."""
+
+    def predict(self, context: Any, model_input: list[Any], params: dict[str, Any] | None = None) -> list[Any]:
+        raise NotImplementedError(
+            "Feature-AE MLflow model artifacts are for lineage and registry traceability; "
+            "use the IQA runtime loader for GPU inference."
+        )
 
 
 class MLflowRunLogger:
@@ -87,6 +105,24 @@ class MLflowRunLogger:
         }
         mlflow.log_params(params)
 
+    def log_datasets(self, config: FeatureAETrainingConfig) -> dict[str, bool]:
+        """Log MLflow Dataset inputs for training and metric evaluation manifests."""
+        logged = {
+            "training": _log_manifest_dataset(
+                manifest_path=config.manifest_path,
+                name=config.dataset_version or config.manifest_path.stem,
+                context="training",
+            ),
+            "metric_eval": False,
+        }
+        if config.metric_eval_manifest_path:
+            logged["metric_eval"] = _log_manifest_dataset(
+                manifest_path=config.metric_eval_manifest_path,
+                name=config.validation_set_id or config.metric_eval_manifest_path.stem,
+                context="metric_eval",
+            )
+        return logged
+
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
         """Log training metrics at each step.
 
@@ -125,10 +161,46 @@ class MLflowRunLogger:
             eval_report_path: Path to evaluation report file
         """
         if checkpoint_path and checkpoint_path.exists():
-            mlflow.log_artifact(str(checkpoint_path), artifact_path="model")
+            mlflow.log_artifact(str(checkpoint_path), artifact_path="checkpoints")
 
         if eval_report_path and eval_report_path.exists():
             mlflow.log_artifact(str(eval_report_path), artifact_path="reports")
+
+    def log_feature_ae_model(self, config: FeatureAETrainingConfig, checkpoint_path: Path) -> bool:
+        """Log a real MLflow Model wrapper for the Feature-AE checkpoint."""
+        if not checkpoint_path.exists():
+            return False
+        with tempfile.TemporaryDirectory(prefix="iqa_feature_ae_mlflow_") as tmp:
+            tmp_path = Path(tmp)
+            contract_path = tmp_path / "score_contract.json"
+            contract_path.write_text(
+                json.dumps(canonical_feature_ae_preprocessing_dict(), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            artifacts = {
+                "checkpoint": str(checkpoint_path),
+                "score_contract": str(contract_path),
+            }
+            model_version = config.candidate_version or config.feature_ae_version
+            if model_version:
+                source_manifest = model_manifest_path(model_version)
+                if source_manifest.exists():
+                    manifest_artifact = tmp_path / "model_manifest.json"
+                    shutil.copy2(source_manifest, manifest_artifact)
+                    artifacts["model_manifest"] = str(manifest_artifact)
+            mlflow.pyfunc.log_model(
+                artifact_path="model",
+                python_model=FeatureAEReferencePyfuncModel(),
+                artifacts=artifacts,
+                metadata={
+                    "model_type": "feature_ae_reference",
+                    "scenario_id": config.scenario_id,
+                    "candidate_version": config.candidate_version,
+                    "score_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
+                    "checkpoint_filename": checkpoint_path.name,
+                },
+            )
+        return True
 
     def set_tags(
         self,
@@ -152,8 +224,10 @@ class MLflowRunLogger:
         tags = {
             "git_commit": git_commit,
             "dataset_version": dataset_version,
+            "dataset_snapshot_id": dataset_version,
             "manifest_version": manifest_version,
             "scenario_id": scenario_id,
+            "score_contract_version": preprocessing_contract_version,
             "model_version": model_version or candidate_version,
             "candidate_version": candidate_version,
             "roi_model_version": roi_model_version,
@@ -203,6 +277,7 @@ def train_feature_ae_with_mlflow_logging(
     try:
         # Log configuration and tags
         logger.log_config(config)
+        dataset_logging = logger.log_datasets(config)
         logger.set_tags(
             git_commit=git_commit,
             dataset_version=config.dataset_version,
@@ -238,8 +313,10 @@ def train_feature_ae_with_mlflow_logging(
         checkpoint_path = Path(result["checkpoint"])
 
         # Log final checkpoint
+        model_logged = False
         if checkpoint_path.exists():
             logger.log_artifacts(checkpoint_path=checkpoint_path)
+            model_logged = logger.log_feature_ae_model(config, checkpoint_path)
 
         # Log evaluation report if it exists
         eval_best_path = run_dir / "metric_eval_best.json"
@@ -250,11 +327,30 @@ def train_feature_ae_with_mlflow_logging(
             logger.log_artifacts(eval_report_path=eval_history_path)
 
         result["run_id"] = logger._run_id or ""
+        result["mlflow_dataset_logged"] = any(dataset_logging.values())
+        result["mlflow_training_dataset_logged"] = dataset_logging["training"]
+        result["mlflow_metric_eval_dataset_logged"] = dataset_logging["metric_eval"]
+        result["mlflow_model_logged"] = model_logged
         return result
     finally:
         # Always end the run
         logger.end_run()
 
 
-__all__ = ["MLflowRunLogger", "train_feature_ae_with_mlflow_logging"]
+def _log_manifest_dataset(*, manifest_path: Path, name: str, context: str) -> bool:
+    if not manifest_path.exists():
+        return False
+    try:
+        import pandas as pd
+    except ImportError:
+        return False
+    frame = pd.read_csv(manifest_path)
+    try:
+        dataset = mlflow.data.from_pandas(frame, source=str(manifest_path), name=name)
+    except TypeError:
+        dataset = mlflow.data.from_pandas(frame, name=name)
+    mlflow.log_input(dataset, context=context)
+    return True
 
+
+__all__ = ["FeatureAEReferencePyfuncModel", "MLflowRunLogger", "train_feature_ae_with_mlflow_logging"]

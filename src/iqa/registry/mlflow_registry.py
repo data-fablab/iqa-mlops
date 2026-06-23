@@ -110,6 +110,7 @@ def register_run_to_model(
     stage: str = "candidate",
     model_name_base: str = "feature_ae",
     tracking_uri: str | None = None,
+    require_model_artifact: bool = True,
 ) -> dict[str, str]:
     """Register an MLflow run as a model version in a registered model.
 
@@ -139,6 +140,13 @@ def register_run_to_model(
 
     run = client.get_run(run_id)
     model_source = f"{run.info.artifact_uri.rstrip('/')}/model"
+    if require_model_artifact:
+        try:
+            client.download_artifacts(run_id, "model/MLmodel")
+        except Exception as exc:
+            raise FileNotFoundError(
+                f"missing_mlflow_model_artifact: run {run_id} has no model/MLmodel artifact"
+            ) from exc
 
     try:
         client.create_registered_model(model_name)
