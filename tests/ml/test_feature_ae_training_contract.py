@@ -13,6 +13,7 @@ from iqa.models.feature_ae import FEATURE_AE_MODEL_TYPE
 from iqa.training.feature_ae import FeatureAETrainingConfig, train_feature_ae
 from iqa.training.feature_ae_evaluation import (
     compute_aupimo_stability,
+    evaluate_feature_ae_predictions,
     materialize_evaluation_predictions,
     parse_layer_loss_weights,
     score_image_map,
@@ -230,16 +231,36 @@ def test_evaluation_predictions_npz_and_aupimo_stability(tmp_path: Path) -> None
     ]
     predictions_path = tmp_path / "predictions.npz"
 
-    materialize_evaluation_predictions(predictions_path, records)
+    pixel_labels = {
+        "good_1": np.asarray([[0, 0]], dtype=np.uint8),
+        "def_1": np.asarray([[1, 0]], dtype=np.uint8),
+    }
+    pixel_scores = {
+        "good_1": np.asarray([[10.0, 9.0]], dtype=np.float32),
+        "def_1": np.asarray([[1.0, 0.5]], dtype=np.float32),
+    }
+    materialize_evaluation_predictions(
+        predictions_path,
+        records,
+        pixel_labels_by_image=pixel_labels,
+        pixel_scores_by_image=pixel_scores,
+        score_contract={"score_contract_version": "feature_ae_reference_v001"},
+    )
     stability = compute_aupimo_stability(
         records,
-        {
-            "good_1": np.asarray([[10.0, 9.0]], dtype=np.float32),
-            "def_1": np.asarray([[1.0, 0.5]], dtype=np.float32),
-        },
+        pixel_scores,
+    )
+    recomputed = evaluate_feature_ae_predictions(
+        predictions_path,
+        threshold_orange=2.0,
+        threshold_red=5.0,
     )
 
     assert predictions_path.exists()
+    with np.load(predictions_path, allow_pickle=True) as data:
+        assert {"score_contract_version", "score_map_shape", "pixel_scores", "pixel_labels", "roi_coverage"} <= set(data.files)
+        assert data["score_contract_version"][0] == "feature_ae_reference_v001"
+    assert recomputed["metrics"]["pixel_ap"] is not None
     assert stability["aupimo_unstable"] is True
     assert "good_outliers_dominate_low_fpr" in stability["unstable_reasons"]
 
@@ -363,3 +384,4 @@ def _save_mask(path: Path, size: tuple[int, int], box: tuple[int, int, int, int]
     array[y0:y1, x0:x1] = 255
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(array).save(path)
+

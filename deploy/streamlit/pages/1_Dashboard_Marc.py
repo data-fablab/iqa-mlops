@@ -173,6 +173,8 @@ with tab_run:
                     "candidate_false_negatives": "FN candidat",
                     "activated_for_next_events": "Active ensuite",
                     "activation_scope": "Activation",
+                    "cache_status": "Cache",
+                    "cache_hit": "Cache hit",
                     "pixel_aupimo_1e-5_1e-3": st.column_config.NumberColumn("AUPIMO pixel", format="%.6f"),
                     "pixel_ap": st.column_config.NumberColumn("Pixel AP", format="%.6f"),
                     "image_ap": st.column_config.NumberColumn("Image AP", format="%.6f"),

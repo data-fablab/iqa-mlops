@@ -11,7 +11,7 @@ from iqa.storage.artifacts import sha256_file
 from iqa.training.bootstrap import (
     BOOTSTRAP_ARTIFACT_URI,
     materialize_bootstrap_checkpoint,
-    select_bootstrap_champion,
+    select_bootstrap_reference,
     sync_bootstrap_runtime_cache,
     update_bootstrap_manifest,
     upload_checkpoint_to_s3,
@@ -59,11 +59,11 @@ def test_bootstrap_selection_prioritizes_business_metrics_over_val_loss(tmp_path
     )
     _write_loss_history(run_dir)
 
-    champion = select_bootstrap_champion(run_dir)
+    reference = select_bootstrap_reference(run_dir)
 
-    assert champion.selected_metric == "pixel_aupimo_1e-5_1e-3"
-    assert champion.selected_epoch == 2
-    assert champion.val_loss == 0.9
+    assert reference.selected_metric == "pixel_aupimo_1e-5_1e-3"
+    assert reference.selected_epoch == 2
+    assert reference.val_loss == 0.9
 
 
 def test_bootstrap_selection_fails_without_business_metrics(tmp_path: Path) -> None:
@@ -71,14 +71,14 @@ def test_bootstrap_selection_fails_without_business_metrics(tmp_path: Path) -> N
     _write_metric_best(run_dir, {})
 
     with pytest.raises(ValueError, match="No bootstrap business metric"):
-        select_bootstrap_champion(run_dir)
+        select_bootstrap_reference(run_dir)
 
 
 def test_materialize_and_update_bootstrap_manifest(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     source = _checkpoint(run_dir / "checkpoint_best_pixel_ap.pt", b"pixel-ap")
     _write_metric_best(run_dir, {"pixel_ap": {"value": 0.7, "epoch": 3, "checkpoint": source.name}})
-    champion = select_bootstrap_champion(run_dir)
+    reference = select_bootstrap_reference(run_dir)
     manifest = tmp_path / "model_manifest.json"
     manifest.write_text(
         json.dumps(
@@ -91,8 +91,8 @@ def test_materialize_and_update_bootstrap_manifest(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    canonical = materialize_bootstrap_checkpoint(champion, run_dir / "checkpoint.pt")
-    payload = update_bootstrap_manifest(manifest, champion)
+    canonical = materialize_bootstrap_checkpoint(reference, run_dir / "checkpoint.pt")
+    payload = update_bootstrap_manifest(manifest, reference)
 
     assert canonical.read_bytes() == b"pixel-ap"
     assert payload["sha256"] == sha256_file(source)
@@ -106,13 +106,13 @@ def test_materialize_and_update_bootstrap_manifest(tmp_path: Path) -> None:
 
 
 def test_sync_bootstrap_runtime_cache_copies_selected_checkpoint(tmp_path: Path) -> None:
-    source = _checkpoint(tmp_path / "run" / "checkpoint.pt", b"champion")
+    source = _checkpoint(tmp_path / "run" / "checkpoint.pt", b"reference")
     runtime = tmp_path / ".cache" / "iqa" / "models" / "rd_feature_ae_gated_v001_bootstrap" / "checkpoint.pt"
 
     copied = sync_bootstrap_runtime_cache(source, runtime)
 
     assert copied == runtime
-    assert copied.read_bytes() == b"champion"
+    assert copied.read_bytes() == b"reference"
     assert sha256_file(copied) == sha256_file(source)
 
 
@@ -164,3 +164,4 @@ def test_training_rejects_noncanonical_preprocessing_without_dev_flag(tmp_path: 
                 image_size=32,
             )
         )
+

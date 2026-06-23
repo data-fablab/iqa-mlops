@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, random_split
 
 from iqa.datasets import TiledFeatureAEDataset
 from iqa.models.feature_ae import (
-    CHAMPION_FEATURE_AE_CONTRACT,
+    REFERENCE_FEATURE_AE_CONTRACT,
     DEFAULT_FEATURE_LAYERS,
     FEATURE_AE_MODEL_TYPE,
     ReverseDistillationGatedDualContextResNet18,
@@ -250,7 +250,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     layers=layers,
                     pretrained_teacher=config.pretrained_teacher,
                     layer_weights=config.metric_eval_layer_weights
-                    or CHAMPION_FEATURE_AE_CONTRACT.normalized_layer_weights(),
+                    or REFERENCE_FEATURE_AE_CONTRACT.normalized_layer_weights(),
                     calibrate_normal=config.metric_eval_calibrate_normal,
                     calibration_mode=config.metric_eval_calibration_mode,
                     calibration_stat=config.metric_eval_calibration_stat,
@@ -276,6 +276,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     "predictions_path": eval_result.get("predictions_path"),
                 }
             )
+            _append_jsonl(run_dir / "epoch_metrics.jsonl", epoch_metric_history[-1])
             update_metric_best_checkpoints(
                 run_dir=run_dir,
                 candidate_checkpoint=checkpoint,
@@ -499,6 +500,11 @@ def _write_history(path: Path, history: list[dict[str, float | int]]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(payload, sort_keys=True) + "\n")
+
+
 def _validate_config(config: FeatureAETrainingConfig) -> None:
     assert_canonical_feature_ae_preprocessing(
         preprocessing_mode=config.preprocessing_mode,
@@ -515,7 +521,7 @@ def _validate_config(config: FeatureAETrainingConfig) -> None:
         allow_noncanonical_preprocessing=config.allow_noncanonical_preprocessing,
     )
     if config.loss != "l2_cosine":
-        raise ValueError("Feature-AE champion training only supports loss='l2_cosine'.")
+        raise ValueError("Feature-AE reference training only supports loss='l2_cosine'.")
     if config.metric_eval_manifest_path is not None and config.metric_eval_every_epochs != 1:
         raise ValueError("Feature-AE metric evaluation must run every epoch; set metric_eval_every_epochs=1.")
     if config.scenario_id in REPLAY_SCENARIOS:
@@ -542,3 +548,4 @@ def _has_metric_best(run_dir: Path) -> bool:
 
 
 __all__ = ["FeatureAETrainingConfig", "REPLAY_SCENARIOS", "train_feature_ae"]
+

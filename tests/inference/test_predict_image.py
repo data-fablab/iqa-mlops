@@ -11,7 +11,7 @@ from PIL import Image
 from iqa.inference import FeatureAEPrediction, predict_feature_ae_image
 from iqa.inference.feature_ae import normalize_feature_ae_display_map, save_feature_ae_heatmap_overlay
 from iqa.models.feature_ae import (
-    apply_champion_roi,
+    apply_reference_roi,
     feature_layer_anomaly_maps,
     fuse_numpy_layer_maps,
     score_numpy_map_topk,
@@ -101,7 +101,7 @@ class TestPredictImage:
         assert "roi_status" in result_dict
         assert "heatmap_uri" in result_dict
         assert "latency_ms" in result_dict
-        assert result_dict["score_contract_version"] == "feature_ae_champion_v001"
+        assert result_dict["score_contract_version"] == "feature_ae_reference_v001"
 
     def test_predict_image_latency_ms_is_positive(
         self, sample_image: Path, synthetic_feature_ae_checkpoint: Path
@@ -181,7 +181,7 @@ def test_normalize_feature_ae_display_map_applies_roi_and_display_threshold() ->
     assert display[0, 0] == 0.0
 
 
-def test_champion_feature_map_fusion_uses_layer_weights() -> None:
+def test_reference_feature_map_fusion_uses_layer_weights() -> None:
     fused = fuse_numpy_layer_maps(
         {
             "layer2": torch.ones(2, 2).numpy(),
@@ -207,11 +207,11 @@ def test_reference_layer_score_uses_sqrt_l2_plus_cosine() -> None:
     assert maps["layer2"].squeeze().item() == pytest.approx(1.5)
 
 
-def test_champion_roi_soft_map_weights_scores() -> None:
+def test_reference_roi_soft_map_weights_scores() -> None:
     score_map = torch.tensor([[10.0, 10.0], [10.0, 10.0]]).numpy()
     roi_probability = torch.tensor([[1.0, 0.5], [0.0, 0.25]]).numpy()
 
-    weighted = apply_champion_roi(score_map, roi_probability=roi_probability, roi_mode="soft_map")
+    weighted = apply_reference_roi(score_map, roi_probability=roi_probability, roi_mode="soft_map")
     score = score_numpy_map_topk(
         weighted,
         roi_probability=roi_probability,
@@ -236,3 +236,4 @@ def test_roi_and_feature_ae_runtime_fall_back_to_cpu_when_cuda_is_unavailable() 
         assert 'torch_device.type == "cuda" and not torch.cuda.is_available()' in source
         assert 'torch.device("cpu")' in source
         assert 'map_location="cpu"' in source
+

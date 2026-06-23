@@ -15,7 +15,7 @@
     },
     "roi_mode": "soft_map",
     "roi_threshold": 0.5,
-    "score_contract_version": "feature_ae_champion_v001",
+    "score_contract_version": "feature_ae_reference_v001",
     "score_image": "topk_mean",
     "score_max": 292.6936340332031,
     "score_median": 2.961828827857971,
@@ -28,8 +28,16 @@
   },
   "model_type": "reverse_distill_resnet18_dual_context_gated",
   "model_version": "rd_feature_ae_gated_v001_bootstrap",
-  "feature_ae_champion_contract": {
+  "feature_ae_reference_contract": {
     "context_size": 768,
+    "checkpoint_selection_policy": "business_metric_only",
+    "cosine_weight": 0.5,
+    "layer_normalization": "good_p99",
+    "layer_normalization_stats": {
+      "layer2": 1.0,
+      "layer3": 1.0
+    },
+    "layer_score_mode": "sqrt_l2_plus_cosine",
     "layer_weights": {
       "layer2": 0.65,
       "layer3": 0.35
@@ -38,6 +46,7 @@
       "layer2",
       "layer3"
     ],
+    "legacy_scoring_allowed": false,
     "roi_mode": "soft_map",
     "roi_threshold": 0.5,
     "score_image": "topk_mean",
@@ -46,12 +55,15 @@
     "tile_size": 384,
     "tile_stride": 384,
     "topk_fraction": 0.005,
-    "version": "feature_ae_champion_v001"
+    "version": "feature_ae_reference_v001"
   },
   "preprocessing_contract": {
     "augmentation_profile": "none",
     "context_size": 768,
+    "cosine_weight": 0.5,
     "image_size": 384,
+    "layer_normalization": "good_p99",
+    "layer_score_mode": "sqrt_l2_plus_cosine",
     "layer_weights": {
       "layer2": 0.65,
       "layer3": 0.35
@@ -68,9 +80,9 @@
     "tile_stride": 384,
     "tile_train_sampling": "all",
     "topk_fraction": 0.005,
-    "version": "feature_ae_champion_v001"
+    "version": "feature_ae_reference_v001"
   },
-  "preprocessing_contract_version": "feature_ae_champion_v001",
+  "preprocessing_contract_version": "feature_ae_reference_v001",
   "roi_model_version": "roi_segmenter_v001_fixed",
   "runtime": {
     "loader": "load_rd_feature_ae_gated",

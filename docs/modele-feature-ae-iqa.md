@@ -51,12 +51,12 @@ Les anciens aliases et factories ne font plus partie du contrat public.
 
 ## 3. Preprocessing officiel
 
-Le mode historique `tile_256_overlap` n'est pas conserve. Il correspondait a une ancienne taille de tuiles et rendait le nom incoherent avec le champion actuel.
+Le mode historique `tile_256_overlap` n'est pas conserve. Il correspondait a une ancienne taille de tuiles et rendait le nom incoherent avec le reference actuel.
 
 Mode IQA retenu :
 
 ```text
-preprocessing_contract_version = feature_ae_champion_v001
+preprocessing_contract_version = feature_ae_reference_v001
 preprocessing_mode = tiled_context
 image_size         = 384
 context_size       = 768
@@ -84,12 +84,12 @@ ResizeLetterbox
 Le meme contrat de preprocessing doit etre utilise en training, evaluation,
 inference, bootstrap et lifecycle. Les parametres sont centralises dans
 `src/iqa/training/feature_ae_contracts.py` et sauvegardes dans les metadata du
-checkpoint. Les commandes champion/bootstrap/lifecycle refusent les overrides
+checkpoint. Les commandes reference/bootstrap/lifecycle refusent les overrides
 non canoniques, sauf avec le flag explicite de test local
 `--allow-noncanonical-preprocessing`.
 
 Le chemin runtime de demonstration et de production n'utilise plus le letterbox
-image entiere. Le contrat champion reconstruit une score map pleine resolution
+image entiere. Le contrat reference reconstruit une score map pleine resolution
 par tuiles 384 avec contexte 768, fusionne `layer2/layer3`, applique le ROI
 soft-map puis calcule le score `topk_mean` sur la surface fonctionnelle. Tout
 chemin letterbox restant est un chemin legacy de test et ne doit pas alimenter
@@ -154,7 +154,7 @@ Sortie locale Phase 1 :
 data/processed/roi/bootstrap_v001/roi_predictions.csv
 ```
 
-Configuration champion cible :
+Configuration reference cible :
 
 ```text
 layers               = layer2, layer3
@@ -204,7 +204,7 @@ uv run --extra cpu iqa-build-feature-ae-bootstrap \
 ```
 
 Cette commande restaure le ROI depuis MinIO, genere les ROI bootstrap si
-necessaire, entraine le Feature-AE, selectionne le checkpoint champion par
+necessaire, entraine le Feature-AE, selectionne le checkpoint reference par
 metriques metier, publie le checkpoint dans `s3://iqa-models` et met a jour le
 manifest Git du bootstrap. En developpement local, utiliser `--dry-run` pour
 verifier la configuration sans lancer le training.
@@ -213,12 +213,12 @@ Le bootstrap serveur evalue les metriques metier a chaque epoch. L'arret
 anticipe principal suit la progression metier : si aucune metrique prioritaire
 ne s'ameliore pendant 4 evaluations consecutives, le training s'arrete. La
 `val_loss` reste utilisee pour le scheduler LR et comme signal de stabilite,
-mais ne pilote ni le champion ni l'arret principal quand les metriques metier
+mais ne pilote ni le reference ni l'arret principal quand les metriques metier
 sont disponibles.
 
 ## 6. Evaluation metier
 
-La selection du champion ne doit pas reposer sur la loss seule.
+La selection du reference ne doit pas reposer sur la loss seule.
 
 Metriques image :
 
@@ -245,13 +245,13 @@ pixel_aupimo_1e-5_1e-3
 ```
 
 `val_loss` reste un garde-fou de stabilite et de debug. Elle ne doit pas
-selectionner le champion si les metriques metier pointent vers un autre
+selectionner le reference si les metriques metier pointent vers un autre
 checkpoint, et elle ne doit pas arreter le bootstrap avant la patience metier.
 
 Scoring cible :
 
 ```text
-score_contract   = feature_ae_champion_v001
+score_contract   = feature_ae_reference_v001
 teacher_weights  = IMAGENET1K_V1
 layer_weights    = layer2=0.65, layer3=0.35
 roi_mode         = soft_map
@@ -273,14 +273,14 @@ Il sert a mesurer la performance et a prendre les decisions de promotion.
 ## 6.1 Calibration des seuils runtime
 
 Les seuils `green / orange / red` ne sont pas des constantes universelles. Ils
-sont calibres par `model_version` avec le meme contrat champion que
+sont calibres par `model_version` avec le meme contrat reference que
 l'inference, et les metriques metier sont calculees sur `validation_set_v001`
 avec les masques GT defauts.
 
 Commande serveur :
 
 ```bash
-uv run --extra cu128 iqa-calibrate-feature-ae-champion \
+uv run --extra cu128 iqa-calibrate-feature-ae-reference \
   --model-version rd_feature_ae_gated_v001_bootstrap \
   --image-root /opt/iqa/iqa-mlops/data/raw/hss-iad \
   --validation-manifest data/validation/validation_set_v001.csv \
@@ -293,7 +293,7 @@ uv run --extra cu128 iqa-calibrate-feature-ae-champion \
 ```
 
 La commande restaure le Feature-AE depuis MinIO, score les images avec le
-contrat champion, materialise `predictions.npz`, `calibration_matrix.csv` et
+contrat reference, materialise `predictions.npz`, `calibration_matrix.csv` et
 `calibration_summary.json`, puis ecrit les seuils dans le manifest modele :
 
 ```text
@@ -314,7 +314,7 @@ pixel_aupimo_1e-5_1e-3
 
 Le runtime et le runner replay/lifecycle utilisent ensuite ces seuils manifest
 quand ils sont disponibles. Sans seuils calibres, le fallback historique reste
-explicite dans les sorties (`threshold_source = legacy_default`) afin de ne pas
+bloque explicitement le runtime quand les seuils calibres manquent afin de ne pas
 masquer une calibration manquante.
 
 ## 7. Checkpoints attendus
@@ -338,10 +338,10 @@ params.json
 loss_history.csv
 ```
 
-`checkpoint.pt` pointe vers le checkpoint champion selectionne par metriques
+`checkpoint.pt` pointe vers le checkpoint reference selectionne par metriques
 metier. Pour le bootstrap initial, la priorite est donnee a la localisation
 metier (`pixel_aupimo`, puis `pixel_ap`) avant les metriques image. La loss ne
-sert pas de critere champion principal.
+sert pas de critere reference principal.
 
 Metadata minimales attendues dans le checkpoint :
 
@@ -415,8 +415,10 @@ Hors perimetre MVP :
 - reentrainement du teacher ;
 - reentrainement automatique du ROI segmenter ;
 - usage de GT defaut pendant le training normal ;
-- selection champion uniquement par loss ;
+- selection reference uniquement par loss ;
 - API `/train` exposee au metier ;
 - retour humain reel obligatoire.
 
 Le retour humain Sophie reste une vitrine. Le workflow operationnel MVP est automatise par l'oracle GT apres prediction.
+
+

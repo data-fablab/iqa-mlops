@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--allow-noncanonical-preprocessing",
         action="store_true",
-        help="Only for tests/local dev; comparable champion/lifecycle candidates must use the canonical preprocessing contract.",
+        help="Only for tests/local dev; comparable reference/lifecycle candidates must use the canonical preprocessing contract.",
     )
     parser.add_argument("--checkpoint-every-epochs", type=int, default=1)
     parser.add_argument("--save-best", action="store_true")
@@ -98,7 +98,7 @@ def main() -> None:
     if args.teacher_backbone != "resnet18":
         raise ValueError(f"Unsupported teacher backbone: {args.teacher_backbone}")
     if args.augmentation_profile != "none":
-        raise ValueError("Feature-AE champion reproduction only supports --augmentation-profile none.")
+        raise ValueError("Feature-AE reference reproduction only supports --augmentation-profile none.")
     result = train_feature_ae(
         FeatureAETrainingConfig(
             manifest_path=args.manifest,
@@ -171,3 +171,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

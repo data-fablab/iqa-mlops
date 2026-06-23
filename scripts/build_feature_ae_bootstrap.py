@@ -12,7 +12,7 @@ from iqa.training.bootstrap import (
     BOOTSTRAP_ARTIFACT_URI,
     BOOTSTRAP_MODEL_VERSION,
     materialize_bootstrap_checkpoint,
-    select_bootstrap_champion,
+    select_bootstrap_reference,
     sync_bootstrap_runtime_cache,
     update_bootstrap_manifest,
     upload_checkpoint_to_s3,
@@ -75,14 +75,14 @@ def main() -> None:
         _ensure_roi_predictions(args)
         _train_bootstrap(args)
 
-    champion = select_bootstrap_champion(run_dir)
-    canonical_checkpoint = materialize_bootstrap_checkpoint(champion, run_dir / "checkpoint.pt")
+    reference = select_bootstrap_reference(run_dir)
+    canonical_checkpoint = materialize_bootstrap_checkpoint(reference, run_dir / "checkpoint.pt")
     runtime_cache_checkpoint = sync_bootstrap_runtime_cache(canonical_checkpoint)
     if args.publish_minio:
         upload_checkpoint_to_s3(canonical_checkpoint, args.artifact_uri)
     manifest = update_bootstrap_manifest(
         args.manifest_output,
-        champion,
+        reference,
         artifact_uri=args.artifact_uri,
         dataset_version="feature_ae_good_v001_bootstrap",
         validation_set_id="validation_set_v001",
@@ -97,9 +97,9 @@ def main() -> None:
                 "model_version": BOOTSTRAP_MODEL_VERSION,
                 "published_minio": bool(args.publish_minio),
                 "runtime_cache_checkpoint": str(runtime_cache_checkpoint),
-                "selected_epoch": champion.selected_epoch,
-                "selected_metric": champion.selected_metric,
-                "selected_metric_value": champion.selected_metric_value,
+                "selected_epoch": reference.selected_epoch,
+                "selected_metric": reference.selected_metric,
+                "selected_metric_value": reference.selected_metric_value,
                 "sha256": manifest["sha256"],
             },
             indent=2,
@@ -190,3 +190,4 @@ def _train_bootstrap(args: argparse.Namespace) -> dict[str, object]:
 
 if __name__ == "__main__":
     main()
+

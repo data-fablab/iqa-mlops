@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ from iqa.models.artifacts import (
 from iqa.monitoring import LifecycleDecision, LifecycleSignal, evaluate_lifecycle_signal
 from iqa.runtime import gpu_lock
 from iqa.storage.object_store import ObjectStore
+from iqa.storage.artifacts import sha256_file
 from iqa.storage.visual_artifacts import (
     VisualArtifactContext,
     create_visual_object_store,
@@ -274,6 +276,7 @@ class LifecycleArtifacts:
     summary_path: Path
     progress_path: Path
     lifecycle_events_path: Path
+    timings_path: Path
 
 
 def parse_args() -> argparse.Namespace:
@@ -364,6 +367,7 @@ def summary_with_runtime(
             "progress_path": str(artifacts.progress_path),
             "lifecycle_events_path": str(artifacts.lifecycle_events_path),
             "cycles_path": str(artifacts.cycles_path),
+            "timings_path": str(artifacts.timings_path),
         }
     )
     return payload
@@ -386,6 +390,18 @@ def record_lifecycle_event(
             "events_processed": state.events_processed,
             "lots_processed": state.lots_processed,
             "active_model_version": active_runtime.version,
+            "timestamp": datetime.now(UTC).isoformat(),
+            **payload,
+        },
+    )
+
+
+def record_timing(artifacts: LifecycleArtifacts, phase: str, *, duration_seconds: float, **payload: Any) -> None:
+    append_jsonl(
+        artifacts.timings_path,
+        {
+            "phase": phase,
+            "duration_seconds": duration_seconds,
             "timestamp": datetime.now(UTC).isoformat(),
             **payload,
         },
@@ -424,6 +440,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
         summary_path=state.output_dir / "summary.json",
         progress_path=state.output_dir / "progress.json",
         lifecycle_events_path=state.output_dir / "lifecycle_events.jsonl",
+        timings_path=state.output_dir / "timings.jsonl",
     )
     write_progress(artifacts, state, active_runtime, phase="started")
     record_lifecycle_event(artifacts, state, active_runtime, "run_started", args=vars(args))
@@ -593,22 +610,16 @@ def process_replay_event(
         heatmap_path=str(heatmap_path),
         heatmap_uri=heatmap_uri,
         active_model_version=active_model_version,
-        score_contract_version=getattr(feature, "score_contract_version", "feature_ae_champion_v001"),
+        score_contract_version=getattr(feature, "score_contract_version", "feature_ae_reference_v001"),
     )
 
 
 def resolve_runtime_thresholds(model_version: str) -> dict[str, Any]:
     thresholds = load_feature_ae_decision_thresholds(model_version)
-    if thresholds:
-        return {
-            "threshold_orange": float(thresholds["threshold_orange"]),
-            "threshold_red": float(thresholds["threshold_red"]),
-            "threshold_source": f"manifest:{thresholds.get('method', 'decision_thresholds')}",
-        }
     return {
-        "threshold_orange": 0.02,
-        "threshold_red": 0.05,
-        "threshold_source": "legacy_default",
+        "threshold_orange": float(thresholds["threshold_orange"]),
+        "threshold_red": float(thresholds["threshold_red"]),
+        "threshold_source": f"manifest:{thresholds.get('method', 'decision_thresholds')}",
     }
 
 
@@ -705,7 +716,14 @@ def handle_lifecycle_decision(
         phase="cycle_running",
         extra={"current_cycle": cycle_number, "trigger_reason": decision.trigger_reason},
     )
-    cycle_result = build_progressive_cycle(args, state, decision, cycle_number, active_runtime=active_runtime)
+    cycle_result = build_progressive_cycle(
+        args,
+        state,
+        decision,
+        cycle_number,
+        active_runtime=active_runtime,
+        artifacts=artifacts,
+    )
     state.last_cycle_conforming_validated_count = state.total_conforming_validated_count
     if cycle_result.get("mlflow_run_id"):
         record_lifecycle_event(
@@ -736,6 +754,7 @@ def handle_lifecycle_decision(
             aupimo_stability=cycle_result.get("candidate_aupimo_stability"),
         )
     if cycle_result.get("promotion_status") == "promoted":
+        activation_started = datetime.now(UTC)
         promoted = str(cycle_result["candidate_version"])
         state.active_model_final = promoted
         state.promotion_chain.append(promoted)
@@ -796,6 +815,13 @@ def handle_lifecycle_decision(
             active_thresholds=active_runtime.decision_thresholds,
             activation_scope=cycle_result["activation_scope"],
         )
+        record_timing(
+            artifacts,
+            "activation",
+            duration_seconds=(datetime.now(UTC) - activation_started).total_seconds(),
+            cycle_id=cycle_id,
+            active_model_version=active_runtime.version,
+        )
     elif args.mode == "progressive-train":
         state.status = "rejected"
         cycle_result["activated_for_next_events"] = False
@@ -850,6 +876,7 @@ def build_progressive_cycle(
     cycle_number: int,
     *,
     active_runtime: ActiveRuntimeModel,
+    artifacts: LifecycleArtifacts,
 ) -> dict[str, Any]:
     candidate_version = f"rd_feature_ae_gated_natural_cycle_{cycle_number:03d}"
     dataset_snapshot_id = f"feature_ae_natural_cycle_{cycle_number:03d}"
@@ -911,11 +938,47 @@ def build_progressive_cycle(
         "operational_alerts": [],
     }
     if args.mode == "progressive-train":
+        train_started = datetime.now(UTC)
         train_result = train_progressive_candidate(args, candidate_version, manifest_path, dataset_snapshot_id)
+        train_completed = datetime.now(UTC)
+        record_timing(
+            artifacts,
+            "train",
+            duration_seconds=(train_completed - train_started).total_seconds(),
+            cycle_id=f"cycle_{cycle_number:03d}",
+            candidate_version=candidate_version,
+        )
         result["candidate_checkpoint"] = str(train_result.get("checkpoint") or "")
         result["mlflow_run_id"] = str(train_result.get("run_id") or "")
         candidate_training_evidence = metric_evidence_from_training_result(train_result)
         result.update(candidate_training_evidence)
+        write_progress(
+            artifacts,
+            state,
+            active_runtime,
+            phase="candidate_trained",
+            extra={
+                "current_cycle": cycle_number,
+                "current_epoch": result.get("selected_epoch"),
+                "best_epoch": result.get("selected_epoch"),
+                "best_business_metric": result.get("selected_metric"),
+                "best_business_metric_value": result.get("selected_metric_value"),
+                "last_epoch_metrics": (result.get("epoch_metric_history") or [])[-1]
+                if result.get("epoch_metric_history")
+                else {},
+            },
+        )
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "candidate_trained",
+            cycle_id=f"cycle_{cycle_number:03d}",
+            candidate_version=candidate_version,
+            selected_epoch=result.get("selected_epoch"),
+            selected_metric=result.get("selected_metric"),
+            selected_metric_value=result.get("selected_metric_value"),
+        )
         comparison = evaluate_progressive_promotion_comparison(
             args,
             cycle_dir=cycle_dir,
@@ -925,6 +988,9 @@ def build_progressive_cycle(
             active_checkpoint_path=Path(active_checkpoint),
             candidate_version=candidate_version,
             candidate_checkpoint_path=Path(str(result["candidate_checkpoint"])),
+            artifacts=artifacts,
+            state=state,
+            active_runtime=active_runtime,
         )
         result.update(comparison)
         if comparison["gate_decision"] == "passed":
@@ -941,7 +1007,17 @@ def build_progressive_cycle(
                 f"s3://iqa-models/{candidate_version}/checkpoint.pt",
             )
         if result["promotion_status"] == "promoted":
+            registry_started = datetime.now(UTC)
             result.update(register_promoted_cycle(args, state, result))
+            registry_completed = datetime.now(UTC)
+            record_timing(
+                artifacts,
+                "registry",
+                duration_seconds=(registry_completed - registry_started).total_seconds(),
+                cycle_id=f"cycle_{cycle_number:03d}",
+                candidate_version=candidate_version,
+                registry_status=result.get("registry_status"),
+            )
         tag_mlflow_promotion_evidence(result)
     else:
         result["candidate_checkpoint"] = None
@@ -1007,6 +1083,9 @@ def evaluate_progressive_promotion_comparison(
     active_checkpoint_path: Path,
     candidate_version: str,
     candidate_checkpoint_path: Path,
+    artifacts: LifecycleArtifacts,
+    state: CycleState,
+    active_runtime: ActiveRuntimeModel,
 ) -> dict[str, Any]:
     started_at = datetime.now(UTC)
     active = evaluate_progressive_model_on_set(
@@ -1015,6 +1094,8 @@ def evaluate_progressive_promotion_comparison(
         checkpoint_path=active_checkpoint_path,
         evaluation_set_path=evaluation_set_path,
         output_dir=cycle_dir / "evaluation" / "active_before",
+        evaluation_set_id=evaluation_set_id,
+        cache_root=cycle_dir.parents[1] / "prediction_cache",
     )
     candidate = evaluate_progressive_model_on_set(
         args,
@@ -1022,8 +1103,41 @@ def evaluate_progressive_promotion_comparison(
         checkpoint_path=candidate_checkpoint_path,
         evaluation_set_path=evaluation_set_path,
         output_dir=cycle_dir / "evaluation" / "candidate",
+        evaluation_set_id=evaluation_set_id,
+        cache_root=cycle_dir.parents[1] / "prediction_cache",
     )
     completed_at = datetime.now(UTC)
+    duration = (completed_at - started_at).total_seconds()
+    record_timing(
+        artifacts,
+        "comparative_eval",
+        duration_seconds=duration,
+        cycle_id=cycle_dir.name,
+        active_cache_status=active.get("cache_status"),
+        candidate_cache_status=candidate.get("cache_status"),
+    )
+    for role, payload in (("active_before", active), ("candidate", candidate)):
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "prediction_cache_hit" if payload.get("cache_hit") else "prediction_cache_miss",
+            cycle_id=cycle_dir.name,
+            role=role,
+            model_version=payload.get("model_version"),
+            cache_key=payload.get("cache_key"),
+            cache_status=payload.get("cache_status"),
+        )
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "evaluation_completed",
+        cycle_id=cycle_dir.name,
+        active_model_version=active_model_version,
+        candidate_version=candidate_version,
+        duration_seconds=duration,
+    )
     candidate_decision_thresholds = thresholds_from_evaluation_scores(
         candidate["metrics_path"],
         evaluation_set_id=evaluation_set_id,
@@ -1044,6 +1158,14 @@ def evaluate_progressive_promotion_comparison(
             "promotion_status": "rejected_missing_comparable_metric",
             "active_eval_metrics_path": active["metrics_path"],
             "candidate_eval_metrics_path": candidate["metrics_path"],
+            "active_cache_status": active.get("cache_status"),
+            "candidate_cache_status": candidate.get("cache_status"),
+            "active_cache_key": active.get("cache_key"),
+            "candidate_cache_key": candidate.get("cache_key"),
+            "cache_status": candidate.get("cache_status"),
+            "cache_key": candidate.get("cache_key"),
+            "cache_hit": candidate.get("cache_hit"),
+            "cache_source": candidate.get("cache_source"),
             "candidate_decision_thresholds": candidate_decision_thresholds,
             "threshold_source": (
                 candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
@@ -1098,6 +1220,14 @@ def evaluate_progressive_promotion_comparison(
         "promotion_status": promotion_status,
         "active_eval_metrics_path": active["metrics_path"],
         "candidate_eval_metrics_path": candidate["metrics_path"],
+        "active_cache_status": active.get("cache_status"),
+        "candidate_cache_status": candidate.get("cache_status"),
+        "active_cache_key": active.get("cache_key"),
+        "candidate_cache_key": candidate.get("cache_key"),
+        "cache_status": candidate.get("cache_status"),
+        "cache_key": candidate.get("cache_key"),
+        "cache_hit": candidate.get("cache_hit"),
+        "cache_source": candidate.get("cache_source"),
         "candidate_decision_thresholds": candidate_decision_thresholds,
         "threshold_source": (
             candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
@@ -1124,7 +1254,30 @@ def evaluate_progressive_model_on_set(
     checkpoint_path: Path,
     evaluation_set_path: Path,
     output_dir: Path,
+    evaluation_set_id: str,
+    cache_root: Path,
 ) -> dict[str, Any]:
+    cache_key = prediction_cache_key(
+        model_version=model_version,
+        checkpoint_path=checkpoint_path,
+        evaluation_set_path=evaluation_set_path,
+        evaluation_set_id=evaluation_set_id,
+        threshold_orange=0.02,
+        threshold_red=0.05,
+    )
+    cached = load_prediction_cache(cache_root, cache_key, output_dir)
+    if cached is not None:
+        cached.update(
+            {
+                "model_version": model_version,
+                "checkpoint_path": str(checkpoint_path),
+                "cache_status": "hit",
+                "cache_hit": True,
+                "cache_key": cache_key,
+                "cache_source": str(cache_root / cache_key),
+            }
+        )
+        return cached
     result = evaluate_feature_ae_checkpoint(
         FeatureAEEvaluationConfig(
             checkpoint_path=checkpoint_path,
@@ -1142,6 +1295,7 @@ def evaluate_progressive_model_on_set(
             topk_fraction=CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
         )
     )
+    store_prediction_cache(cache_root, cache_key, output_dir)
     metrics = {
         metric: float(value)
         for metric, value in (result.get("metrics") or {}).items()
@@ -1163,7 +1317,84 @@ def evaluate_progressive_model_on_set(
         "aupimo_stability": result.get("aupimo_stability") or {},
         "predictions_path": result.get("predictions_path"),
         "metrics_path": str(output_dir / "metrics.json"),
+        "params_path": str(output_dir / "params.json"),
+        "cache_status": "miss_stored",
+        "cache_hit": False,
+        "cache_key": cache_key,
+        "cache_source": str(cache_root / cache_key),
     }
+
+
+def prediction_cache_key(
+    *,
+    model_version: str,
+    checkpoint_path: Path,
+    evaluation_set_path: Path,
+    evaluation_set_id: str,
+    threshold_orange: float,
+    threshold_red: float,
+) -> str:
+    payload = {
+        "model_version": model_version,
+        "checkpoint_sha256": sha256_file(checkpoint_path),
+        "evaluation_set_id": evaluation_set_id,
+        "evaluation_set_sha256": sha256_file(evaluation_set_path),
+        "score_contract_version": CANONICAL_FEATURE_AE_PREPROCESSING.version,
+        "threshold_signature": f"{threshold_orange:.12g}:{threshold_red:.12g}",
+    }
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def load_prediction_cache(cache_root: Path, cache_key: str, output_dir: Path) -> dict[str, Any] | None:
+    cache_dir = cache_root / cache_key
+    metrics_path = cache_dir / "metrics.json"
+    predictions_path = cache_dir / "predictions.npz"
+    if not metrics_path.is_file() or not predictions_path.is_file():
+        return None
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("metrics.json", "predictions.npz", "params.json"):
+        source = cache_dir / name
+        if source.is_file():
+            shutil.copy2(source, output_dir / name)
+    payload = json.loads((output_dir / "metrics.json").read_text(encoding="utf-8"))
+    metrics = {
+        metric: float(value)
+        for metric, value in (payload.get("metrics") or {}).items()
+        if value is not None
+        and metric
+        in {
+            *FEATURE_AE_BUSINESS_METRIC_PRIORITY,
+            "pixel_auroc",
+            "image_recall",
+            "false_negatives",
+            "orange_rate",
+        }
+    }
+    return {
+        "metrics": metrics,
+        "per_class_metrics": payload.get("per_class_metrics") or {},
+        "aupimo_stability": payload.get("aupimo_stability") or {},
+        "predictions_path": str(output_dir / "predictions.npz"),
+        "metrics_path": str(output_dir / "metrics.json"),
+        "params_path": str(output_dir / "params.json"),
+    }
+
+
+def store_prediction_cache(cache_root: Path, cache_key: str, output_dir: Path) -> None:
+    cache_dir = cache_root / cache_key
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("metrics.json", "predictions.npz", "params.json"):
+        source = output_dir / name
+        if source.is_file():
+            shutil.copy2(source, cache_dir / name)
+    index_path = cache_root / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+    index[cache_key] = {
+        "cache_dir": str(cache_dir),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    write_json(index_path, index)
 
 
 def select_comparable_business_metric(
@@ -1202,6 +1433,7 @@ def thresholds_from_evaluation_scores(
         "threshold_red": threshold_red,
         "threshold_source": f"progressive_eval_good_quantiles:{evaluation_set_id}",
         "method": "progressive_eval_good_quantiles",
+        "score_contract_version": CANONICAL_FEATURE_AE_PREPROCESSING.version,
         "orange_quantile": orange_quantile,
         "red_quantile": red_quantile,
     }
@@ -1555,3 +1787,4 @@ def _git_commit() -> str:
 
 if __name__ == "__main__":
     main()
+

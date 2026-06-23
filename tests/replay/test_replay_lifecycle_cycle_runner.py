@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from scripts import run_replay_lifecycle_cycle as runner
 from iqa.storage.object_store import InMemoryObjectStore
 
@@ -100,7 +102,14 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
         return {"checkpoint": str(config.output_checkpoint), "run_id": "mlflow-run-001", "run_dir": str(run_dir)}
 
     monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train)
-    def fake_evaluate_progressive_model(args, model_version, checkpoint_path, evaluation_set_path, output_dir):
+    def fake_evaluate_progressive_model(
+        args,
+        model_version,
+        checkpoint_path,
+        evaluation_set_path,
+        output_dir,
+        **kwargs,
+    ):
         value = 0.2
         if model_version.endswith("cycle_001"):
             value = 0.42
@@ -448,7 +457,7 @@ def test_progressive_train_rejects_candidate_that_does_not_improve_active_on_sam
     monkeypatch.setattr(
         runner,
         "evaluate_progressive_model_on_set",
-        lambda args, model_version, checkpoint_path, evaluation_set_path, output_dir: {
+        lambda args, model_version, checkpoint_path, evaluation_set_path, output_dir, **kwargs: {
             "model_version": model_version,
             "checkpoint_path": str(checkpoint_path),
             "metrics": {"pixel_aupimo_1e-5_1e-3": 0.9 if model_version == runner.DEFAULT_FEATURE_AE_MODEL_VERSION else 0.4},
@@ -478,7 +487,7 @@ def test_progressive_train_blocks_promotion_when_false_negatives_increase(tmp_pa
     monkeypatch.setattr(runner, "ACTIVE_REPLAY_SCENARIOS", tmp_path / "missing_replay_scenarios.csv")
     _mock_runtime(monkeypatch)
 
-    def fake_evaluate(args, model_version, checkpoint_path, evaluation_set_path, output_dir):
+    def fake_evaluate(args, model_version, checkpoint_path, evaluation_set_path, output_dir, **kwargs):
         value = 0.8 if model_version == runner.DEFAULT_FEATURE_AE_MODEL_VERSION else 0.9
         false_negatives = 0 if model_version == runner.DEFAULT_FEATURE_AE_MODEL_VERSION else 2
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -576,13 +585,38 @@ def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) ->
     assert summary["candidate_dataset_version"] == "feature_ae_good_v003"
 
 
-def test_runtime_thresholds_fall_back_to_legacy_defaults(monkeypatch) -> None:
-    monkeypatch.setattr(runner, "load_feature_ae_decision_thresholds", lambda *args, **kwargs: None)
+def test_runtime_thresholds_require_reference_calibration(monkeypatch) -> None:
+    def _missing_thresholds(*args, **kwargs):
+        raise ValueError("missing calibrated decision_thresholds")
 
-    thresholds = runner.resolve_runtime_thresholds("missing_thresholds")
+    monkeypatch.setattr(runner, "load_feature_ae_decision_thresholds", _missing_thresholds)
 
-    assert thresholds == {
-        "threshold_orange": 0.02,
-        "threshold_red": 0.05,
-        "threshold_source": "legacy_default",
-    }
+    with pytest.raises(ValueError, match="missing calibrated decision_thresholds"):
+        runner.resolve_runtime_thresholds("missing_thresholds")
+
+
+def test_prediction_cache_roundtrip(tmp_path: Path) -> None:
+    cache_root = tmp_path / "prediction_cache"
+    output_dir = tmp_path / "cycle_eval"
+    output_dir.mkdir()
+    (output_dir / "metrics.json").write_text(
+        json.dumps(
+            {
+                "metrics": {"pixel_aupimo_1e-5_1e-3": 0.2, "pixel_ap": 0.1},
+                "per_class_metrics": {"Casting_class1": {"pixel_ap": 0.1}},
+                "aupimo_stability": {"aupimo_unstable": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "predictions.npz").write_bytes(b"predictions")
+    (output_dir / "params.json").write_text("{}", encoding="utf-8")
+
+    runner.store_prediction_cache(cache_root, "abc123", output_dir)
+    loaded = runner.load_prediction_cache(cache_root, "abc123", tmp_path / "loaded_eval")
+
+    assert loaded is not None
+    assert loaded["metrics"]["pixel_aupimo_1e-5_1e-3"] == 0.2
+    assert (cache_root / "index.json").exists()
+    assert (tmp_path / "loaded_eval" / "predictions.npz").read_bytes() == b"predictions"
+

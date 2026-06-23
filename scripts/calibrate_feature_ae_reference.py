@@ -1,4 +1,4 @@
-"""Calibrate Feature-AE with the champion tiled runtime contract."""
+"""Calibrate Feature-AE with the reference tiled runtime contract."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from iqa.models.artifacts import (
     model_manifest_path,
     resolve_feature_ae_checkpoint,
 )
-from iqa.models.feature_ae import CHAMPION_FEATURE_AE_CONTRACT
+from iqa.models.feature_ae import REFERENCE_FEATURE_AE_CONTRACT
 from iqa.training.feature_ae_evaluation import (
     FeatureAEEvaluationConfig,
     evaluate_feature_ae_checkpoint,
@@ -26,7 +26,7 @@ from iqa.training.feature_ae_evaluation import (
 
 DEFAULT_VALIDATION_MANIFEST = Path("data/validation/validation_set_v001.csv")
 DEFAULT_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
-DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/calibration_champion")
+DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/calibration_reference")
 BUSINESS_METRIC_PRIORITY = (
     "pixel_aupimo_1e-5_1e-3",
     "pixel_ap",
@@ -45,10 +45,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--max-images", type=int)
-    parser.add_argument("--roi-mode", default=CHAMPION_FEATURE_AE_CONTRACT.roi_mode)
-    parser.add_argument("--roi-threshold", type=float, default=CHAMPION_FEATURE_AE_CONTRACT.roi_threshold)
+    parser.add_argument("--roi-mode", default=REFERENCE_FEATURE_AE_CONTRACT.roi_mode)
+    parser.add_argument("--roi-threshold", type=float, default=REFERENCE_FEATURE_AE_CONTRACT.roi_threshold)
     parser.add_argument("--layer-weights", nargs="*", default=["layer2=0.65", "layer3=0.35"])
-    parser.add_argument("--topk-fraction", type=float, default=CHAMPION_FEATURE_AE_CONTRACT.topk_fraction)
+    parser.add_argument("--topk-fraction", type=float, default=REFERENCE_FEATURE_AE_CONTRACT.topk_fraction)
     parser.add_argument("--orange-quantile", type=float, default=0.95)
     parser.add_argument("--red-quantile", type=float, default=0.99)
     parser.add_argument("--write-manifest", action="store_true")
@@ -56,11 +56,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    result = calibrate_feature_ae_champion(parse_args())
+    result = calibrate_feature_ae_reference(parse_args())
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
-def calibrate_feature_ae_champion(args: argparse.Namespace) -> dict[str, Any]:
+def calibrate_feature_ae_reference(args: argparse.Namespace) -> dict[str, Any]:
     if not 0.0 < args.orange_quantile < args.red_quantile < 1.0:
         raise ValueError("--orange-quantile and --red-quantile must satisfy 0 < orange < red < 1")
     assert_validation_has_defects(args.validation_manifest, args.gt_masks_manifest)
@@ -82,8 +82,8 @@ def calibrate_feature_ae_champion(args: argparse.Namespace) -> dict[str, Any]:
             calibrate_normal=False,
             roi_threshold=args.roi_threshold,
             apply_score_region_to_map=False,
-            score_smoothing=CHAMPION_FEATURE_AE_CONTRACT.score_smoothing,
-            score_image=CHAMPION_FEATURE_AE_CONTRACT.score_image,
+            score_smoothing=REFERENCE_FEATURE_AE_CONTRACT.score_smoothing,
+            score_image=REFERENCE_FEATURE_AE_CONTRACT.score_image,
             topk_fraction=args.topk_fraction,
             save_score_maps=True,
             save_previews=True,
@@ -96,11 +96,11 @@ def calibrate_feature_ae_champion(args: argparse.Namespace) -> dict[str, Any]:
     image_scores = [float(row["score"]) for row in images]
     normal_scores = [float(row["score"]) for row in images if not bool(row["is_defective"])]
     if not normal_scores:
-        raise ValueError("Champion calibration requires at least one conforming validation image")
+        raise ValueError("Reference calibration requires at least one conforming validation image")
 
     metrics = dict(evaluation.get("metrics", {}))
     selected_metric, selected_metric_value = select_business_metric(metrics)
-    thresholds = build_champion_thresholds(
+    thresholds = build_reference_thresholds(
         normal_scores,
         model_version=args.model_version,
         validation_manifest=args.validation_manifest,
@@ -116,7 +116,7 @@ def calibrate_feature_ae_champion(args: argparse.Namespace) -> dict[str, Any]:
     summary = {
         "model_version": args.model_version,
         "roi_model_version": args.roi_model_version,
-        "contract": CHAMPION_FEATURE_AE_CONTRACT.to_dict(),
+        "contract": REFERENCE_FEATURE_AE_CONTRACT.to_dict(),
         "validation_manifest": str(args.validation_manifest),
         "gt_masks_manifest": str(args.gt_masks_manifest),
         "metrics": metrics,
@@ -131,7 +131,7 @@ def calibrate_feature_ae_champion(args: argparse.Namespace) -> dict[str, Any]:
     threshold_report = output_dir / "threshold_calibration_report.json"
     threshold_report.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if args.write_manifest:
-        update_champion_manifest(args.model_version, thresholds)
+        update_reference_manifest(args.model_version, thresholds)
     return {
         "model_version": args.model_version,
         "calibration_summary": str(summary_path),
@@ -155,7 +155,7 @@ def assert_validation_has_defects(validation_manifest: Path, gt_masks_manifest: 
             if row.get("gt_mask_path") or row.get("mask_path") or row.get("path"):
                 gt_rows += 1
     if defective_rows <= 0 or gt_rows <= 0:
-        raise ValueError("Champion calibration requires defective validation images with GT masks")
+        raise ValueError("Reference calibration requires defective validation images with GT masks")
 
 
 def select_business_metric(metrics: dict[str, Any]) -> tuple[str, float]:
@@ -163,10 +163,10 @@ def select_business_metric(metrics: dict[str, Any]) -> tuple[str, float]:
         value = metrics.get(metric)
         if value is not None and np.isfinite(float(value)):
             return metric, float(value)
-    raise ValueError("Champion calibration produced no business metric: pixel_aupimo, pixel_ap, image_ap or image_auroc")
+    raise ValueError("Reference calibration produced no business metric: pixel_aupimo, pixel_ap, image_ap or image_auroc")
 
 
-def build_champion_thresholds(
+def build_reference_thresholds(
     normal_scores: list[float],
     *,
     model_version: str,
@@ -180,19 +180,19 @@ def build_champion_thresholds(
 ) -> dict[str, Any]:
     values = np.asarray(normal_scores, dtype=np.float64)
     return {
-        "method": "champion_good_quantiles_with_business_metrics",
+        "method": "reference_good_quantiles_with_business_metrics",
         "model_version": model_version,
         "calibration_set_id": validation_manifest.stem,
         "gt_masks_manifest": str(gt_masks_manifest),
-        "score_contract_version": CHAMPION_FEATURE_AE_CONTRACT.version,
-        "teacher_weights": CHAMPION_FEATURE_AE_CONTRACT.teacher_weights,
-        "layers": list(CHAMPION_FEATURE_AE_CONTRACT.layers),
+        "score_contract_version": REFERENCE_FEATURE_AE_CONTRACT.version,
+        "teacher_weights": REFERENCE_FEATURE_AE_CONTRACT.teacher_weights,
+        "layers": list(REFERENCE_FEATURE_AE_CONTRACT.layers),
         "layer_weights": layer_weights,
-        "roi_mode": CHAMPION_FEATURE_AE_CONTRACT.roi_mode,
-        "roi_threshold": CHAMPION_FEATURE_AE_CONTRACT.roi_threshold,
-        "score_smoothing": CHAMPION_FEATURE_AE_CONTRACT.score_smoothing,
-        "score_image": CHAMPION_FEATURE_AE_CONTRACT.score_image,
-        "topk_fraction": CHAMPION_FEATURE_AE_CONTRACT.topk_fraction,
+        "roi_mode": REFERENCE_FEATURE_AE_CONTRACT.roi_mode,
+        "roi_threshold": REFERENCE_FEATURE_AE_CONTRACT.roi_threshold,
+        "score_smoothing": REFERENCE_FEATURE_AE_CONTRACT.score_smoothing,
+        "score_image": REFERENCE_FEATURE_AE_CONTRACT.score_image,
+        "topk_fraction": REFERENCE_FEATURE_AE_CONTRACT.topk_fraction,
         "orange_quantile": float(orange_quantile),
         "red_quantile": float(red_quantile),
         "threshold_orange": float(np.quantile(values, orange_quantile)),
@@ -251,15 +251,16 @@ def write_calibration_matrix(path: Path, metrics: dict[str, Any], thresholds: di
     return path
 
 
-def update_champion_manifest(model_version: str, thresholds: dict[str, Any]) -> Path:
+def update_reference_manifest(model_version: str, thresholds: dict[str, Any]) -> Path:
     path = model_manifest_path(model_version)
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest["feature_ae_champion_contract"] = CHAMPION_FEATURE_AE_CONTRACT.to_dict()
+    manifest["feature_ae_reference_contract"] = REFERENCE_FEATURE_AE_CONTRACT.to_dict()
     manifest["decision_thresholds"] = thresholds
-    manifest["preprocessing_contract_version"] = CHAMPION_FEATURE_AE_CONTRACT.version
+    manifest["preprocessing_contract_version"] = REFERENCE_FEATURE_AE_CONTRACT.version
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 
 if __name__ == "__main__":
     main()
+

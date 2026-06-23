@@ -85,6 +85,8 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "candidate_false_negatives": cycle.get("candidate_false_negatives"),
                 "activated_for_next_events": cycle.get("activated_for_next_events"),
                 "activation_scope": cycle.get("activation_scope"),
+                "cache_status": cycle.get("cache_status"),
+                "cache_hit": cycle.get("cache_hit"),
                 "pixel_aupimo_1e-5_1e-3": metrics.get("pixel_aupimo_1e-5_1e-3"),
                 "pixel_ap": metrics.get("pixel_ap"),
                 "image_ap": metrics.get("image_ap"),
