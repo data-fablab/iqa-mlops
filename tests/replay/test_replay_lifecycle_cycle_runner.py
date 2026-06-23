@@ -610,7 +610,10 @@ def test_prediction_cache_roundtrip(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (output_dir / "predictions.npz").write_bytes(b"predictions")
-    (output_dir / "params.json").write_text("{}", encoding="utf-8")
+    (output_dir / "params.json").write_text(
+        json.dumps({"prediction_schema_version": runner.PREDICTION_SCHEMA_VERSION}),
+        encoding="utf-8",
+    )
 
     runner.store_prediction_cache(cache_root, "abc123", output_dir)
     loaded = runner.load_prediction_cache(cache_root, "abc123", tmp_path / "loaded_eval")
@@ -619,4 +622,3 @@ def test_prediction_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded["metrics"]["pixel_aupimo_1e-5_1e-3"] == 0.2
     assert (cache_root / "index.json").exists()
     assert (tmp_path / "loaded_eval" / "predictions.npz").read_bytes() == b"predictions"
-

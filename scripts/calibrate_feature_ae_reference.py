@@ -20,8 +20,11 @@ from iqa.models.artifacts import (
 from iqa.models.feature_ae import REFERENCE_FEATURE_AE_CONTRACT
 from iqa.training.feature_ae_evaluation import (
     FeatureAEEvaluationConfig,
+    PREDICTION_SCHEMA_VERSION,
     evaluate_feature_ae_checkpoint,
+    evaluate_feature_ae_predictions,
     parse_layer_loss_weights,
+    score_image_map,
 )
 
 DEFAULT_VALIDATION_MANIFEST = Path("data/validation/validation_set_v001.csv")
@@ -51,6 +54,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--topk-fraction", type=float, default=REFERENCE_FEATURE_AE_CONTRACT.topk_fraction)
     parser.add_argument("--orange-quantile", type=float, default=0.95)
     parser.add_argument("--red-quantile", type=float, default=0.99)
+    parser.add_argument("--predictions", type=Path)
+    parser.add_argument("--normal-tail-low-q", type=float, default=0.99)
+    parser.add_argument("--normal-tail-high-q", type=float, default=0.999)
     parser.add_argument("--write-manifest", action="store_true")
     return parser.parse_args()
 
@@ -65,35 +71,50 @@ def calibrate_feature_ae_reference(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("--orange-quantile and --red-quantile must satisfy 0 < orange < red < 1")
     assert_validation_has_defects(args.validation_manifest, args.gt_masks_manifest)
 
-    checkpoint = resolve_feature_ae_checkpoint(args.model_version, strict_checksum=True)
     output_dir = args.output_root / args.model_version
     output_dir.mkdir(parents=True, exist_ok=True)
 
     layer_weights = parse_layer_loss_weights(tuple(args.layer_weights))
-    evaluation = evaluate_feature_ae_checkpoint(
-        FeatureAEEvaluationConfig(
-            checkpoint_path=checkpoint,
-            manifest_path=args.validation_manifest,
-            image_root=args.image_root,
-            output_dir=output_dir / "evaluation",
-            gt_masks_manifest=args.gt_masks_manifest,
-            device=args.device,
-            layer_weights=layer_weights,
-            calibrate_normal=False,
-            roi_threshold=args.roi_threshold,
-            apply_score_region_to_map=False,
-            score_smoothing=REFERENCE_FEATURE_AE_CONTRACT.score_smoothing,
-            score_image=REFERENCE_FEATURE_AE_CONTRACT.score_image,
-            topk_fraction=args.topk_fraction,
-            save_score_maps=True,
-            save_previews=True,
-            max_previews=12,
+    if args.predictions is not None:
+        source_predictions = args.predictions
+    else:
+        checkpoint = resolve_feature_ae_checkpoint(args.model_version, strict_checksum=True)
+        evaluation = evaluate_feature_ae_checkpoint(
+            FeatureAEEvaluationConfig(
+                checkpoint_path=checkpoint,
+                manifest_path=args.validation_manifest,
+                image_root=args.image_root,
+                output_dir=output_dir / "evaluation",
+                gt_masks_manifest=args.gt_masks_manifest,
+                device=args.device,
+                layer_weights=layer_weights,
+                calibrate_normal=False,
+                roi_threshold=args.roi_threshold,
+                apply_score_region_to_map=False,
+                score_smoothing=REFERENCE_FEATURE_AE_CONTRACT.score_smoothing,
+                score_image=REFERENCE_FEATURE_AE_CONTRACT.score_image,
+                topk_fraction=args.topk_fraction,
+                save_score_maps=True,
+                save_previews=True,
+                max_previews=12,
+            )
         )
+        source_predictions = Path(str(evaluation["predictions_path"]))
+    predictions_path = materialize_normal_tail_calibrated_predictions(
+        source_predictions,
+        output_dir / "predictions.npz",
+        low_q=float(args.normal_tail_low_q),
+        high_q=float(args.normal_tail_high_q),
+        topk_fraction=float(args.topk_fraction),
+    )
+    evaluation = evaluate_feature_ae_predictions(
+        predictions_path,
+        threshold_orange=0.0,
+        threshold_red=0.0,
     )
     images = list(evaluation.get("images", []))
     if args.max_images is not None:
         images = images[: args.max_images]
-    image_scores = [float(row["score"]) for row in images]
     normal_scores = [float(row["score"]) for row in images if not bool(row["is_defective"])]
     if not normal_scores:
         raise ValueError("Reference calibration requires at least one conforming validation image")
@@ -112,11 +133,17 @@ def calibrate_feature_ae_reference(args: argparse.Namespace) -> dict[str, Any]:
         selected_metric_value=selected_metric_value,
     )
     write_calibration_matrix(output_dir / "calibration_matrix.csv", metrics, thresholds)
-    predictions_path = materialize_predictions(output_dir / "predictions.npz", images, image_scores)
     summary = {
         "model_version": args.model_version,
         "roi_model_version": args.roi_model_version,
         "contract": REFERENCE_FEATURE_AE_CONTRACT.to_dict(),
+        "posthoc_calibration": {
+            "kind": "normal_tail_quantile",
+            "low_q": float(args.normal_tail_low_q),
+            "high_q": float(args.normal_tail_high_q),
+            "source_npz": str(source_predictions),
+            "score_contract_version": REFERENCE_FEATURE_AE_CONTRACT.version,
+        },
         "validation_manifest": str(args.validation_manifest),
         "gt_masks_manifest": str(args.gt_masks_manifest),
         "metrics": metrics,
@@ -207,16 +234,52 @@ def build_reference_thresholds(
     }
 
 
-def materialize_predictions(path: Path, images: list[dict[str, Any]], scores: list[float]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        path,
-        image_scores=np.asarray(scores, dtype=np.float32),
-        image_labels=np.asarray([bool(row["is_defective"]) for row in images], dtype=np.bool_),
-        image_ids=np.asarray([str(row["image_id"]) for row in images], dtype=object),
-        relative_paths=np.asarray([str(row["relative_path"]) for row in images], dtype=object),
-    )
-    return path
+def materialize_normal_tail_calibrated_predictions(
+    source: Path,
+    destination: Path,
+    *,
+    low_q: float,
+    high_q: float,
+    topk_fraction: float,
+) -> Path:
+    if not 0.0 < low_q < high_q < 1.0:
+        raise ValueError("--normal-tail-low-q and --normal-tail-high-q must satisfy 0 < low < high < 1")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with np.load(source, allow_pickle=True) as data:
+        schema = str(data["schema_version"].item()) if "schema_version" in data.files and data["schema_version"].shape == () else ""
+        if schema != PREDICTION_SCHEMA_VERSION or "score_maps" not in data.files or "masks" not in data.files:
+            raise ValueError(
+                "unsupported_prediction_schema: post-hoc calibration requires "
+                f"schema_version={PREDICTION_SCHEMA_VERSION!r}, score_maps and masks"
+            )
+        raw_score_maps = np.asarray(data["score_maps"], dtype=np.float32)
+        y_true = np.asarray(data["y_true"], dtype=bool)
+        normal_pixels = raw_score_maps[~y_true].reshape(-1)
+        if normal_pixels.size == 0:
+            raise ValueError("normal_tail_quantile calibration requires at least one good image")
+        low, high = np.quantile(normal_pixels, [low_q, high_q])
+        scale = max(float(high - low), 1e-8)
+        score_maps = ((raw_score_maps - float(low)) / scale).astype(np.float32)
+        roi_masks = np.asarray(data["roi_masks"], dtype=np.float32) if "roi_masks" in data.files else np.ones_like(score_maps, dtype=np.float32)
+        image_score = np.asarray(
+            [
+                score_image_map(score_map, topk_fraction=topk_fraction, roi_mask=roi > 0)
+                for score_map, roi in zip(score_maps, roi_masks, strict=True)
+            ],
+            dtype=np.float32,
+        )
+        payload = {name: data[name] for name in data.files if name not in {"score_maps", "raw_score_maps", "image_score"}}
+        payload["schema_version"] = np.asarray(PREDICTION_SCHEMA_VERSION, dtype=object)
+        payload["raw_score_maps"] = raw_score_maps
+        payload["score_maps"] = score_maps
+        payload["image_score"] = image_score
+        payload["calibration_kind"] = np.asarray("normal_tail_quantile", dtype=object)
+        payload["calibration_low_q"] = np.asarray(float(low_q), dtype=np.float32)
+        payload["calibration_high_q"] = np.asarray(float(high_q), dtype=np.float32)
+        payload["calibration_low_value"] = np.asarray(float(low), dtype=np.float32)
+        payload["calibration_high_value"] = np.asarray(float(high), dtype=np.float32)
+    np.savez_compressed(destination, **payload)
+    return destination
 
 
 def write_calibration_matrix(path: Path, metrics: dict[str, Any], thresholds: dict[str, Any]) -> Path:
@@ -263,4 +326,3 @@ def update_reference_manifest(model_version: str, thresholds: dict[str, Any]) ->
 
 if __name__ == "__main__":
     main()
-

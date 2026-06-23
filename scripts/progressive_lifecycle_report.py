@@ -51,7 +51,7 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
         "registry",
     )
     if show_cache:
-        header = header + ("cache", "hit")
+        header = header + ("cache", "hit", "schema", "aupimo_s", "pixel_s")
     rows = [header, *[_row(cycle, show_cache=show_cache) for cycle in cycles]]
     widths = [max(len(str(row[index])) for row in rows) for index in range(len(rows[0]))]
     report = "\n".join(
@@ -92,8 +92,21 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False) -> tuple[str, ...]:
         registry,
     )
     if show_cache:
-        row = row + (str(cycle.get("cache_status") or ""), str(cycle.get("cache_hit") or ""))
+        timings = cycle.get("candidate_metric_timings") or {}
+        row = row + (
+            str(cycle.get("cache_status") or ""),
+            str(cycle.get("cache_hit") or ""),
+            str(cycle.get("prediction_schema_version") or ""),
+            _duration(timings.get("aupimo_compute_seconds")),
+            _duration(timings.get("pixel_rank_metrics_seconds")),
+        )
     return row
+
+
+def _duration(value: Any) -> str:
+    if value is None:
+        return ""
+    return f"{float(value):.3f}"
 
 
 def _epoch_lines(cycles: list[dict[str, Any]]) -> list[str]:

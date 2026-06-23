@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from iqa.training.feature_ae_evaluation import evaluate_feature_ae_predictions
+from iqa.training.feature_ae_evaluation import PREDICTION_SCHEMA_VERSION, evaluate_feature_ae_predictions
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,7 +28,17 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output_path = args.output_dir / "metrics.json"
     output_path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
-    print(json.dumps({"metrics": output_path, "predictions": args.predictions}, indent=2, sort_keys=True))
+    params_path = args.output_dir / "params.json"
+    params = {
+        "predictions": str(args.predictions),
+        "prediction_schema_version": result.get("prediction_schema_version") or PREDICTION_SCHEMA_VERSION,
+        "score_contract_version": result.get("score_contract_version"),
+        "threshold_orange": float(args.threshold_orange),
+        "threshold_red": float(args.threshold_red),
+        "metric_timings": result.get("metric_timings") or {},
+    }
+    params_path.write_text(json.dumps(params, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps({"metrics": str(output_path), "params": str(params_path), "predictions": str(args.predictions)}, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

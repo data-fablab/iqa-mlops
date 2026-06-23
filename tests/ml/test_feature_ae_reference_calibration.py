@@ -5,12 +5,15 @@ import json
 import tomllib
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from iqa.models.feature_ae import REFERENCE_FEATURE_AE_CONTRACT
+from iqa.training.feature_ae_evaluation import PREDICTION_SCHEMA_VERSION, evaluate_feature_ae_predictions
 from scripts.calibrate_feature_ae_reference import (
     assert_validation_has_defects,
     build_reference_thresholds,
+    materialize_normal_tail_calibrated_predictions,
     select_business_metric,
     update_reference_manifest,
     write_calibration_matrix,
@@ -129,3 +132,62 @@ def test_reference_calibration_cli_is_exposed() -> None:
         == "scripts.calibrate_feature_ae_reference:main"
     )
 
+
+def test_normal_tail_quantile_calibration_reuses_dense_predictions(tmp_path: Path) -> None:
+    source = tmp_path / "source_predictions.npz"
+    destination = tmp_path / "calibrated_predictions.npz"
+    score_maps = np.asarray(
+        [
+            [[0.0, 1.0], [2.0, 3.0]],
+            [[3.0, 4.0], [5.0, 6.0]],
+        ],
+        dtype=np.float32,
+    )
+    masks = np.asarray(
+        [
+            [[0, 0], [0, 0]],
+            [[1, 0], [0, 0]],
+        ],
+        dtype=np.uint8,
+    )
+    np.savez_compressed(
+        source,
+        schema_version=np.asarray(PREDICTION_SCHEMA_VERSION, dtype=object),
+        score_maps=score_maps,
+        masks=masks,
+        roi_masks=np.ones_like(score_maps, dtype=np.float32),
+        image_score=np.asarray([3.0, 6.0], dtype=np.float32),
+        y_true=np.asarray([False, True], dtype=np.bool_),
+        relative_path=np.asarray(["Casting_class1/train/good/a.jpg", "Casting_class1/test/defective/b.jpg"], dtype=object),
+        piece_event_id=np.asarray(["good-1", "defective-1"], dtype=object),
+        source_class=np.asarray(["Casting_class1", "Casting_class1"], dtype=object),
+        oracle_verdict=np.asarray(["good", "defective"], dtype=object),
+        gt_positive_pixels=np.asarray([0, 1], dtype=np.int64),
+        score_contract_version=np.asarray(["feature_ae_reference_v001", "feature_ae_reference_v001"], dtype=object),
+        score_map_shape=np.asarray([[2, 2], [2, 2]], dtype=np.int32),
+        roi_coverage=np.asarray([1.0, 1.0], dtype=np.float32),
+    )
+
+    output = materialize_normal_tail_calibrated_predictions(
+        source,
+        destination,
+        low_q=0.25,
+        high_q=0.75,
+        topk_fraction=0.25,
+    )
+
+    with np.load(output, allow_pickle=True) as data:
+        assert data["schema_version"].item() == PREDICTION_SCHEMA_VERSION
+        assert "raw_score_maps" in data.files
+        assert not np.allclose(data["score_maps"], data["raw_score_maps"])
+        assert data["calibration_kind"].item() == "normal_tail_quantile"
+        assert data["calibration_low_q"].item() == pytest.approx(0.25)
+        assert data["calibration_high_q"].item() == pytest.approx(0.75)
+
+    recomputed = evaluate_feature_ae_predictions(
+        output,
+        threshold_orange=0.1,
+        threshold_red=0.2,
+    )
+    assert recomputed["prediction_schema_version"] == PREDICTION_SCHEMA_VERSION
+    assert recomputed["metrics"]["pixel_aupimo_1e-5_1e-3"] is not None

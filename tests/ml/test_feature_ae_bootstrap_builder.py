@@ -147,8 +147,14 @@ def test_feature_ae_metric_eval_reports_pixel_auroc() -> None:
     metrics = compute_binary_metrics(
         image_labels=[False, True],
         image_scores=[0.1, 0.9],
-        pixel_labels=[np.array([[0, 0], [0, 1]], dtype=np.uint8)],
-        pixel_scores=[np.array([[0.1, 0.2], [0.3, 0.9]], dtype=np.float32)],
+        pixel_labels=[
+            np.array([[0, 0], [0, 0]], dtype=np.uint8),
+            np.array([[0, 0], [0, 1]], dtype=np.uint8),
+        ],
+        pixel_scores=[
+            np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32),
+            np.array([[0.1, 0.2], [0.3, 0.9]], dtype=np.float32),
+        ],
     )
 
     assert metrics["pixel_auroc"] == 1.0
@@ -164,4 +170,3 @@ def test_training_rejects_noncanonical_preprocessing_without_dev_flag(tmp_path: 
                 image_size=32,
             )
         )
-

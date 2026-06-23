@@ -35,7 +35,11 @@ from iqa.storage.visual_artifacts import (
 )
 from iqa.training.bootstrap import upload_checkpoint_to_s3
 from iqa.training.feature_ae import FeatureAETrainingConfig
-from iqa.training.feature_ae_evaluation import FeatureAEEvaluationConfig, evaluate_feature_ae_checkpoint
+from iqa.training.feature_ae_evaluation import (
+    PREDICTION_SCHEMA_VERSION,
+    FeatureAEEvaluationConfig,
+    evaluate_feature_ae_checkpoint,
+)
 from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING, FEATURE_AE_BUSINESS_METRIC_PRIORITY
 from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
 from iqa.registry import register_run_to_model, registered_model_name
@@ -1108,6 +1112,35 @@ def evaluate_progressive_promotion_comparison(
     )
     completed_at = datetime.now(UTC)
     duration = (completed_at - started_at).total_seconds()
+    for role, payload in (("active_before", active), ("candidate", candidate)):
+        if payload.get("eval_inference_seconds") is not None and not payload.get("cache_hit"):
+            record_timing(
+                artifacts,
+                "eval_inference",
+                duration_seconds=float(payload.get("eval_inference_seconds") or 0.0),
+                cycle_id=cycle_dir.name,
+                role=role,
+                cache_status=payload.get("cache_status"),
+            )
+        metric_timings = payload.get("metric_timings") or {}
+        if metric_timings.get("aupimo_compute_seconds") is not None:
+            record_timing(
+                artifacts,
+                "aupimo_compute",
+                duration_seconds=float(metric_timings.get("aupimo_compute_seconds") or 0.0),
+                cycle_id=cycle_dir.name,
+                role=role,
+                cache_status=payload.get("cache_status"),
+            )
+        if metric_timings.get("pixel_rank_metrics_seconds") is not None:
+            record_timing(
+                artifacts,
+                "pixel_rank_metrics",
+                duration_seconds=float(metric_timings.get("pixel_rank_metrics_seconds") or 0.0),
+                cycle_id=cycle_dir.name,
+                role=role,
+                cache_status=payload.get("cache_status"),
+            )
     record_timing(
         artifacts,
         "comparative_eval",
@@ -1115,6 +1148,8 @@ def evaluate_progressive_promotion_comparison(
         cycle_id=cycle_dir.name,
         active_cache_status=active.get("cache_status"),
         candidate_cache_status=candidate.get("cache_status"),
+        active_metric_timings=active.get("metric_timings"),
+        candidate_metric_timings=candidate.get("metric_timings"),
     )
     for role, payload in (("active_before", active), ("candidate", candidate)):
         record_lifecycle_event(
@@ -1167,6 +1202,9 @@ def evaluate_progressive_promotion_comparison(
             "cache_hit": candidate.get("cache_hit"),
             "cache_source": candidate.get("cache_source"),
             "candidate_decision_thresholds": candidate_decision_thresholds,
+            "prediction_schema_version": candidate.get("prediction_schema_version"),
+            "candidate_metric_timings": candidate.get("metric_timings", {}),
+            "active_metric_timings": active.get("metric_timings", {}),
             "threshold_source": (
                 candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
             ),
@@ -1229,6 +1267,9 @@ def evaluate_progressive_promotion_comparison(
         "cache_hit": candidate.get("cache_hit"),
         "cache_source": candidate.get("cache_source"),
         "candidate_decision_thresholds": candidate_decision_thresholds,
+        "prediction_schema_version": candidate.get("prediction_schema_version"),
+        "candidate_metric_timings": candidate.get("metric_timings", {}),
+        "active_metric_timings": active.get("metric_timings", {}),
         "threshold_source": (
             candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
         ),
@@ -1264,6 +1305,8 @@ def evaluate_progressive_model_on_set(
         evaluation_set_id=evaluation_set_id,
         threshold_orange=0.02,
         threshold_red=0.05,
+        roi_signature=f"functional_surface_prediction:{CANONICAL_FEATURE_AE_PREPROCESSING.roi_threshold:.12g}",
+        calibration_signature="none",
     )
     cached = load_prediction_cache(cache_root, cache_key, output_dir)
     if cached is not None:
@@ -1295,6 +1338,7 @@ def evaluate_progressive_model_on_set(
             topk_fraction=CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
         )
     )
+    params = json.loads((output_dir / "params.json").read_text(encoding="utf-8")) if (output_dir / "params.json").is_file() else {}
     store_prediction_cache(cache_root, cache_key, output_dir)
     metrics = {
         metric: float(value)
@@ -1318,6 +1362,9 @@ def evaluate_progressive_model_on_set(
         "predictions_path": result.get("predictions_path"),
         "metrics_path": str(output_dir / "metrics.json"),
         "params_path": str(output_dir / "params.json"),
+        "prediction_schema_version": PREDICTION_SCHEMA_VERSION,
+        "metric_timings": result.get("metric_timings") or {},
+        "eval_inference_seconds": params.get("duration_seconds"),
         "cache_status": "miss_stored",
         "cache_hit": False,
         "cache_key": cache_key,
@@ -1333,6 +1380,8 @@ def prediction_cache_key(
     evaluation_set_id: str,
     threshold_orange: float,
     threshold_red: float,
+    roi_signature: str,
+    calibration_signature: str,
 ) -> str:
     payload = {
         "model_version": model_version,
@@ -1340,6 +1389,9 @@ def prediction_cache_key(
         "evaluation_set_id": evaluation_set_id,
         "evaluation_set_sha256": sha256_file(evaluation_set_path),
         "score_contract_version": CANONICAL_FEATURE_AE_PREPROCESSING.version,
+        "prediction_schema_version": PREDICTION_SCHEMA_VERSION,
+        "roi_signature": roi_signature,
+        "calibration_signature": calibration_signature,
         "threshold_signature": f"{threshold_orange:.12g}:{threshold_red:.12g}",
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -1351,6 +1403,12 @@ def load_prediction_cache(cache_root: Path, cache_key: str, output_dir: Path) ->
     metrics_path = cache_dir / "metrics.json"
     predictions_path = cache_dir / "predictions.npz"
     if not metrics_path.is_file() or not predictions_path.is_file():
+        return None
+    params_path = cache_dir / "params.json"
+    if not params_path.is_file():
+        return None
+    params: dict[str, Any] = json.loads(params_path.read_text(encoding="utf-8"))
+    if params.get("prediction_schema_version") != PREDICTION_SCHEMA_VERSION:
         return None
     output_dir.mkdir(parents=True, exist_ok=True)
     for name in ("metrics.json", "predictions.npz", "params.json"):
@@ -1378,6 +1436,9 @@ def load_prediction_cache(cache_root: Path, cache_key: str, output_dir: Path) ->
         "predictions_path": str(output_dir / "predictions.npz"),
         "metrics_path": str(output_dir / "metrics.json"),
         "params_path": str(output_dir / "params.json"),
+        "prediction_schema_version": PREDICTION_SCHEMA_VERSION,
+        "metric_timings": payload.get("metric_timings") or {},
+        "eval_inference_seconds": params.get("duration_seconds"),
     }
 
 
@@ -1787,4 +1848,3 @@ def _git_commit() -> str:
 
 if __name__ == "__main__":
     main()
-
