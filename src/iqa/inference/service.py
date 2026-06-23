@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from iqa.inference.contracts import InferenceRequest, placeholder_inference
@@ -54,7 +55,7 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "iqa-inference"}
 
 
-@app.get("/metrics")
+@app.get("/metrics", response_class=PlainTextResponse)
 def metrics() -> str:
     gpu_lock_held = 1 if getattr(app.state, "gpu_lock_held", False) else 0
     lines = [

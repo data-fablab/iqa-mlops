@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 # from pydantic import BaseModel, Field
 from iqa.api.schemas import (
     Incident,
@@ -1019,7 +1019,7 @@ def list_incidents(
     return rows
 
 
-@app.get("/metrics")
+@app.get("/metrics", response_class=PlainTextResponse)
 def metrics() -> str:
     lines = [
         "# HELP iqa_api_up IQA API availability",
