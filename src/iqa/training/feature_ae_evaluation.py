@@ -459,8 +459,12 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         image_labels.append(bool(entry["is_defective"]))
         image_scores.append(image_score)
         image_latencies_ms.append(float(entry["latency_ms"]))
-        pixel_labels.append(gt)
-        pixel_scores.append(score_map.astype(np.float32))
+        if config.score_region == "functional_surface_prediction":
+            pixel_labels.append(gt[valid_roi])
+            pixel_scores.append(score_map.astype(np.float32)[valid_roi])
+        else:
+            pixel_labels.append(gt)
+            pixel_scores.append(score_map.astype(np.float32))
         per_image.append(
             {
                 "image_id": image_id,
@@ -469,6 +473,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
                 "is_defective": bool(entry["is_defective"]),
                 "score": image_score,
                 "gt_positive_pixels": int(gt.sum()),
+                "gt_positive_pixels_in_roi": int(gt[valid_roi].sum()) if valid_roi.size else 0,
                 "score_map_shape": list(score_map.shape),
                 "roi_coverage": roi_coverage,
             }

@@ -256,6 +256,23 @@ def test_aupimo_ignores_defective_images_without_positive_gt_mask() -> None:
     assert metrics["pixel_aupimo_1e-5_1e-3"] is None
 
 
+def test_aupimo_accepts_roi_filtered_pixel_vectors() -> None:
+    metrics = compute_binary_metrics(
+        image_labels=[False, True],
+        image_scores=[0.1, 0.9],
+        pixel_labels=[
+            np.zeros(4, dtype=np.uint8),
+            np.asarray([1], dtype=np.uint8),
+        ],
+        pixel_scores=[
+            np.zeros(4, dtype=np.float32),
+            np.asarray([1.0], dtype=np.float32),
+        ],
+    )
+
+    assert metrics["pixel_aupimo_1e-5_1e-3"] == 1.0
+
+
 def test_tiny_feature_ae_training_smoke(tmp_path: Path) -> None:
     image_root = tmp_path / "images"
     for index in range(2):
