@@ -28,6 +28,17 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "candidate_good_red_count": 2,
             "fn_delta": -1,
             "good_red_delta": 0,
+            "localization_gate": {"passed": True},
+            "classification_gate": {
+                "passed": True,
+                "active_image_recall": 0.5,
+                "candidate_image_recall": 1.0,
+            },
+            "classification_progress": {
+                "improved": True,
+                "non_regression": True,
+                "summary": "improved: FN 1 -> 0",
+            },
             "gate_decision": "passed",
             "gate_reason": "candidate_passed_representative_validation_gate",
             "registry_stage": "test",
@@ -67,6 +78,17 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "candidate_good_red_count": 4,
             "fn_delta": 2,
             "good_red_delta": 3,
+            "localization_gate": {"passed": False},
+            "classification_gate": {
+                "passed": False,
+                "active_image_recall": 1.0,
+                "candidate_image_recall": 0.5,
+            },
+            "classification_progress": {
+                "improved": False,
+                "non_regression": False,
+                "summary": "regressed: FN 0 -> 2",
+            },
             "gate_decision": "rejected",
             "gate_reason": "candidate_increases_false_negatives",
             "registry_stage": "test",
@@ -94,7 +116,13 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
     assert "miss_stored" in report
     assert "run_id" in report
     assert "active_fn" in report
+    assert "active_recall" in report
+    assert "candidate_recall" in report
     assert "candidate_good_red" in report
+    assert "class_gate" in report
+    assert "class_progress" in report
+    assert "improved: FN 1 -> 0" in report
+    assert "regressed: FN 0 -> 2" in report
     assert "candidate_passed_representative_validation_gate" in report
     assert "run-001" in report
     assert "yes" in report

@@ -66,6 +66,9 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for cycle in cycles:
         metrics = cycle.get("metrics") or {}
+        localization_gate = cycle.get("localization_gate") or {}
+        classification_gate = cycle.get("classification_gate") or {}
+        classification_progress = cycle.get("classification_progress") or {}
         rows.append(
             {
                 "cycle_id": cycle.get("cycle_id"),
@@ -82,9 +85,16 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "reference_metric_delta": cycle.get("reference_metric_delta"),
                 "reference_candidate_metric_value": cycle.get("reference_candidate_metric_value"),
                 "promotion_panel_decision": cycle.get("promotion_panel_decision"),
+                "localization_gate": localization_gate.get("passed"),
+                "classification_gate": classification_gate.get("passed"),
+                "classification_progress_improved": classification_progress.get("improved"),
+                "classification_progress_summary": classification_progress.get("summary"),
                 "active_false_negatives": cycle.get("active_false_negatives"),
                 "candidate_false_negatives": cycle.get("candidate_false_negatives"),
                 "fn_delta": cycle.get("fn_delta"),
+                "active_image_recall": classification_gate.get("active_image_recall"),
+                "candidate_image_recall": classification_gate.get("candidate_image_recall", metrics.get("image_recall")),
+                "image_recall_delta": classification_gate.get("image_recall_delta"),
                 "active_good_red_count": cycle.get("active_good_red_count"),
                 "candidate_good_red_count": cycle.get("candidate_good_red_count"),
                 "good_red_delta": cycle.get("good_red_delta"),

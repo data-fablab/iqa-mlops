@@ -93,6 +93,9 @@ def _lifecycle_conf(
             "{{ params.max_good_red_regression }}"
         ),
         "candidate_init_policy": "{{ params.candidate_init_policy }}",
+        "require_mlflow_registry": "{{ params.require_mlflow_registry }}",
+        "mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}",
+        "ml_image": "{{ params.ml_image }}",
     }
 
 

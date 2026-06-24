@@ -260,8 +260,12 @@ def test_lifecycle_trigger_dag_collects_durable_signals_and_triggers_lifecycle()
     assert "PythonOperator(" not in trigger
     assert trigger.count("TriggerDagRunOperator(") == 2
     assert "lifecycle_decision_json" in trigger
-    assert "feature_ae_good_v002" in trigger
-    assert "feature_ae_good_v003" in trigger
+    assert "feature_ae_good_mvp_v001" in trigger
+    assert '"gate_eval_profile": "{{ params.gate_eval_profile }}"' in trigger
+    assert '"max_steps": "{{ params.max_steps }}"' in trigger
+    assert '"require_mlflow_registry": "{{ params.require_mlflow_registry }}"' in trigger
+    assert '"mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}"' in trigger
+    assert '"ml_image": "{{ params.ml_image }}"' in trigger
     assert "iqa-run-lifecycle-decision" not in trigger
     assert "BashOperator(" not in trigger
     assert "bash_command" not in trigger

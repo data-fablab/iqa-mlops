@@ -157,8 +157,7 @@ with tab_run:
         st.subheader("Lifecycle Feature-AE")
         if lifecycle:
             st.caption(
-                "Selection checkpoint : pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc. "
-                "val_loss reste secondaire."
+                "Decision modele : AUPIMO pour la localisation, FN/recall/good-red pour la classification good/defective."
             )
             st.dataframe(
                 lifecycle,
@@ -176,9 +175,16 @@ with tab_run:
                     "active_metric_value": st.column_config.NumberColumn("Actif", format="%.6f"),
                     "candidate_metric_value": st.column_config.NumberColumn("Candidat", format="%.6f"),
                     "metric_delta": st.column_config.NumberColumn("Delta", format="%.6f"),
+                    "localization_gate": "Gate localisation",
+                    "classification_gate": "Gate classification",
+                    "classification_progress_improved": "Classification progresse",
+                    "classification_progress_summary": "Synthese classification",
                     "active_false_negatives": "FN actif",
                     "candidate_false_negatives": "FN candidat",
                     "fn_delta": "Delta FN",
+                    "active_image_recall": st.column_config.NumberColumn("Recall actif", format="%.3f"),
+                    "candidate_image_recall": st.column_config.NumberColumn("Recall candidat", format="%.3f"),
+                    "image_recall_delta": st.column_config.NumberColumn("Delta recall", format="%.3f"),
                     "active_good_red_count": "Non conformes actif",
                     "candidate_good_red_count": "Non conformes candidat",
                     "good_red_delta": "Delta non conformes",
@@ -202,15 +208,24 @@ with tab_run:
             )
             st.line_chart(
                 {
-                    "pixel_aupimo_1e-5_1e-3": {
+                    "AUPIMO candidat": {
                         row["cycle_id"]: row.get("pixel_aupimo_1e-5_1e-3")
                         for row in lifecycle
                         if row.get("pixel_aupimo_1e-5_1e-3") is not None
                     },
-                    "pixel_ap": {
-                        row["cycle_id"]: row.get("pixel_ap")
+                }
+            )
+            st.line_chart(
+                {
+                    "FN candidat": {
+                        row["cycle_id"]: row.get("candidate_false_negatives")
                         for row in lifecycle
-                        if row.get("pixel_ap") is not None
+                        if row.get("candidate_false_negatives") is not None
+                    },
+                    "Recall image candidat": {
+                        row["cycle_id"]: row.get("candidate_image_recall")
+                        for row in lifecycle
+                        if row.get("candidate_image_recall") is not None
                     },
                 }
             )
