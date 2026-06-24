@@ -71,6 +71,7 @@ def test_validation_calibration_bootstrap_and_replay_are_disjoint() -> None:
 
 def test_validation_and_calibration_roles_are_explicit() -> None:
     validation = _read_csv(VALIDATION / "validation_set_replay_representative_v001.csv")
+    gate = _read_csv(VALIDATION / "validation_set_replay_gate_v001.csv")
     calibration = _read_csv(VALIDATION / "calibration_good_reference_v001.csv")
 
     assert {row["validation_set_id"] for row in validation} == {"validation_set_replay_representative_v001"}
@@ -81,6 +82,17 @@ def test_validation_and_calibration_roles_are_explicit() -> None:
         "Casting_class3": 22,
     }
     assert any(row["is_defective"].lower() == "true" for row in validation)
+    assert {row["validation_set_id"] for row in gate} == {"validation_set_replay_gate_v001"}
+    assert {row["validation_role"] for row in gate} == {"mvp_gate_aupimo_reference"}
+    assert len(gate) == 49
+    assert sum(row["is_defective"].lower() == "true" for row in gate) == 34
+    assert sum(row["is_defective"].lower() == "false" for row in gate) == 15
+    assert {row["n_images"] for row in gate} == {"1"}
+    assert _counts(gate, "source_class") == {
+        "Casting_class1": 13,
+        "Casting_class2": 25,
+        "Casting_class3": 11,
+    }
     assert {row["validation_set_id"] for row in calibration} == {"calibration_good_reference_v001"}
     assert {row["label"] for row in calibration} == {"good"}
     assert {row["is_defective"].lower() for row in calibration} == {"false"}

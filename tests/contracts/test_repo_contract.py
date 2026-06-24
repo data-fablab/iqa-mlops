@@ -56,7 +56,9 @@ def test_validation_set_contract_is_documented() -> None:
     readme = ROOT / "data" / "validation" / "README.md"
 
     assert readme.is_file()
-    assert "validation_set_replay_representative_v001" in readme.read_text(encoding="utf-8")
+    content = readme.read_text(encoding="utf-8")
+    assert "validation_set_replay_gate_v001" in content
+    assert "validation_set_replay_representative_v001" in content
 
 
 def test_metadata_store_is_documented_as_postgresql() -> None:

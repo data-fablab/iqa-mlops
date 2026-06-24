@@ -56,6 +56,7 @@ Contrats actuels :
 | `data/metadata/feature_ae_bootstrap_events.csv` | `feature_ae_bootstrap_events_v001` | `feature_ae_good_v001_bootstrap` | `piece_event_id == event_id` |
 | `data/metadata/casting_flux_replay_plan_natural_v003.csv` | `casting_flux_replay_plan_natural_v002` | `production_replay_natural_v002` | `piece_event_id == simulated_event_id` |
 | `data/metadata/casting_flux_replay_plan_drift.csv` | `casting_flux_replay_plan_drift_v001` | `drift_domain_extension_v001` | `piece_event_id == simulated_event_id` |
+| `data/validation/validation_set_replay_gate_v001.csv` | `validation_set_replay_gate_v001` | `validation_set_replay_gate_v001` | `piece_event_id == event_id` |
 | `data/validation/validation_set_replay_representative_v001.csv` | `validation_set_replay_representative_v001` | `validation_set_replay_representative_v001` | `piece_event_id == event_id` |
 | `data/validation/calibration_good_reference_v001.csv` | `calibration_good_reference_v001` | `calibration_good_reference_v001` | `piece_event_id == event_id` |
 
@@ -92,10 +93,24 @@ Les manifests materialises sont produits sous `data/model_datasets/` par
 Le lifecycle MVP utilise `feature_ae_good_mvp_v001` comme socle stable et ajoute
 les conformes vus pendant le replay pour construire les candidats de cycle.
 
-## Validation representative MVP
+## Validation Gate Et Representative MVP
+
+`data/validation/validation_set_replay_gate_v001.csv` est le panel gate
+AUPIMO utilise par defaut pour les runs progressifs courts. Il est fige au
+niveau image afin de conserver le signal AUPIMO historique du bootstrap et de
+comparer les candidats sans faire s'effondrer la metrique low-FPR sur un panel
+hors distribution de gate.
+
+La repartition actuelle par `source_class` est :
+
+| `source_class` | Images |
+| --- | ---: |
+| `Casting_class1` | 13 |
+| `Casting_class2` | 25 |
+| `Casting_class3` | 11 |
 
 `data/validation/validation_set_replay_representative_v001.csv` est fige au
-niveau `piece_event`.
+niveau `piece_event` et sert aux validations completes/audit.
 La repartition actuelle par `source_class` est :
 
 | `source_class` | Pieces |

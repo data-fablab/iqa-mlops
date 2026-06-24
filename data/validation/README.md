@@ -1,9 +1,15 @@
 # Validation And Calibration Contracts
 
-`validation_set_replay_representative_v001` is the frozen representative gate
-set for the Feature-AE MVP lifecycle. It is excluded from bootstrap,
+`validation_set_replay_gate_v001` is the frozen AUPIMO promotion gate panel
+for short progressive Feature-AE lifecycle runs. It preserves the historical
+image-level reference panel where the bootstrap model has a non-zero AUPIMO
+signal, so the fast gate can compare candidates without collapsing the
+localisation metric.
+
+`validation_set_replay_representative_v001` is the larger representative audit
+set for full validation and release evidence. It is excluded from bootstrap,
 calibration, replay plans, candidate Feature-AE datasets and threshold
-calibration.
+calibration, but it is not the default fast promotion gate.
 
 `calibration_good_reference_v001` is a good-only set reserved for Feature-AE
 threshold calibration. It is excluded from bootstrap, replay, train and
