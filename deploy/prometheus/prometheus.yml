@@ -1,6 +1,15 @@
 global:
   scrape_interval: 15s
 
+# Règle de drift (chemin B) — seuil unique partagé par notif/panel/sensor.
+rule_files:
+  - /etc/prometheus/rules/*.rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   # Prometheus self-monitoring.
   - job_name: prometheus

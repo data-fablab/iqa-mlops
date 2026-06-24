@@ -1,0 +1,23 @@
+groups:
+  - name: iqa_drift_proxy
+    rules:
+      # Proxy de drift (chemin B) — seuil calibré en issue 03
+      # (configs/drift_proxy_calibration.yaml). Part d'anomalies (Orange+Rouge)
+      # DANS le régime drift, bornée [0,1] et filtrée scenario_id=~"drift.*"
+      # (décision 15) pour ne pas être diluée par le trafic natural. La règle est
+      # l'unique autorité du seuil, partagée par notif / panel / sensor.
+      # NB : le nom d'échantillon reste iqa_prediction_total (prometheus_client
+      # retire _total du nom de famille mais pas de l'échantillon).
+      - alert: IqaDriftProxy
+        expr: |
+          sum(rate(iqa_prediction_total{scenario_id=~"drift.*",decision=~"Orange|Rouge"}[2m]))
+          /
+          clamp_min(sum(rate(iqa_prediction_total{scenario_id=~"drift.*"}[2m])), 1e-9)
+          > 0.5
+        for: 30s
+        labels:
+          severity: critical
+          signal: drift_proxy
+        annotations:
+          summary: "Drift de domaine detecte (proxy taux d'anomalies)"
+          description: "Le taux d'anomalies du regime drift depasse le seuil calibre (0.5) — domaine OOD (Casting_class2/class3). Doit declencher le reentrainement iqa_lifecycle."

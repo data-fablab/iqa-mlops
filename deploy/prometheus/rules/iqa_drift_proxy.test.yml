@@ -1,0 +1,46 @@
+# promtool test rules deploy/prometheus/rules/iqa_drift_proxy.test.yml
+rule_files:
+  - iqa_drift_proxy.rules.yml
+
+evaluation_interval: 15s
+
+tests:
+  # Phase d'extension de domaine (Casting_class2/class3 OOD) : le débit du régime
+  # drift est dominé par des anomalies (Orange/Rouge) -> ratio ~1 -> l'alerte tire.
+  - interval: 15s
+    input_series:
+      - series: 'iqa_prediction_total{scenario_id="drift_domain_extension",decision="Rouge"}'
+        values: "0+1x20"
+      - series: 'iqa_prediction_total{scenario_id="drift_domain_extension",decision="Vert"}'
+        values: "0+0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: IqaDriftProxy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              signal: drift_proxy
+            exp_annotations:
+              summary: "Drift de domaine detecte (proxy taux d'anomalies)"
+              description: "Le taux d'anomalies du regime drift depasse le seuil calibre (0.5) — domaine OOD (Casting_class2/class3). Doit declencher le reentrainement iqa_lifecycle."
+
+  # Phase baseline (Casting_class1 in-distribution) : tout le débit drift est Vert
+  # -> ratio 0 -> pas d'alerte (pas de faux positif).
+  - interval: 15s
+    input_series:
+      - series: 'iqa_prediction_total{scenario_id="drift_domain_extension",decision="Vert"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: IqaDriftProxy
+        exp_alerts: []
+
+  # Trafic natural seul (hors filtre scenario_id=~"drift.*") : l'alerte ne tire pas.
+  - interval: 15s
+    input_series:
+      - series: 'iqa_prediction_total{scenario_id="production_replay_natural",decision="Rouge"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: IqaDriftProxy
+        exp_alerts: []

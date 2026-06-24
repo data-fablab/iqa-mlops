@@ -1,0 +1,16 @@
+# Alertmanager — route les alertes Prometheus vers un webhook catcher local
+# (décision 8 : visible à l'écran, zéro dépendance externe / secret).
+# Le sensor Airflow (issue 05) lit la série ALERTS via Prometheus, PAS via ce
+# chemin de notification (décision 1 : alerte = signal, Airflow = moteur découplé).
+route:
+  receiver: webhook-catcher
+  group_by: ["alertname"]
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 1m
+
+receivers:
+  - name: webhook-catcher
+    webhook_configs:
+      - url: http://webhook-catcher:8080/alert
+        send_resolved: true
