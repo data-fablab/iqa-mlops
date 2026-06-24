@@ -94,12 +94,21 @@ services:
       dockerfile: airflow/Dockerfile
     image: iqa-airflow:local
     entrypoint: /bin/bash
-    command: ["-c", "airflow db migrate && airflow pools import /opt/airflow/pools.json"]
+    command:
+      - "-c"
+      - >-
+        airflow db migrate &&
+        airflow pools import /opt/airflow/pools.json &&
+        airflow users create --role Admin --username "$${IQA_AIRFLOW_API_USER}"
+        --password "$${IQA_AIRFLOW_API_PASSWORD}" --firstname iqa --lastname admin
+        --email admin@iqa.local || true
     env_file: ../.env
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/airflow
+      IQA_AIRFLOW_API_USER: ${IQA_AIRFLOW_API_USER:-airflow}
+      IQA_AIRFLOW_API_PASSWORD: ${IQA_AIRFLOW_API_PASSWORD:-airflow}
     volumes:
       - ./airflow/pools.json:/opt/airflow/pools.json:ro
       - ../airflow/dags:/opt/airflow/dags:ro
@@ -117,6 +126,9 @@ services:
       AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
       AIRFLOW__METRICS__STATSD_PORT: "9125"
       AIRFLOW__METRICS__STATSD_PREFIX: airflow
+      # Allow the drift sensor (issue 05) to query dagRuns via basic auth, while
+      # keeping the browser session backend for the UI.
+      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
       IQA_IMAGE_DATA: ${IQA_IMAGE_DATA:-iqa-data:local}
       IQA_IMAGE_ML: ${IQA_IMAGE_ML:-iqa-ml:local}
       IQA_IMAGE_DVC: ${IQA_IMAGE_DVC:-iqa-dvc-gate:local}
@@ -159,6 +171,12 @@ services:
       IQA_IMAGE_ML: ${IQA_IMAGE_ML:-iqa-ml:local}
       IQA_IMAGE_DVC: ${IQA_IMAGE_DVC:-iqa-dvc-gate:local}
       MLFLOW_TRACKING_URI: ${IQA_MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      # Drift sensor (issue 05): reads the shared IqaDriftProxy rule via the
+      # Prometheus query API and guards re-trigger via the Airflow REST API.
+      IQA_PROMETHEUS_URL: ${IQA_PROMETHEUS_URL:-http://prometheus:9090}
+      IQA_AIRFLOW_API_URL: ${IQA_AIRFLOW_API_URL:-http://airflow-webserver:8080/api/v1}
+      IQA_AIRFLOW_API_USER: ${IQA_AIRFLOW_API_USER:-airflow}
+      IQA_AIRFLOW_API_PASSWORD: ${IQA_AIRFLOW_API_PASSWORD:-airflow}
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
       - ../src:/opt/iqa/src:ro
