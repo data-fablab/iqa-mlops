@@ -1,0 +1,42 @@
+# Calibration du proxy de drift (chemin B, démo live) — alimente la règle
+# Prometheus IqaDriftProxy de l'issue 04. Reproductible via :
+#   uv run --extra serving python scripts/calibrate_drift_proxy.py
+#
+# Scénario de drift contrôlé : Feature-AE entraîné sur le baseline Casting_class1.
+# Le replay drift rejoue class1 (in-distribution) puis class2 puis class3
+# (domain extension OOD) -> décisions Vert -> Orange -> Rouge. Le proxy est la part
+# d'anomalies DANS le régime drift, bornée [0,1].
+#
+# NB : ce seuil est un RATIO d'anomalies, distinct du reconstruction_p95 de
+# configs/monitoring_thresholds.yaml (réservé au chemin A / fidélité,
+# proposition décision 14).
+
+drift_proxy:
+  # Part d'anomalies (Rouge+Orange) dans le débit de scénario drift.
+  # Filtre scenario_id=~"drift.*" (décision 15) ; fenêtre alignée sur scrape_interval=15s.
+  expr: >-
+    sum(rate(iqa_prediction_total{scenario_id=~"drift.*",decision=~"Orange|Rouge"}[2m]))
+    / clamp_min(sum(rate(iqa_prediction_total{scenario_id=~"drift.*"}[2m])), 1e-9)
+  window: 2m
+
+  # Séparation mesurée (script de calibration) — marge maximale 1.0 :
+  separation:
+    natural_anomaly_rate: 0.0              # production nominale : tout Vert
+    drift_baseline_phase: 0.0              # phase baseline_domain_class1 : modèle en domaine -> pas d'alerte
+    drift_extension_phase: 1.0             # phases domain_extension_class2/3 : OOD -> 100 % d'anomalies
+    margin: 1.0
+
+  # Seuil retenu : franchissement net, fire: 30s. Ne tire que lorsque la fenêtre
+  # est dominée par l'extension OOD (class2/class3), pas sur le baseline class1.
+  threshold: 0.5
+  for: 30s
+
+  # Point HITL (issue 03, critère 3).
+  hitl:
+    validated: true
+    validated_by: ftk72
+    validated_on: 2026-06-23
+    note: >-
+      Seuil 0.5 validé : sépare nettement la phase baseline class1 (0 %) de la phase
+      d'extension de domaine class2/class3 (100 %). La chaîne raconte : modèle OK sur
+      class1, puis class2/class3 arrivent -> anomalies détectées -> alerte -> réentraînement.
