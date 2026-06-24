@@ -394,6 +394,10 @@ def test_progressive_train_promotes_multiple_test_models(tmp_path: Path, monkeyp
     assert cycles[0]["registry_status"] == "registered"
     assert cycles[0]["val_loss"] == 0.3
     assert cycles[0]["gate_decision"] == "passed"
+    assert cycles[0]["localization_gate"]["passed"] is True
+    assert cycles[0]["localization_gate"]["metric"] == "pixel_aupimo_1e-5_1e-3"
+    assert cycles[0]["classification_gate"]["passed"] is True
+    assert cycles[0]["classification_progress"]["non_regression"] is True
     assert summary["metric_history"][0]["selected_metric"] == "pixel_aupimo_1e-5_1e-3"
     assert summary["best_cycle"] == "cycle_002"
     assert summary["rejected_candidates"] == []
@@ -502,6 +506,8 @@ def test_progressive_train_rejects_candidate_that_does_not_improve_active_on_sam
     assert cycle["gate_decision"] == "rejected"
     assert cycle["gate_reason"] == "candidate_regressed_on_reference_panel"
     assert cycle["promotion_status"] == "rejected_reference_regression"
+    assert cycle["localization_gate"]["passed"] is False
+    assert cycle["classification_gate"]["passed"] is True
     assert summary["models_promoted"] == []
     assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
 
@@ -521,12 +527,13 @@ def test_progressive_train_promotes_reference_win_despite_progressive_metric_reg
         value = 0.5
         if model_version.endswith("cycle_001"):
             value = 0.7 if panel == "reference" else 0.3
+        false_negatives = 0 if model_version.endswith("cycle_001") else 1
         output_dir.mkdir(parents=True, exist_ok=True)
         metrics = {
             "pixel_aupimo_1e-5_1e-3": value,
             "pixel_ap": value / 4,
-            "false_negatives": 0,
-            "image_recall": 1.0,
+            "false_negatives": false_negatives,
+            "image_recall": 1.0 if false_negatives == 0 else 0.5,
         }
         (output_dir / "metrics.json").write_text(
             json.dumps(
@@ -559,6 +566,12 @@ def test_progressive_train_promotes_reference_win_despite_progressive_metric_reg
     assert cycle["gate_decision"] == "passed"
     assert cycle["gate_reason"] == "candidate_passed_representative_validation_gate"
     assert cycle["promotion_status"] == "promoted"
+    assert cycle["localization_gate"]["passed"] is True
+    assert cycle["classification_gate"]["passed"] is True
+    assert cycle["classification_progress"]["improved"] is True
+    assert cycle["classification_progress"]["non_regression"] is True
+    assert cycle["classification_gate"]["fn_delta"] == -1
+    assert cycle["classification_gate"]["image_recall_delta"] == 0.5
     assert summary["promotion_chain"] == [
         runner.DEFAULT_FEATURE_AE_MODEL_VERSION,
         "rd_feature_ae_gated_natural_cycle_001",
@@ -612,6 +625,10 @@ def test_progressive_train_blocks_promotion_when_false_negatives_increase(tmp_pa
     assert cycle["gate_decision"] == "rejected"
     assert cycle["gate_reason"] == "candidate_increases_false_negatives"
     assert cycle["promotion_status"] == "rejected_operational_guardrail"
+    assert cycle["localization_gate"]["passed"] is True
+    assert cycle["classification_gate"]["passed"] is False
+    assert cycle["classification_gate"]["fn_delta"] == 2
+    assert cycle["classification_progress"]["non_regression"] is False
     assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
 
 
@@ -673,6 +690,10 @@ def test_progressive_train_blocks_candidate_that_increases_good_red_count(tmp_pa
     assert cycle["gate_decision"] == "rejected"
     assert cycle["gate_reason"] == "candidate_increases_good_red_count"
     assert cycle["promotion_status"] == "rejected_operational_guardrail"
+    assert cycle["localization_gate"]["passed"] is True
+    assert cycle["classification_gate"]["passed"] is False
+    assert cycle["classification_gate"]["good_red_delta"] > args.max_good_red_regression
+    assert cycle["classification_progress"]["non_regression"] is False
     assert summary["promotion_chain"] == [runner.DEFAULT_FEATURE_AE_MODEL_VERSION]
 
 
@@ -739,16 +760,32 @@ def test_register_promoted_cycle_raises_registry_failure_in_strict_mode(tmp_path
         runner.register_promoted_cycle(args, state, {"mlflow_run_id": "mlflow-001"})
 
 
-def test_tag_mlflow_promotion_evidence_tags_run_and_model_version(monkeypatch) -> None:
-    calls: dict[str, list[tuple[str, ...]]] = {
+def test_tag_mlflow_promotion_evidence_tags_run_and_model_version(monkeypatch, tmp_path: Path) -> None:
+    calls: dict[str, list[tuple[str, ...] | tuple[str, str, float] | tuple[str, str, str | None]]] = {
         "run_tags": [],
         "version_tags": [],
         "descriptions": [],
+        "params": [],
+        "metrics": [],
+        "artifacts": [],
     }
+    active_metrics = tmp_path / "active_metrics.json"
+    active_metrics.write_text(json.dumps({"metrics": {"pixel_aupimo_1e-5_1e-3": 0.3}}), encoding="utf-8")
+    candidate_metrics = tmp_path / "candidate_metrics.json"
+    candidate_metrics.write_text(json.dumps({"metrics": {"pixel_aupimo_1e-5_1e-3": 0.4}}), encoding="utf-8")
 
     class FakeClient:
         def set_tag(self, run_id: str, key: str, value: str) -> None:
             calls["run_tags"].append((run_id, key, value))
+
+        def log_param(self, run_id: str, key: str, value: str) -> None:
+            calls["params"].append((run_id, key, value))
+
+        def log_metric(self, run_id: str, key: str, value: float) -> None:
+            calls["metrics"].append((run_id, key, value))
+
+        def log_artifact(self, run_id: str, local_path: str, artifact_path: str | None = None) -> None:
+            calls["artifacts"].append((run_id, Path(local_path).name, artifact_path))
 
         def set_model_version_tag(self, name: str, version: str, key: str, value: str) -> None:
             calls["version_tags"].append((name, version, key, value))
@@ -771,15 +808,84 @@ def test_tag_mlflow_promotion_evidence_tags_run_and_model_version(monkeypatch) -
             "registered_model_version": "4",
             "candidate_version": "rd_feature_ae_gated_natural_cycle_001",
             "gate_decision": "passed",
+            "gate_reason": "candidate_improved_on_reference_panel",
+            "gate_eval_profile": "fast",
             "promotion_status": "promoted",
             "selected_metric": "pixel_aupimo_1e-5_1e-3",
+            "active_metric_value": 0.3,
+            "candidate_metric_value": 0.4,
             "metric_delta": 0.1,
+            "active_false_negatives": 1,
             "candidate_false_negatives": 0,
+            "fn_delta": -1,
+            "active_good_red_count": 2,
             "candidate_good_red_count": 2,
+            "good_red_delta": 0,
+            "active_metrics_on_eval_set": {
+                "pixel_aupimo_1e-5_1e-3": 0.3,
+                "false_negatives": 1,
+                "good_red_count": 2,
+            },
+            "candidate_metrics_on_eval_set": {
+                "pixel_aupimo_1e-5_1e-3": 0.4,
+                "false_negatives": 0,
+                "good_red_count": 2,
+            },
+            "mvp_gate": {
+                "metric_ok": True,
+                "false_negatives_ok": True,
+                "good_red_ok": True,
+                "thresholds_ok": True,
+            },
+            "localization_gate": {
+                "metric": "pixel_aupimo_1e-5_1e-3",
+                "active_value": 0.3,
+                "candidate_value": 0.4,
+                "delta": 0.1,
+                "passed": True,
+            },
+            "classification_gate": {
+                "active_false_negatives": 1,
+                "candidate_false_negatives": 0,
+                "fn_delta": -1,
+                "active_image_recall": 0.5,
+                "candidate_image_recall": 1.0,
+                "image_recall_delta": 0.5,
+                "active_good_red_count": 2,
+                "candidate_good_red_count": 2,
+                "good_red_delta": 0,
+                "passed": True,
+            },
+            "classification_progress": {
+                "improved": True,
+                "non_regression": True,
+                "summary": "improved: FN 1 -> 0",
+            },
+            "classification_progress_improved": True,
+            "classification_progress_summary": "improved: FN 1 -> 0",
+            "active_eval_metrics_path": str(active_metrics),
+            "candidate_eval_metrics_path": str(candidate_metrics),
         }
     )
 
     assert ("run-001", "gate_decision", "passed") in calls["run_tags"]
+    assert ("run-001", "gate_eval_profile", "fast") in calls["run_tags"]
+    assert ("run-001", "gate.decision", "passed") in calls["params"]
+    assert ("run-001", "gate.eval_profile", "fast") in calls["params"]
+    assert ("run-001", "gate.passed", 1.0) in calls["metrics"]
+    assert ("run-001", "gate.metric_delta", 0.1) in calls["metrics"]
+    assert ("run-001", "gate.candidate.pixel_aupimo_1e-5_1e-3", 0.4) in calls["metrics"]
+    assert ("run-001", "gate.false_negatives_ok", 1.0) in calls["metrics"]
+    assert ("run-001", "gate.localization.passed", 1.0) in calls["metrics"]
+    assert ("run-001", "gate.localization.delta", 0.1) in calls["metrics"]
+    assert ("run-001", "gate.classification.passed", 1.0) in calls["metrics"]
+    assert ("run-001", "gate.classification.fn_delta", -1.0) in calls["metrics"]
+    assert ("run-001", "gate.classification.image_recall_delta", 0.5) in calls["metrics"]
+    assert ("run-001", "gate.classification_progress.improved", 1.0) in calls["metrics"]
+    assert ("run-001", "classification_progress.improved", "True") in calls["params"]
+    assert ("run-001", "gate_evidence.json", "gate") in calls["artifacts"]
+    assert ("run-001", "active_metrics.json", "gate/active") in calls["artifacts"]
+    assert ("run-001", "candidate_metrics.json", "gate/candidate") in calls["artifacts"]
     assert (
         "feature_ae__production_replay_natural",
         "4",
@@ -794,6 +900,83 @@ def test_tag_mlflow_promotion_evidence_tags_run_and_model_version(monkeypatch) -
             "metric=pixel_aupimo_1e-5_1e-3 delta=0.1 fn=0 good_red=2",
         )
     ]
+
+
+def test_tag_mlflow_promotion_evidence_logs_rejected_gate_without_registry(monkeypatch) -> None:
+    calls: dict[str, list[tuple[str, ...] | tuple[str, str, float]]] = {
+        "run_tags": [],
+        "version_tags": [],
+        "metrics": [],
+    }
+
+    class FakeClient:
+        def set_tag(self, run_id: str, key: str, value: str) -> None:
+            calls["run_tags"].append((run_id, key, value))
+
+        def log_param(self, run_id: str, key: str, value: str) -> None:
+            calls["run_tags"].append((run_id, key, value))
+
+        def log_metric(self, run_id: str, key: str, value: float) -> None:
+            calls["metrics"].append((run_id, key, value))
+
+        def log_artifact(self, run_id: str, local_path: str, artifact_path: str | None = None) -> None:
+            calls["run_tags"].append((run_id, Path(local_path).name, artifact_path or ""))
+
+        def set_model_version_tag(self, name: str, version: str, key: str, value: str) -> None:
+            calls["version_tags"].append((name, version, key, value))
+
+    class FakeTracking:
+        MlflowClient = FakeClient
+
+    class FakeMlflow:
+        tracking = FakeTracking()
+
+    monkeypatch.setitem(sys.modules, "mlflow", FakeMlflow())
+
+    runner.tag_mlflow_promotion_evidence(
+        {
+            "mlflow_run_id": "run-002",
+            "gate_decision": "rejected",
+            "gate_reason": "candidate_regressed_on_reference_panel",
+            "promotion_status": "rejected_reference_regression",
+            "gate_eval_profile": "fast",
+            "selected_metric": "pixel_aupimo_1e-5_1e-3",
+            "active_metric_value": 0.0,
+            "candidate_metric_value": 0.0,
+            "metric_delta": 0.0,
+            "active_false_negatives": 7,
+            "candidate_false_negatives": 7,
+            "fn_delta": 0,
+            "active_good_red_count": 1,
+            "candidate_good_red_count": 1,
+            "good_red_delta": 0,
+            "localization_gate": {"passed": False, "delta": 0.0},
+            "classification_gate": {
+                "active_false_negatives": 7,
+                "candidate_false_negatives": 7,
+                "fn_delta": 0,
+                "active_good_red_count": 1,
+                "candidate_good_red_count": 1,
+                "good_red_delta": 0,
+                "passed": True,
+            },
+            "classification_progress": {
+                "improved": False,
+                "non_regression": True,
+                "summary": "stable: FN 7 -> 7",
+            },
+        }
+    )
+
+    assert ("run-002", "gate_decision", "rejected") in calls["run_tags"]
+    assert ("run-002", "gate.reason", "candidate_regressed_on_reference_panel") in calls["run_tags"]
+    assert ("run-002", "gate.passed", 0.0) in calls["metrics"]
+    assert ("run-002", "gate.active_false_negatives", 7.0) in calls["metrics"]
+    assert ("run-002", "gate.candidate_good_red_count", 1.0) in calls["metrics"]
+    assert ("run-002", "gate.localization.passed", 0.0) in calls["metrics"]
+    assert ("run-002", "gate.classification.passed", 1.0) in calls["metrics"]
+    assert ("run-002", "gate.classification_progress.non_regression", 1.0) in calls["metrics"]
+    assert calls["version_tags"] == []
 
 
 def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) -> None:

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 
-from iqa.dags import build_container_dag, data_image, make_container_task
+from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
 
 
 DECISION_TASK_ID = "evaluate_decision"
@@ -98,6 +98,9 @@ def _define() -> None:
             "reference_gt_masks_manifest": "{{ params.reference_gt_masks_manifest }}",
             "max_good_red_regression": "{{ params.max_good_red_regression }}",
             "candidate_init_policy": "{{ params.candidate_init_policy }}",
+            "require_mlflow_registry": "{{ params.require_mlflow_registry }}",
+            "mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}",
+            "ml_image": "{{ params.ml_image }}",
         },
     )
 
@@ -130,6 +133,9 @@ dag = build_container_dag(
         "reference_gt_masks_manifest": "data/validation/validation_gt_masks_v001.csv",
         "max_good_red_regression": 1,
         "candidate_init_policy": "stable_base",
+        "require_mlflow_registry": False,
+        "mlflow_tracking_uri": "http://mlflow:5000",
+        "ml_image": ml_image(),
         "image": data_image(),
     },
 )

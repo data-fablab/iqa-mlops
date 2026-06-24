@@ -24,7 +24,7 @@ def _define() -> None:
         command=(
             "iqa-run-replay-lifecycle-cycle "
             "--scenario-id {{ params.scenario_id }} "
-            "--image-root {{ params.repo_root }}/data/raw/hss-iad "
+            "--image-root {{ params.image_root }} "
             "--mode {{ params.mode }} "
             "--max-events {{ params.max_events }} "
             "--lifecycle-interval {{ params.lifecycle_interval }} "
@@ -42,7 +42,7 @@ def _define() -> None:
             "--candidate-init-policy {{ params.candidate_init_policy }} "
             "--publish-minio "
             "--wait-for-gpu"
-            "{% if params.require_mlflow_registry %} --require-mlflow-registry{% endif %}"
+            "{% if params.require_mlflow_registry in [true, 'True', 'true', '1', 1] %} --require-mlflow-registry{% endif %}"
         ),
         env={
             "MLFLOW_TRACKING_URI": "{{ params.mlflow_tracking_uri }}",
@@ -67,6 +67,7 @@ dag = build_container_dag(
     params={
         "scenario_id": "production_replay_natural",
         "repo_root": "/opt/iqa/iqa-mlops",
+        "image_root": "/opt/iqa/iqa-mlops/data/raw/hss-iad",
         "mode": "progressive-train",
         "max_events": 260,
         "lifecycle_interval": 50,

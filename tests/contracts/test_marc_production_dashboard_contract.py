@@ -44,6 +44,11 @@ def test_marc_dashboard_exposes_production_and_lineage_terms() -> None:
         "Non conforme",
         "pixel_aupimo_1e-5_1e-3",
         "pixel_ap",
+        "Gate localisation",
+        "Gate classification",
+        "Classification progresse",
+        "Synthese classification",
+        "Recall candidat",
         "MLflow",
         "MinIO",
         "DVC",
@@ -88,6 +93,18 @@ def test_marc_lifecycle_rows_surface_aupimo_and_promotion() -> None:
                 "metric_delta": 0.0019,
                 "active_false_negatives": 1,
                 "candidate_false_negatives": 0,
+                "localization_gate": {"passed": True},
+                "classification_gate": {
+                    "passed": True,
+                    "active_image_recall": 0.8,
+                    "candidate_image_recall": 1.0,
+                    "image_recall_delta": 0.2,
+                },
+                "classification_progress": {
+                    "improved": True,
+                    "non_regression": True,
+                    "summary": "improved: FN 1 -> 0",
+                },
                 "activated_for_next_events": True,
                 "activation_scope": "mlflow_registry",
                 "metrics": {"pixel_aupimo_1e-5_1e-3": 0.0059, "pixel_ap": 0.004},
@@ -108,6 +125,13 @@ def test_marc_lifecycle_rows_surface_aupimo_and_promotion() -> None:
     assert rows[0]["metric_delta"] == 0.0019
     assert rows[0]["active_false_negatives"] == 1
     assert rows[0]["candidate_false_negatives"] == 0
+    assert rows[0]["localization_gate"] is True
+    assert rows[0]["classification_gate"] is True
+    assert rows[0]["classification_progress_improved"] is True
+    assert rows[0]["classification_progress_summary"] == "improved: FN 1 -> 0"
+    assert rows[0]["active_image_recall"] == 0.8
+    assert rows[0]["candidate_image_recall"] == 1.0
+    assert rows[0]["image_recall_delta"] == 0.2
     assert rows[0]["activated_for_next_events"] is True
     assert rows[0]["activation_scope"] == "mlflow_registry"
     assert rows[0]["registry"] == "registered"

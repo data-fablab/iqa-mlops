@@ -132,7 +132,7 @@ def test_lifecycle_dag_runs_reference_application_pipeline_via_factory() -> None
     assert "make_container_task(" in source
     assert "iqa-run-replay-lifecycle-cycle" in source
     assert "{{ params.scenario_id }}" in source
-    assert "{{ params.repo_root }}/data/raw/hss-iad" in source
+    assert "{{ params.image_root }}" in source
     assert "{{ params.mode }}" in source
     assert "pipeline" in source.lower()
 
@@ -147,6 +147,7 @@ def test_lifecycle_dag_runs_on_ml_image_with_gpu_lock() -> None:
     assert "repo_mount=True" in source
     assert 'working_dir="/opt/iqa/iqa-mlops"' in source
     assert '"repo_root": "/opt/iqa/iqa-mlops"' in source
+    assert '"image_root": "/opt/iqa/iqa-mlops/data/raw/hss-iad"' in source
     assert "pool=GPU_POOL" in source
     assert "max_active_runs=1" in source
     assert "execution_timeout=timedelta(hours=6)" in source
@@ -170,6 +171,7 @@ def test_lifecycle_dag_declares_comparative_promotion_params() -> None:
     assert "--reference-gt-masks-manifest" in source
     assert "--max-steps" in source
     assert "--require-mlflow-registry" in source
+    assert "params.require_mlflow_registry in [true, 'True', 'true', '1', 1]" in source
 
 
 @pytest.mark.unit
@@ -268,6 +270,16 @@ def test_lifecycle_trigger_dag_evaluates_in_container_and_triggers_lifecycle() -
     assert "TriggerDagRunOperator(" in trigger
     assert 'trigger_dag_id=LIFECYCLE_DAG_ID' in trigger or 'trigger_dag_id="iqa_lifecycle"' in trigger
     assert "op_evaluate_decision >> op_gate_on_decision >> op_trigger_lifecycle" in trigger
+    for relayed_param in [
+        '"gate_eval_profile": "{{ params.gate_eval_profile }}"',
+        '"reference_eval_manifest": "{{ params.reference_eval_manifest }}"',
+        '"reference_gt_masks_manifest": "{{ params.reference_gt_masks_manifest }}"',
+        '"max_steps": "{{ params.max_steps }}"',
+        '"require_mlflow_registry": "{{ params.require_mlflow_registry }}"',
+        '"mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}"',
+        '"ml_image": "{{ params.ml_image }}"',
+    ]:
+        assert relayed_param in trigger
     # No shell / no eager iqa import in the scheduler.
     assert "BashOperator(" not in trigger
     assert "bash_command" not in trigger

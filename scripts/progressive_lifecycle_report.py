@@ -46,13 +46,17 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
         "active_aupimo",
         "candidate_aupimo",
         "delta",
-        "pixel_ap",
+        "loc_gate",
         "active_fn",
         "candidate_fn",
+        "active_recall",
+        "candidate_recall",
         "active_good_red",
         "candidate_good_red",
         "fn_delta",
         "good_red_delta",
+        "class_gate",
+        "class_progress",
         "gate",
         "reason",
         "registry",
@@ -80,13 +84,17 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
     delta = cycle.get("metric_delta")
     candidate_metrics = cycle.get("candidate_metrics_on_eval_set") or cycle.get("metrics") or {}
     active_metrics = cycle.get("active_metrics_on_eval_set") or {}
-    pixel_ap = candidate_metrics.get("pixel_ap")
     active_false_negatives = cycle.get("active_false_negatives", active_metrics.get("false_negatives"))
     candidate_false_negatives = cycle.get("candidate_false_negatives", candidate_metrics.get("false_negatives"))
     active_good_red_count = cycle.get("active_good_red_count", active_metrics.get("good_red_count"))
     candidate_good_red_count = cycle.get("candidate_good_red_count", candidate_metrics.get("good_red_count"))
     fn_delta = cycle.get("fn_delta")
     good_red_delta = cycle.get("good_red_delta")
+    localization_gate = cycle.get("localization_gate") or {}
+    classification_gate = cycle.get("classification_gate") or {}
+    classification_progress = cycle.get("classification_progress") or {}
+    active_recall = classification_gate.get("active_image_recall", active_metrics.get("image_recall"))
+    candidate_recall = classification_gate.get("candidate_image_recall", candidate_metrics.get("image_recall"))
     registry = cycle.get("registry_alias") or cycle.get("registry_stage") or ""
     if cycle.get("registered_model_version"):
         registry = f"{registry}:v{cycle['registered_model_version']}"
@@ -101,13 +109,17 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
         "" if active_value is None else f"{float(active_value):.6g}",
         "" if candidate_value is None else f"{float(candidate_value):.6g}",
         "" if delta is None else f"{float(delta):+.6g}",
-        "" if pixel_ap is None else f"{float(pixel_ap):.6g}",
+        _gate_status(localization_gate.get("passed")),
         "" if active_false_negatives is None else f"{float(active_false_negatives):.0f}",
         "" if candidate_false_negatives is None else f"{float(candidate_false_negatives):.0f}",
+        "" if active_recall is None else f"{float(active_recall):.3f}",
+        "" if candidate_recall is None else f"{float(candidate_recall):.3f}",
         "" if active_good_red_count is None else f"{float(active_good_red_count):.0f}",
         "" if candidate_good_red_count is None else f"{float(candidate_good_red_count):.0f}",
         "" if fn_delta is None else f"{float(fn_delta):+.0f}",
         "" if good_red_delta is None else f"{float(good_red_delta):+.0f}",
+        _gate_status(classification_gate.get("passed")),
+        str(classification_progress.get("summary") or ""),
         str(cycle.get("gate_decision") or ""),
         str(cycle.get("gate_reason") or ""),
         registry,
@@ -134,6 +146,14 @@ def _bool_status(value: Any) -> str:
         return "yes"
     if value is False:
         return "no"
+    return ""
+
+
+def _gate_status(value: Any) -> str:
+    if value is True:
+        return "pass"
+    if value is False:
+        return "fail"
     return ""
 
 

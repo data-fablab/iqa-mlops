@@ -6,8 +6,10 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1511,7 +1513,46 @@ def evaluate_reference_promotion_comparison(
     candidate_thresholds = reference.get("candidate_decision_thresholds")
     active_thresholds = reference.get("active_decision_thresholds")
     thresholds_ok = candidate_thresholds is not None and active_thresholds is not None
-    passed = bool(metric_ok and reference_false_negatives_ok and good_red_ok and thresholds_ok)
+    active_image_recall = _finite_float(active_metrics.get("image_recall"))
+    candidate_image_recall = _finite_float(candidate_metrics.get("image_recall"))
+    image_recall_delta = (
+        None
+        if active_image_recall is None or candidate_image_recall is None
+        else candidate_image_recall - active_image_recall
+    )
+    localization_gate = {
+        "metric": reference.get("selected_metric"),
+        "active_value": reference.get("active_metric_value"),
+        "candidate_value": reference.get("candidate_metric_value"),
+        "delta": reference.get("metric_delta"),
+        "min_delta": float(args.promotion_min_delta),
+        "thresholds_ok": thresholds_ok,
+        "passed": bool(metric_ok and thresholds_ok),
+    }
+    classification_gate = {
+        "active_false_negatives": reference.get("active_false_negatives"),
+        "candidate_false_negatives": reference.get("candidate_false_negatives"),
+        "fn_delta": int(reference.get("candidate_false_negatives") or 0)
+        - int(reference.get("active_false_negatives") or 0),
+        "active_image_recall": active_image_recall,
+        "candidate_image_recall": candidate_image_recall,
+        "image_recall_delta": image_recall_delta,
+        "active_good_red_count": active_good_red_count,
+        "candidate_good_red_count": candidate_good_red_count,
+        "good_red_delta": good_red_delta,
+        "active_good_red_rate": reference.get("active_good_red_rate"),
+        "candidate_good_red_rate": reference.get("candidate_good_red_rate"),
+        "max_good_red_regression": int(args.max_good_red_regression),
+        "false_negatives_ok": reference_false_negatives_ok,
+        "good_red_ok": good_red_ok,
+        "passed": bool(reference_false_negatives_ok and good_red_ok),
+    }
+    classification_progress = _classification_progress_summary(
+        classification_gate,
+        reference_false_negatives_ok=reference_false_negatives_ok,
+        good_red_ok=good_red_ok,
+    )
+    passed = bool(localization_gate["passed"] and classification_gate["passed"])
 
     mvp_gate = {
         "decision": "passed" if passed else "rejected",
@@ -1530,6 +1571,9 @@ def evaluate_reference_promotion_comparison(
         "good_red_ok": good_red_ok,
         "thresholds_ok": thresholds_ok,
         "gate_eval_profile": args.gate_eval_profile,
+        "localization_gate": localization_gate,
+        "classification_gate": classification_gate,
+        "classification_progress": classification_progress,
     }
 
     missing_comparable_metric = reference.get("selected_metric") is None
@@ -1581,6 +1625,12 @@ def evaluate_reference_promotion_comparison(
         "promotion_panel_decision": mvp_gate,
         "simplified_gate": mvp_gate,
         "mvp_gate": mvp_gate,
+        "localization_gate": localization_gate,
+        "classification_gate": classification_gate,
+        "classification_progress": classification_progress,
+        "classification_progress_improved": classification_progress["improved"],
+        "classification_progress_non_regression": classification_progress["non_regression"],
+        "classification_progress_summary": classification_progress["summary"],
         "gate_eval_profile": args.gate_eval_profile,
         "active_decision_thresholds": active_thresholds,
         "active_eval_metrics_path": reference.get("active_eval_metrics_path"),
@@ -1985,11 +2035,13 @@ def tag_mlflow_promotion_evidence(cycle: dict[str, Any]) -> None:
             "candidate_version",
             "evaluation_set_id",
             "evaluation_seen_events",
+            "gate_eval_profile",
             "selected_metric",
             "active_metric_value",
             "candidate_metric_value",
             "metric_delta",
             "gate_decision",
+            "gate_reason",
             "promotion_status",
             "registered_model_name",
             "registry_stage",
@@ -2005,6 +2057,13 @@ def tag_mlflow_promotion_evidence(cycle: dict[str, Any]) -> None:
             "fn_delta",
             "registered_model_version",
             "registry_alias",
+            "active_cache_status",
+            "candidate_cache_status",
+            "active_cache_key",
+            "candidate_cache_key",
+            "classification_progress_improved",
+            "classification_progress_non_regression",
+            "classification_progress_summary",
         ]
         version_name = str(cycle.get("registered_model_name") or "")
         version_number = str(cycle.get("registered_model_version") or "")
@@ -2015,6 +2074,17 @@ def tag_mlflow_promotion_evidence(cycle: dict[str, Any]) -> None:
                 client.set_tag(run_id, key, tag_value)
                 if version_name and version_number:
                     client.set_model_version_tag(version_name, version_number, key, tag_value)
+        for key, value in _mlflow_gate_params(cycle).items():
+            if value is not None:
+                try:
+                    client.log_param(run_id, key, str(value))
+                except Exception:
+                    client.set_tag(run_id, key, str(value))
+        for key, value in _mlflow_gate_metrics(cycle).items():
+            metric_value = _finite_float(value)
+            if metric_value is not None:
+                client.log_metric(run_id, key, metric_value)
+        _log_mlflow_gate_artifacts(client, run_id, cycle)
         if version_name and version_number:
             description = (
                 f"{cycle.get('candidate_version', version_name)}: "
@@ -2028,6 +2098,185 @@ def tag_mlflow_promotion_evidence(cycle: dict[str, Any]) -> None:
             client.update_model_version(version_name, version_number, description=description)
     except Exception:
         return
+
+
+def _finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _classification_progress_summary(
+    classification_gate: dict[str, Any],
+    *,
+    reference_false_negatives_ok: bool,
+    good_red_ok: bool,
+) -> dict[str, Any]:
+    fn_delta = int(classification_gate.get("fn_delta") or 0)
+    recall_delta = _finite_float(classification_gate.get("image_recall_delta"))
+    improved = bool(fn_delta < 0 or (recall_delta is not None and recall_delta > 0))
+    non_regression = bool(reference_false_negatives_ok and good_red_ok)
+    parts = [
+        f"FN {classification_gate.get('active_false_negatives')} -> {classification_gate.get('candidate_false_negatives')}",
+        f"good red {classification_gate.get('active_good_red_count')} -> {classification_gate.get('candidate_good_red_count')}",
+    ]
+    if recall_delta is not None:
+        parts.append(
+            "recall "
+            f"{float(classification_gate.get('active_image_recall') or 0.0):.3f} -> "
+            f"{float(classification_gate.get('candidate_image_recall') or 0.0):.3f}"
+        )
+    status = "improved" if improved else "stable"
+    if not non_regression:
+        status = "regressed"
+    return {
+        "improved": improved,
+        "non_regression": non_regression,
+        "summary": f"{status}: " + ", ".join(parts),
+    }
+
+
+def _mlflow_gate_params(cycle: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "gate.decision": cycle.get("gate_decision"),
+        "gate.reason": cycle.get("gate_reason"),
+        "gate.promotion_status": cycle.get("promotion_status"),
+        "gate.eval_profile": cycle.get("gate_eval_profile"),
+        "gate.selected_metric": cycle.get("selected_metric"),
+        "gate.evaluation_set_id": cycle.get("evaluation_set_id"),
+        "gate.threshold_source": cycle.get("threshold_source"),
+        "gate.active_cache_status": cycle.get("active_cache_status"),
+        "gate.candidate_cache_status": cycle.get("candidate_cache_status"),
+        "classification_progress.improved": cycle.get("classification_progress_improved"),
+        "classification_progress.summary": cycle.get("classification_progress_summary"),
+    }
+
+
+def _mlflow_gate_metrics(cycle: dict[str, Any]) -> dict[str, Any]:
+    metrics: dict[str, Any] = {
+        "gate.passed": cycle.get("gate_decision") == "passed",
+        "gate.active_metric_value": cycle.get("active_metric_value"),
+        "gate.candidate_metric_value": cycle.get("candidate_metric_value"),
+        "gate.metric_delta": cycle.get("metric_delta"),
+        "gate.active_false_negatives": cycle.get("active_false_negatives"),
+        "gate.candidate_false_negatives": cycle.get("candidate_false_negatives"),
+        "gate.fn_delta": cycle.get("fn_delta"),
+        "gate.active_good_red_count": cycle.get("active_good_red_count"),
+        "gate.candidate_good_red_count": cycle.get("candidate_good_red_count"),
+        "gate.good_red_delta": cycle.get("good_red_delta"),
+        "gate.max_good_red_regression": cycle.get("max_good_red_regression"),
+    }
+    gate = cycle.get("mvp_gate") if isinstance(cycle.get("mvp_gate"), dict) else cycle.get("simplified_gate")
+    if isinstance(gate, dict):
+        for key in ("metric_ok", "false_negatives_ok", "good_red_ok", "thresholds_ok"):
+            if key in gate:
+                metrics[f"gate.{key}"] = gate[key]
+    localization_gate = cycle.get("localization_gate")
+    if isinstance(localization_gate, dict):
+        for key in ("active_value", "candidate_value", "delta", "min_delta", "thresholds_ok", "passed"):
+            if key in localization_gate:
+                metrics[f"gate.localization.{key}"] = localization_gate[key]
+    classification_gate = cycle.get("classification_gate")
+    if isinstance(classification_gate, dict):
+        for key in (
+            "active_false_negatives",
+            "candidate_false_negatives",
+            "fn_delta",
+            "active_image_recall",
+            "candidate_image_recall",
+            "image_recall_delta",
+            "active_good_red_count",
+            "candidate_good_red_count",
+            "good_red_delta",
+            "active_good_red_rate",
+            "candidate_good_red_rate",
+            "max_good_red_regression",
+            "false_negatives_ok",
+            "good_red_ok",
+            "passed",
+        ):
+            if key in classification_gate:
+                metrics[f"gate.classification.{key}"] = classification_gate[key]
+    classification_progress = cycle.get("classification_progress")
+    if isinstance(classification_progress, dict):
+        for key in ("improved", "non_regression"):
+            if key in classification_progress:
+                metrics[f"gate.classification_progress.{key}"] = classification_progress[key]
+    for role, source_key in (
+        ("active", "active_metrics_on_eval_set"),
+        ("candidate", "candidate_metrics_on_eval_set"),
+    ):
+        source = cycle.get(source_key)
+        if not isinstance(source, dict):
+            continue
+        for metric_name in (
+            "pixel_aupimo_1e-5_1e-3",
+            "image_ap",
+            "image_auroc",
+            "image_recall",
+            "false_negatives",
+            "good_red_count",
+            "good_red_rate",
+            "red_count",
+            "red_rate",
+            "alert_count",
+            "alert_rate",
+        ):
+            if metric_name in source:
+                metrics[f"gate.{role}.{metric_name}"] = source[metric_name]
+    return metrics
+
+
+def _log_mlflow_gate_artifacts(client: Any, run_id: str, cycle: dict[str, Any]) -> None:
+    evidence_keys = [
+        "cycle_id",
+        "gate_decision",
+        "gate_reason",
+        "promotion_status",
+        "promotion_policy",
+        "gate_eval_profile",
+        "selected_metric",
+        "active_metric_value",
+        "candidate_metric_value",
+        "metric_delta",
+        "active_false_negatives",
+        "candidate_false_negatives",
+        "fn_delta",
+        "active_good_red_count",
+        "candidate_good_red_count",
+        "good_red_delta",
+        "active_cache_status",
+        "candidate_cache_status",
+        "active_cache_key",
+        "candidate_cache_key",
+        "threshold_source",
+        "mvp_gate",
+        "simplified_gate",
+        "localization_gate",
+        "classification_gate",
+        "classification_progress",
+    ]
+    evidence = {key: cycle.get(key) for key in evidence_keys if key in cycle}
+    with tempfile.TemporaryDirectory(prefix="iqa_gate_evidence_") as tmp:
+        evidence_path = Path(tmp) / "gate_evidence.json"
+        evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        client.log_artifact(run_id, str(evidence_path), artifact_path="gate")
+    for key, artifact_path in (
+        ("active_eval_metrics_path", "gate/active"),
+        ("candidate_eval_metrics_path", "gate/candidate"),
+    ):
+        value = cycle.get(key)
+        if not value:
+            continue
+        path = Path(str(value))
+        if path.is_file():
+            client.log_artifact(run_id, str(path), artifact_path=artifact_path)
 
 
 def _val_loss_for_epoch(path: Path, epoch: int) -> float | None:
