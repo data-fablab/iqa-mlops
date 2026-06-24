@@ -35,7 +35,7 @@ dag = build_container_dag(
     tags=["iqa", "replay"],
     params={
         "scenario_id": "production_replay_natural",
-        "plan": "data/metadata/casting_flux_replay_plan_natural.csv",
+        "plan": "data/metadata/casting_flux_replay_plan_natural_v003.csv",
         "image": data_image(),
     },
 )

@@ -24,7 +24,7 @@ Rejoue le **cycle nominal** : les données du casting sont représentatives des 
 
 ### Plan de replay
 
-Fichier : `data/metadata/casting_flux_replay_plan_natural.csv`
+Fichier : `data/metadata/casting_flux_replay_plan_natural_v003.csv`
 
 ```
 simulated_event_id,scenario_id,scenario_type,scenario_phase,is_representative,sequence_number,...

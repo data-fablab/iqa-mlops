@@ -19,7 +19,6 @@ iqa-build-feature-ae-datasets = "scripts.build_feature_ae_datasets:main"
 iqa-build-feature-ae-bootstrap = "scripts.build_feature_ae_bootstrap:main"
 iqa-calibrate-feature-ae-reference = "scripts.calibrate_feature_ae_reference:main"
 iqa-calibrate-feature-ae-thresholds = "scripts.calibrate_feature_ae_thresholds:main"
-iqa-evaluate-feature-ae-predictions = "scripts.evaluate_feature_ae_predictions:main"
 iqa-simulate-lifecycle = "scripts.simulate_lifecycle:main"
 iqa-prepare-sim-env = "scripts.prepare_sim_environment:main"
 iqa-validate-mvp = "scripts.validate_mvp:main"
@@ -173,4 +172,3 @@ explicit = true
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
-

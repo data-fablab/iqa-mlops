@@ -66,8 +66,6 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for cycle in cycles:
         metrics = cycle.get("metrics") or {}
-        stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
-        per_class = cycle.get("candidate_per_class_metrics") or cycle.get("per_class_metrics") or {}
         rows.append(
             {
                 "cycle_id": cycle.get("cycle_id"),
@@ -82,11 +80,8 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "candidate_metric_value": cycle.get("candidate_metric_value"),
                 "metric_delta": cycle.get("metric_delta"),
                 "reference_metric_delta": cycle.get("reference_metric_delta"),
-                "progressive_metric_delta": cycle.get("progressive_metric_delta"),
                 "reference_candidate_metric_value": cycle.get("reference_candidate_metric_value"),
-                "progressive_candidate_metric_value": cycle.get("progressive_candidate_metric_value"),
                 "promotion_panel_decision": cycle.get("promotion_panel_decision"),
-                "per_class_regressions": cycle.get("per_class_regressions"),
                 "active_false_negatives": cycle.get("active_false_negatives"),
                 "candidate_false_negatives": cycle.get("candidate_false_negatives"),
                 "fn_delta": cycle.get("fn_delta"),
@@ -95,8 +90,8 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "good_red_delta": cycle.get("good_red_delta"),
                 "activated_for_next_events": cycle.get("activated_for_next_events"),
                 "activation_scope": cycle.get("activation_scope"),
-                "cache_status": cycle.get("cache_status"),
-                "cache_hit": cycle.get("cache_hit"),
+                "active_cache_status": cycle.get("active_cache_status"),
+                "candidate_cache_status": cycle.get("candidate_cache_status"),
                 "pixel_aupimo_1e-5_1e-3": metrics.get("pixel_aupimo_1e-5_1e-3"),
                 "pixel_ap": metrics.get("pixel_ap"),
                 "image_ap": metrics.get("image_ap"),
@@ -114,11 +109,6 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "candidate_good_alert_rate": cycle.get("candidate_good_alert_rate"),
                 "active_good_red_rate": cycle.get("active_good_red_rate"),
                 "candidate_good_red_rate": cycle.get("candidate_good_red_rate"),
-                "aupimo_unstable": stability.get("aupimo_unstable"),
-                "low_fpr_good_outlier_count": stability.get("low_fpr_good_outlier_count"),
-                "max_good_score": stability.get("max_good_score"),
-                "max_defect_score": stability.get("max_defect_score"),
-                "classes": ", ".join(sorted(per_class)) if isinstance(per_class, dict) else "",
                 "gate": cycle.get("gate_decision"),
                 "promotion": cycle.get("promotion_status"),
                 "stage": cycle.get("registry_stage"),
@@ -146,9 +136,6 @@ def production_alerts(lots: list[dict[str, Any]], cycles: list[dict[str, Any]]) 
         promotion_status = str(cycle.get("promotion_status") or "")
         if promotion_status.startswith("rejected") or cycle.get("gate_decision") == "rejected":
             alerts.append(f"{cycle.get('candidate_version')} rejete par le gate modele.")
-        stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
-        if stability.get("aupimo_unstable"):
-            alerts.append(f"{cycle.get('cycle_id')} AUPIMO instable : {', '.join(stability.get('unstable_reasons') or [])}.")
     return alerts
 
 

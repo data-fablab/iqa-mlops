@@ -110,7 +110,7 @@ def test_lineage_summary_builds_complete_evidence(tmp_path: Path) -> None:
     assert summary["model_artifact_uri"] == "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt"
     assert summary["model_sha256"]
     assert summary["preprocessing_contract_version"] == "feature_ae_reference_v001"
-    assert summary["decision_thresholds"]["calibration_set_id"] == "calibration_set_v001"
+    assert summary["decision_thresholds"]["calibration_set_id"] == "historical_bootstrap_manifest_thresholds"
     assert summary["threshold_sources"] == ["manifest:calibration_good_quantiles"]
     assert set(summary["dvc"]["stages"]) >= {"inventory", "piece_events", "replay", "validation", "model_dataset"}
     assert summary["mlflow_tracking"]["source_of_truth"] == "mlflow_registry"
@@ -191,4 +191,3 @@ def test_mlflow_logger_declares_required_lineage_fields() -> None:
         "mlflow.set_tags(tags)",
     ]:
         assert expected in source
-

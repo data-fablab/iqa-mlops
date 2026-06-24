@@ -29,7 +29,7 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "fn_delta": -1,
             "good_red_delta": 0,
             "gate_decision": "passed",
-            "gate_reason": "candidate_passed_reference_gate",
+            "gate_reason": "candidate_passed_representative_validation_gate",
             "registry_stage": "test",
             "registered_model_version": "1",
             "mlflow_run_id": "run-001",
@@ -42,14 +42,12 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
                 "good_red_rate": 0.0,
                 "false_negatives": 0,
             },
-            "candidate_aupimo_stability": {"aupimo_unstable": False},
             "cache_status": "miss_stored",
             "cache_hit": False,
             "epoch_metric_history": [
                 {
                     "epoch": 1,
                     "metrics": {"pixel_aupimo_1e-5_1e-3": 0.91, "pixel_ap": 0.12},
-                    "predictions_path": "metric_eval/epoch_001/predictions.npz",
                 }
             ],
         },
@@ -97,7 +95,7 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
     assert "run_id" in report
     assert "active_fn" in report
     assert "candidate_good_red" in report
-    assert "candidate_passed_reference_gate" in report
+    assert "candidate_passed_representative_validation_gate" in report
     assert "run-001" in report
     assert "yes" in report
     assert "no" in report

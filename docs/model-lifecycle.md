@@ -30,8 +30,8 @@ Regles Phase 2 operationnelles :
 
 | Scenario | Declencheur | Dataset candidat |
 | --- | --- | --- |
-| `production_replay_natural` | au moins 50 nouveaux `piece_event` conformes valides par `oracle_gt` | `feature_ae_good_v002` |
-| `drift_domain_extension` | `drift_confirmed=true` | `feature_ae_good_v003` |
+| `production_replay_natural` | au moins 50 nouveaux `piece_event` conformes valides par `oracle_gt` | `feature_ae_good_mvp_v001` |
+| `drift_domain_extension` | `drift_confirmed=true` | `feature_ae_good_mvp_v001` |
 
 Ces regles materialisent la decision projet historique : reentrainement apres
 volume suffisant de conformes valides, lot complet ou drift confirme. Le seuil

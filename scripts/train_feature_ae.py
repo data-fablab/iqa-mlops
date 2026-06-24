@@ -70,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metric-eval-device")
     parser.add_argument("--metric-eval-roi-predictions-dir", nargs="*", type=Path, default=[])
     parser.add_argument("--gt-masks-manifest", type=Path)
-    parser.add_argument("--validation-set-id", default="validation_set_v001")
+    parser.add_argument("--validation-set-id", default="validation_set_replay_representative_v001")
     parser.add_argument("--metric-eval-every-epochs", type=int, default=0)
     parser.add_argument("--metric-eval-start-epoch", type=int, default=1)
     parser.add_argument("--metric-eval-batch-size", type=int, default=8)
@@ -171,4 +171,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

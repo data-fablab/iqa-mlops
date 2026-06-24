@@ -172,16 +172,14 @@ The supported replay scenarios are:
 - `production_replay_natural`
 - `drift_domain_extension`
 
-`bootstrap`, `calibration_set_v001`, replay manifests, and
-`validation_set_v001` remain disjoint. `oracle_gt` is the sovereign feedback
-source for training eligibility; Sophie remains a display/review persona in this
-phase.
+`bootstrap`, `calibration_good_reference_v001`, replay manifests, and
+`validation_set_replay_representative_v001` remain disjoint. `oracle_gt` is the
+sovereign feedback source for training eligibility; Sophie remains a
+display/review persona in this phase.
 
-Feature-AE candidate datasets are materialized from oracle-validated conforming
-pieces:
+Feature-AE MVP training uses one stable good anchor:
 
-- `feature_ae_good_v002` from natural replay conforming pieces.
-- `feature_ae_good_v003` from drift/domain-extension conforming pieces.
+- `feature_ae_good_mvp_v001`, disjoint from validation, calibration and replay.
 
 Model lifecycle decisions are triggered by data events, such as 50 new
 oracle-validated conforming pieces or confirmed drift. CI validates contracts and

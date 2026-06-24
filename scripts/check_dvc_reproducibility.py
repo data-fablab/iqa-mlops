@@ -16,10 +16,10 @@ EXPECTED_REMOTE_URL = "s3://iqa-dvc"
 REGENERATED_MANIFESTS = [
     Path("data/metadata/casting_piece_events.csv"),
     Path("data/metadata/feature_ae_bootstrap_events.csv"),
-    Path("data/metadata/casting_flux_replay_plan_natural.csv"),
+    Path("data/metadata/casting_flux_replay_plan_natural_v003.csv"),
     Path("data/metadata/casting_flux_replay_plan_drift.csv"),
-    Path("data/metadata/calibration_set_v001.csv"),
-    Path("data/validation/validation_set_v001.csv"),
+    Path("data/validation/calibration_good_reference_v001.csv"),
+    Path("data/validation/validation_set_replay_representative_v001.csv"),
     Path("reports/data_phase1_validation.md"),
 ]
 

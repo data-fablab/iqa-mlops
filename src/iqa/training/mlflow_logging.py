@@ -322,9 +322,9 @@ def train_feature_ae_with_mlflow_logging(
         eval_best_path = run_dir / "metric_eval_best.json"
         if eval_best_path.exists():
             logger.log_artifacts(eval_report_path=eval_best_path)
-        eval_history_path = run_dir / "metric_eval_history.json"
-        if eval_history_path.exists():
-            logger.log_artifacts(eval_report_path=eval_history_path)
+        epoch_metrics_path = run_dir / "epoch_metrics.jsonl"
+        if epoch_metrics_path.exists():
+            logger.log_artifacts(eval_report_path=epoch_metrics_path)
 
         result["run_id"] = logger._run_id or ""
         result["mlflow_dataset_logged"] = any(dataset_logging.values())

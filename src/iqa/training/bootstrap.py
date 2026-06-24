@@ -122,7 +122,7 @@ def update_bootstrap_manifest(
     *,
     artifact_uri: str = BOOTSTRAP_ARTIFACT_URI,
     dataset_version: str = "feature_ae_good_v001_bootstrap",
-    validation_set_id: str = "validation_set_v001",
+    validation_set_id: str = "validation_set_replay_representative_v001",
     roi_model_version: str = "roi_segmenter_v001_fixed",
 ) -> dict[str, Any]:
     path = Path(manifest_path)
@@ -195,4 +195,3 @@ __all__ = [
     "update_bootstrap_manifest",
     "upload_checkpoint_to_s3",
 ]
-

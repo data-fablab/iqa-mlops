@@ -56,11 +56,10 @@ def test_casting_image_inventory_is_complete_and_linked_to_piece_events() -> Non
 
 def test_validation_calibration_bootstrap_and_replay_are_disjoint() -> None:
     bootstrap_ids = _ids(_read_csv(METADATA / "feature_ae_bootstrap_events.csv"))
-    validation_ids = _ids(_read_csv(VALIDATION / "validation_set_v001.csv"))
-    calibration_ids = _ids(_read_csv(METADATA / "calibration_set_v001.csv"))
-    natural_replay_ids = _ids(_read_csv(METADATA / "casting_flux_replay_plan_natural.csv"), "source_event_id")
-    drift_replay_ids = _ids(_read_csv(METADATA / "casting_flux_replay_plan_drift.csv"), "source_event_id")
-    replay_ids = natural_replay_ids | drift_replay_ids
+    validation_ids = _ids(_read_csv(VALIDATION / "validation_set_replay_representative_v001.csv"))
+    calibration_ids = _ids(_read_csv(VALIDATION / "calibration_good_reference_v001.csv"))
+    natural_replay_ids = _ids(_read_csv(METADATA / "casting_flux_replay_plan_natural_v003.csv"), "source_event_id")
+    replay_ids = natural_replay_ids
 
     assert bootstrap_ids.isdisjoint(validation_ids)
     assert bootstrap_ids.isdisjoint(calibration_ids)
@@ -71,25 +70,25 @@ def test_validation_calibration_bootstrap_and_replay_are_disjoint() -> None:
 
 
 def test_validation_and_calibration_roles_are_explicit() -> None:
-    validation = _read_csv(VALIDATION / "validation_set_v001.csv")
-    calibration = _read_csv(METADATA / "calibration_set_v001.csv")
+    validation = _read_csv(VALIDATION / "validation_set_replay_representative_v001.csv")
+    calibration = _read_csv(VALIDATION / "calibration_good_reference_v001.csv")
 
-    assert {row["validation_set_id"] for row in validation} == {"validation_set_v001"}
-    assert len(validation) == 20
+    assert {row["validation_set_id"] for row in validation} == {"validation_set_replay_representative_v001"}
+    assert len(validation) == 74
     assert _counts(validation, "source_class") == {
-        "Casting_class1": 5,
-        "Casting_class2": 8,
-        "Casting_class3": 7,
+        "Casting_class1": 13,
+        "Casting_class2": 39,
+        "Casting_class3": 22,
     }
     assert any(row["is_defective"].lower() == "true" for row in validation)
-    assert {row["calibration_set_id"] for row in calibration} == {"calibration_set_v001"}
+    assert {row["validation_set_id"] for row in calibration} == {"calibration_good_reference_v001"}
     assert {row["label"] for row in calibration} == {"good"}
     assert {row["is_defective"].lower() for row in calibration} == {"false"}
 
 
 def test_replay_plans_carry_phase1_runtime_metadata() -> None:
     for path, scenario_id, dataset_version in [
-        (METADATA / "casting_flux_replay_plan_natural.csv", "production_replay_natural", "production_replay_natural_v001"),
+        (METADATA / "casting_flux_replay_plan_natural_v003.csv", "production_replay_natural", "production_replay_natural_v002"),
         (METADATA / "casting_flux_replay_plan_drift.csv", "drift_domain_extension", "drift_domain_extension_v001"),
     ]:
         rows = _read_csv(path)

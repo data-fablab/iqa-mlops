@@ -91,7 +91,7 @@ class FeatureAETrainingConfig:
     metric_eval_device: str | None = None
     metric_eval_roi_predictions_dirs: tuple[Path, ...] = ()
     gt_masks_manifest: Path | None = None
-    validation_set_id: str = "validation_set_v001"
+    validation_set_id: str = "validation_set_replay_representative_v001"
     metric_eval_every_epochs: int = 0
     metric_eval_start_epoch: int = 1
     metric_eval_batch_size: int = 8
@@ -275,9 +275,6 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     "epoch": epoch,
                     "checkpoint": str(checkpoint),
                     "metrics": eval_result.get("metrics") or {},
-                    "per_class_metrics": eval_result.get("per_class_metrics") or {},
-                    "aupimo_stability": eval_result.get("aupimo_stability") or {},
-                    "predictions_path": eval_result.get("predictions_path"),
                 }
             )
             _append_jsonl(run_dir / "epoch_metrics.jsonl", epoch_metric_history[-1])
@@ -323,10 +320,6 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
         )
 
     _write_history(run_dir / "loss_history.csv", history)
-    (run_dir / "metric_eval_history.json").write_text(
-        json.dumps(epoch_metric_history, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
     (run_dir / "params.json").write_text(json.dumps(_metadata(config, layers), indent=2, sort_keys=True), encoding="utf-8")
     return {
         "model_type": FEATURE_AE_MODEL_TYPE,

@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario-id", default="production_replay_natural")
     parser.add_argument("--checkpoint", default="models/feature_ae/candidate.pt")
-    parser.add_argument("--validation-set-id", default="validation_set_v001")
+    parser.add_argument("--validation-set-id", default="validation_set_replay_representative_v001")
     parser.add_argument(
         "--wait-for-gpu",
         action="store_true",

@@ -54,10 +54,10 @@ Contrats actuels :
 | --- | --- | --- | --- |
 | `data/metadata/casting_piece_events.csv` | `casting_piece_events_v001` | `hss_iad_casting_raw_v1` | `piece_event_id == event_id` |
 | `data/metadata/feature_ae_bootstrap_events.csv` | `feature_ae_bootstrap_events_v001` | `feature_ae_good_v001_bootstrap` | `piece_event_id == event_id` |
-| `data/metadata/casting_flux_replay_plan_natural.csv` | `casting_flux_replay_plan_natural_v001` | `production_replay_natural_v001` | `piece_event_id == simulated_event_id` |
+| `data/metadata/casting_flux_replay_plan_natural_v003.csv` | `casting_flux_replay_plan_natural_v002` | `production_replay_natural_v002` | `piece_event_id == simulated_event_id` |
 | `data/metadata/casting_flux_replay_plan_drift.csv` | `casting_flux_replay_plan_drift_v001` | `drift_domain_extension_v001` | `piece_event_id == simulated_event_id` |
-| `data/validation/validation_set_v001.csv` | `validation_set_v001` | `validation_set_v001` | `piece_event_id == event_id` |
-| `data/metadata/calibration_set_v001.csv` | `calibration_set_v001` | `calibration_set_v001` | `piece_event_id == event_id` |
+| `data/validation/validation_set_replay_representative_v001.csv` | `validation_set_replay_representative_v001` | `validation_set_replay_representative_v001` | `piece_event_id == event_id` |
+| `data/validation/calibration_good_reference_v001.csv` | `calibration_good_reference_v001` | `calibration_good_reference_v001` | `piece_event_id == event_id` |
 
 En replay, `source_event_id` reste l'identifiant de la piece originale et
 `piece_event_id` identifie l'evenement simule servi par le scheduler replay.
@@ -80,8 +80,7 @@ Les datasets Feature-AE candidats suivent ces versions :
 
 | Version | Source |
 | --- | --- |
-| `feature_ae_good_v002` | Conformes valides issus du replay naturel. |
-| `feature_ae_good_v003` | Conformes valides issus du replay drift/domain extension. |
+| `feature_ae_good_mvp_v001` | Socle good MVP disjoint validation/calibration/replay. |
 
 Un sample est eligible seulement si `oracle_verdict=conforme`,
 `train_eligible=true`, `train_eligibility_source=oracle_gt`, sans quarantaine et
@@ -90,25 +89,24 @@ Les manifests materialises sont produits sous `data/model_datasets/` par
 `iqa-build-feature-ae-datasets` et portent `dataset_version` ainsi que
 `manifest_version`.
 
-Leur consommation par le lifecycle reste declenchee par evenement donnees :
-`feature_ae_good_v002` devient candidat quand `production_replay_natural`
-atteint 50 nouveaux `piece_event` conformes valides par `oracle_gt` ;
-`feature_ae_good_v003` devient candidat quand le scenario
-`drift_domain_extension` porte `drift_confirmed=true`.
+Le lifecycle MVP utilise `feature_ae_good_mvp_v001` comme socle stable et ajoute
+les conformes vus pendant le replay pour construire les candidats de cycle.
 
-## Validation set v001
+## Validation representative MVP
 
-`data/validation/validation_set_v001.csv` est fige au niveau `piece_event`.
+`data/validation/validation_set_replay_representative_v001.csv` est fige au
+niveau `piece_event`.
 La repartition actuelle par `source_class` est :
 
 | `source_class` | Pieces |
 | --- | ---: |
-| `Casting_class1` | 5 |
-| `Casting_class2` | 8 |
-| `Casting_class3` | 7 |
+| `Casting_class1` | 13 |
+| `Casting_class2` | 39 |
+| `Casting_class3` | 22 |
 
 Ce set reste disjoint de bootstrap, calibration et replay. Il sert a verifier la
-regle oracle sans alimenter le train normal.
+regle oracle sans alimenter le train normal. La calibration seuils utilise le
+panel good separe `data/validation/calibration_good_reference_v001.csv`.
 
 ## Persistance PostgreSQL
 

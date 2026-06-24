@@ -12,11 +12,7 @@ from iqa.datasets import CALIBRATION_SET_ID, TiledFeatureAEDataset, is_calibrati
 from iqa.models.feature_ae import FEATURE_AE_MODEL_TYPE
 from iqa.training.feature_ae import FeatureAETrainingConfig, train_feature_ae
 from iqa.training.feature_ae_evaluation import (
-    PREDICTION_SCHEMA_VERSION,
-    compute_aupimo_stability,
     compute_binary_metrics,
-    evaluate_feature_ae_predictions,
-    materialize_evaluation_predictions,
     parse_layer_loss_weights,
     score_image_map,
     smooth_score_map,
@@ -258,67 +254,6 @@ def test_aupimo_ignores_defective_images_without_positive_gt_mask() -> None:
     )
 
     assert metrics["pixel_aupimo_1e-5_1e-3"] is None
-
-
-def test_evaluation_predictions_npz_and_aupimo_stability(tmp_path: Path) -> None:
-    records = [
-        {"image_id": "good_1", "source_class": "Casting_class1", "is_defective": False, "score": 10.0, "gt_positive_pixels": 0, "relative_path": "Casting_class1/train/good/a.jpg"},
-        {"image_id": "def_1", "source_class": "Casting_class1", "is_defective": True, "score": 1.0, "gt_positive_pixels": 1, "relative_path": "Casting_class1/test/defective/b.jpg"},
-    ]
-    predictions_path = tmp_path / "predictions.npz"
-
-    pixel_labels = {
-        "good_1": np.asarray([[0, 0]], dtype=np.uint8),
-        "def_1": np.asarray([[1, 0]], dtype=np.uint8),
-    }
-    pixel_scores = {
-        "good_1": np.asarray([[10.0, 9.0]], dtype=np.float32),
-        "def_1": np.asarray([[1.0, 0.5]], dtype=np.float32),
-    }
-    materialize_evaluation_predictions(
-        predictions_path,
-        records,
-        pixel_labels_by_image=pixel_labels,
-        pixel_scores_by_image=pixel_scores,
-        score_contract={"score_contract_version": "feature_ae_reference_v001"},
-    )
-    stability = compute_aupimo_stability(
-        records,
-        pixel_scores,
-    )
-    recomputed = evaluate_feature_ae_predictions(
-        predictions_path,
-        threshold_orange=2.0,
-        threshold_red=5.0,
-    )
-
-    assert predictions_path.exists()
-    with np.load(predictions_path, allow_pickle=True) as data:
-        assert {"schema_version", "score_contract_version", "score_map_shape", "score_maps", "masks", "roi_masks", "roi_coverage"} <= set(data.files)
-        assert "pixel_scores" not in data.files
-        assert "pixel_roi_scores" not in data.files
-        assert data["schema_version"].item() == PREDICTION_SCHEMA_VERSION
-        assert data["score_contract_version"][0] == "feature_ae_reference_v001"
-        assert data["score_maps"].shape == (2, 1, 2)
-        assert data["masks"].shape == (2, 1, 2)
-    assert recomputed["metrics"]["pixel_ap"] is not None
-    assert recomputed["prediction_schema_version"] == PREDICTION_SCHEMA_VERSION
-    assert stability["aupimo_unstable"] is True
-    assert "good_outliers_dominate_low_fpr" in stability["unstable_reasons"]
-
-
-def test_evaluate_predictions_rejects_legacy_flat_pixel_npz(tmp_path: Path) -> None:
-    predictions_path = tmp_path / "legacy_predictions.npz"
-    np.savez_compressed(
-        predictions_path,
-        piece_event_id=np.asarray(["good_1"], dtype=object),
-        oracle_verdict=np.asarray(["good"], dtype=object),
-        pixel_scores=np.asarray([np.zeros((2, 2), dtype=np.float32)], dtype=object),
-        pixel_labels=np.asarray([np.zeros((2, 2), dtype=np.uint8)], dtype=object),
-    )
-
-    with pytest.raises(ValueError, match="unsupported_prediction_schema"):
-        evaluate_feature_ae_predictions(predictions_path, threshold_orange=0.1, threshold_red=0.2)
 
 
 def test_tiny_feature_ae_training_smoke(tmp_path: Path) -> None:

@@ -1,0 +1,78 @@
+{
+  "files": {
+    "anchor_good": "data\\model_datasets\\feature_ae_good_mvp_v001.csv",
+    "calibration": "data\\validation\\calibration_good_reference_v001.csv",
+    "replay": "data\\metadata\\casting_flux_replay_plan_natural_v003.csv",
+    "validation": "data\\validation\\validation_set_replay_representative_v001.csv"
+  },
+  "outputs": {
+    "anchor_good_images": 279,
+    "anchor_good_pieces": 120,
+    "calibration": {
+      "labels": {
+        "good": 90
+      },
+      "rows": 90,
+      "source_classes": {
+        "Casting_class1": 15,
+        "Casting_class2": 50,
+        "Casting_class3": 25
+      }
+    },
+    "replay_v003_labels": {
+      "defective": 26,
+      "good": 536
+    },
+    "replay_v003_rows": 562,
+    "replay_v003_source_classes": {
+      "Casting_class1": 97,
+      "Casting_class2": 309,
+      "Casting_class3": 156
+    },
+    "validation": {
+      "labels": {
+        "defective": 14,
+        "good": 60
+      },
+      "rows": 74,
+      "source_classes": {
+        "Casting_class1": 13,
+        "Casting_class2": 39,
+        "Casting_class3": 22
+      }
+    }
+  },
+  "overlaps_on_source_event_id": {
+    "anchor_good__replay": 0,
+    "calibration__anchor_good": 0,
+    "calibration__replay": 0,
+    "validation__anchor_good": 0,
+    "validation__calibration": 0,
+    "validation__replay": 0
+  },
+  "source_events": {
+    "labels": {
+      "defective": 40,
+      "good": 922
+    },
+    "rows": 962,
+    "source_classes": {
+      "Casting_class1": 217,
+      "Casting_class2": 486,
+      "Casting_class3": 259
+    }
+  },
+  "source_replay_v002": {
+    "labels": {
+      "defective": 26,
+      "good": 806
+    },
+    "rows": 832,
+    "source_classes": {
+      "Casting_class1": 142,
+      "Casting_class2": 458,
+      "Casting_class3": 232
+    }
+  },
+  "version": "feature_ae_partition_report_v001"
+}
