@@ -9,7 +9,7 @@ import csv
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -72,6 +72,7 @@ class FeatureAEEvaluationConfig:
     cosine_weight: float = 0.5
     threshold_orange: float = 0.02
     threshold_red: float = 0.05
+    metric_profile: Literal["fast", "full"] = "full"
     save_score_maps: bool = False
     save_previews: bool = False
     max_previews: int = 31
@@ -166,7 +167,10 @@ def compute_binary_metrics(
     pixel_scores: list[np.ndarray],
     *,
     timings: dict[str, float] | None = None,
+    metric_profile: Literal["fast", "full"] = "full",
 ) -> dict[str, float | None]:
+    if metric_profile not in {"fast", "full"}:
+        raise ValueError(f"Unsupported metric profile: {metric_profile}")
     metrics: dict[str, float | None] = {
         "image_auroc": None,
         "image_ap": None,
@@ -181,14 +185,15 @@ def compute_binary_metrics(
         metrics["image_ap"] = float(average_precision_score(y_true, y_score))
 
     if pixel_labels:
-        rank_started = time.perf_counter()
-        p_true = np.concatenate([labels.reshape(-1) for labels in pixel_labels]).astype(np.int32)
-        p_score = np.concatenate([scores.reshape(-1) for scores in pixel_scores]).astype(np.float32)
-        if p_true.sum() > 0 and np.unique(p_true).size == 2:
-            metrics["pixel_auroc"] = float(roc_auc_score(p_true, p_score))
-            metrics["pixel_ap"] = float(average_precision_score(p_true, p_score))
-        if timings is not None:
-            timings["pixel_rank_metrics_seconds"] = time.perf_counter() - rank_started
+        if metric_profile == "full":
+            rank_started = time.perf_counter()
+            p_true = np.concatenate([labels.reshape(-1) for labels in pixel_labels]).astype(np.int32)
+            p_score = np.concatenate([scores.reshape(-1) for scores in pixel_scores]).astype(np.float32)
+            if p_true.sum() > 0 and np.unique(p_true).size == 2:
+                metrics["pixel_auroc"] = float(roc_auc_score(p_true, p_score))
+                metrics["pixel_ap"] = float(average_precision_score(p_true, p_score))
+            if timings is not None:
+                timings["pixel_rank_metrics_seconds"] = time.perf_counter() - rank_started
         aupimo_started = time.perf_counter()
         aupimo = _normalized_low_fpr_aupimo(
             np.asarray(image_labels, dtype=np.int64),
@@ -474,7 +479,14 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             _save_preview(previews_dir / f"{image_id}.png", score_map)
 
     metric_timings: dict[str, float] = {}
-    metrics = compute_binary_metrics(image_labels, image_scores, pixel_labels, pixel_scores, timings=metric_timings)
+    metrics = compute_binary_metrics(
+        image_labels,
+        image_scores,
+        pixel_labels,
+        pixel_scores,
+        timings=metric_timings,
+        metric_profile=config.metric_profile,
+    )
     decision = compute_decision_metrics(
         image_labels,
         image_scores,
@@ -521,6 +533,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             "roi_threshold": config.roi_threshold,
             "score_image": config.score_image,
             "topk_fraction": config.topk_fraction,
+            "metric_profile": config.metric_profile,
         },
         "calibration": {
             "enabled": config.calibrate_normal,
@@ -543,6 +556,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         "threshold_red": config.threshold_red,
         "duration_seconds": time.perf_counter() - evaluation_started,
         "metric_timings": metric_timings,
+        "metric_profile": config.metric_profile,
     }
     (config.output_dir / "params.json").write_text(json.dumps(params, indent=2, sort_keys=True), encoding="utf-8")
     (config.output_dir / "metrics.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")

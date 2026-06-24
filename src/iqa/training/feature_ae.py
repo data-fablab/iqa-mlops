@@ -7,7 +7,7 @@ import math
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -106,6 +106,7 @@ class FeatureAETrainingConfig:
     metric_eval_score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing
     metric_eval_score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image
     metric_eval_topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction
+    metric_eval_profile: Literal["fast", "full"] = "full"
     metric_eval_save_score_maps: bool = False
     metric_eval_save_previews: bool = False
     metric_eval_max_previews: int = 31
@@ -265,6 +266,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     score_smoothing=config.metric_eval_score_smoothing,
                     score_image=config.metric_eval_score_image,
                     topk_fraction=config.metric_eval_topk_fraction,
+                    metric_profile=config.metric_eval_profile,
                     save_score_maps=config.metric_eval_save_score_maps,
                     save_previews=config.metric_eval_save_previews,
                     max_previews=config.metric_eval_max_previews,

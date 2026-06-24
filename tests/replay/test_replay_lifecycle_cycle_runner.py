@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,6 +50,7 @@ def _args(tmp_path: Path, *, scenario_id: str, mode: str = "decision-only", max_
         batch_size=1,
         epochs=1,
         max_steps=1,
+        gate_eval_profile="fast",
         promotion_min_delta=0.0,
         require_mlflow_registry=False,
         anchor_good_manifest=anchor_good,
@@ -737,6 +739,63 @@ def test_register_promoted_cycle_raises_registry_failure_in_strict_mode(tmp_path
         runner.register_promoted_cycle(args, state, {"mlflow_run_id": "mlflow-001"})
 
 
+def test_tag_mlflow_promotion_evidence_tags_run_and_model_version(monkeypatch) -> None:
+    calls: dict[str, list[tuple[str, ...]]] = {
+        "run_tags": [],
+        "version_tags": [],
+        "descriptions": [],
+    }
+
+    class FakeClient:
+        def set_tag(self, run_id: str, key: str, value: str) -> None:
+            calls["run_tags"].append((run_id, key, value))
+
+        def set_model_version_tag(self, name: str, version: str, key: str, value: str) -> None:
+            calls["version_tags"].append((name, version, key, value))
+
+        def update_model_version(self, name: str, version: str, description: str) -> None:
+            calls["descriptions"].append((name, version, description))
+
+    class FakeTracking:
+        MlflowClient = FakeClient
+
+    class FakeMlflow:
+        tracking = FakeTracking()
+
+    monkeypatch.setitem(sys.modules, "mlflow", FakeMlflow())
+
+    runner.tag_mlflow_promotion_evidence(
+        {
+            "mlflow_run_id": "run-001",
+            "registered_model_name": "feature_ae__production_replay_natural",
+            "registered_model_version": "4",
+            "candidate_version": "rd_feature_ae_gated_natural_cycle_001",
+            "gate_decision": "passed",
+            "promotion_status": "promoted",
+            "selected_metric": "pixel_aupimo_1e-5_1e-3",
+            "metric_delta": 0.1,
+            "candidate_false_negatives": 0,
+            "candidate_good_red_count": 2,
+        }
+    )
+
+    assert ("run-001", "gate_decision", "passed") in calls["run_tags"]
+    assert (
+        "feature_ae__production_replay_natural",
+        "4",
+        "gate_decision",
+        "passed",
+    ) in calls["version_tags"]
+    assert calls["descriptions"] == [
+        (
+            "feature_ae__production_replay_natural",
+            "4",
+            "rd_feature_ae_gated_natural_cycle_001: gate=passed promotion=promoted "
+            "metric=pixel_aupimo_1e-5_1e-3 delta=0.1 fn=0 good_red=2",
+        )
+    ]
+
+
 def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) -> None:
     plan = tmp_path / "drift.csv"
     _write_replay(plan, scenario_id=runner.DRIFT_SCENARIO_ID, rows=1)
@@ -785,3 +844,35 @@ def test_metric_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded["metrics"]["pixel_aupimo_1e-5_1e-3"] == 0.2
     assert (cache_root / "index.json").exists()
     assert (tmp_path / "loaded_eval" / "metrics.json").exists()
+
+
+def test_metric_cache_key_changes_with_gate_eval_profile(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    manifest = tmp_path / "validation.csv"
+    manifest.write_text("image_id,relative_path,is_defective\n", encoding="utf-8")
+    masks = tmp_path / "masks.csv"
+    masks.write_text("image_id,gt_mask_path\n", encoding="utf-8")
+
+    fast_key = runner.metric_cache_key(
+        model_version="model-v1",
+        checkpoint_path=checkpoint,
+        evaluation_set_path=manifest,
+        evaluation_set_id="validation",
+        gt_masks_manifest=masks,
+        gate_eval_profile="fast",
+        threshold_orange=0.02,
+        threshold_red=0.05,
+    )
+    full_key = runner.metric_cache_key(
+        model_version="model-v1",
+        checkpoint_path=checkpoint,
+        evaluation_set_path=manifest,
+        evaluation_set_id="validation",
+        gt_masks_manifest=masks,
+        gate_eval_profile="full",
+        threshold_orange=0.02,
+        threshold_red=0.05,
+    )
+
+    assert fast_key != full_key

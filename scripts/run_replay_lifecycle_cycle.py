@@ -54,10 +54,30 @@ VALIDATION_MANIFEST = Path("data/validation/validation_set_replay_representative
 VALIDATION_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
 DEFAULT_ANCHOR_GOOD_MANIFEST = Path("data/model_datasets/feature_ae_good_mvp_v001.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/replay_lifecycle")
+DEFAULT_METRIC_CACHE_ROOT = Path(".cache/iqa/metric_eval_cache")
 Mode = Literal["decision-only", "train-on-trigger", "progressive-decision", "progressive-train"]
 PROGRESSIVE_MODES = {"progressive-decision", "progressive-train"}
 ACTIVE_REPLAY_SCENARIOS = Path("data/metadata/replay_scenarios.csv")
 PROGRESSIVE_PROMOTION_POLICY = "candidate_must_improve_representative_validation_without_operational_regression"
+GATE_METRICS_TO_KEEP = {
+    *FEATURE_AE_BUSINESS_METRIC_PRIORITY,
+    "pixel_auroc",
+    "image_auroc",
+    "image_ap",
+    "image_recall",
+    "false_negatives",
+    "false_positive_count",
+    "good_alert_count",
+    "good_red_count",
+    "alert_count",
+    "red_count",
+    "orange_rate",
+    "alert_rate",
+    "red_rate",
+    "good_alert_rate",
+    "good_red_rate",
+    "latency_ms",
+}
 
 
 @dataclass
@@ -301,6 +321,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=14)
     parser.add_argument("--max-steps", type=int)
+    parser.add_argument("--gate-eval-profile", choices=["fast", "full"], default="fast")
     parser.add_argument("--lifecycle-interval", type=int, default=50)
     parser.add_argument("--max-cycles", type=int)
     parser.add_argument("--target-stage", default="test")
@@ -1043,6 +1064,24 @@ def build_progressive_cycle(
             result["promotion_status"] = comparison["promotion_status"]
             result["gate_decision"] = "rejected"
             result["gate_reason"] = comparison["gate_reason"]
+        record_lifecycle_event(
+            artifacts,
+            state,
+            active_runtime,
+            "gate_decision",
+            cycle_id=f"cycle_{cycle_number:03d}",
+            candidate_version=candidate_version,
+            gate_eval_profile=args.gate_eval_profile,
+            gate_decision=result.get("gate_decision"),
+            gate_reason=result.get("gate_reason"),
+            promotion_status=result.get("promotion_status"),
+            selected_metric=result.get("selected_metric"),
+            metric_delta=result.get("metric_delta"),
+            active_false_negatives=result.get("active_false_negatives"),
+            candidate_false_negatives=result.get("candidate_false_negatives"),
+            active_good_red_count=result.get("active_good_red_count"),
+            candidate_good_red_count=result.get("candidate_good_red_count"),
+        )
         if args.publish_minio and result["candidate_checkpoint"] and result["promotion_status"] == "promoted":
             upload_checkpoint_to_s3(
                 str(result["candidate_checkpoint"]),
@@ -1138,7 +1177,17 @@ def evaluate_model_pair_on_panel(
     gt_masks_manifest: Path,
 ) -> dict[str, Any]:
     started_at = datetime.now(UTC)
-    cache_root = cycle_dir.parents[1] / "metric_cache"
+    cache_root = DEFAULT_METRIC_CACHE_ROOT
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "active_eval_start",
+        cycle_id=cycle_dir.name,
+        panel=panel_name,
+        gate_eval_profile=args.gate_eval_profile,
+        model_version=active_model_version,
+    )
     active = evaluate_reference_model_on_set(
         args,
         model_version=active_model_version,
@@ -1150,6 +1199,27 @@ def evaluate_model_pair_on_panel(
         gt_masks_manifest=gt_masks_manifest,
         cache_enabled=True,
     )
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "active_eval_cache_hit" if active.get("cache_hit") else "active_eval_cache_miss",
+        cycle_id=cycle_dir.name,
+        panel=panel_name,
+        gate_eval_profile=args.gate_eval_profile,
+        cache_status=active.get("cache_status"),
+        cache_key=active.get("cache_key"),
+    )
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "candidate_eval_start",
+        cycle_id=cycle_dir.name,
+        panel=panel_name,
+        gate_eval_profile=args.gate_eval_profile,
+        model_version=candidate_version,
+    )
     candidate = evaluate_reference_model_on_set(
         args,
         model_version=candidate_version,
@@ -1159,7 +1229,7 @@ def evaluate_model_pair_on_panel(
         evaluation_set_id=evaluation_set_id,
         cache_root=cache_root,
         gt_masks_manifest=gt_masks_manifest,
-        cache_enabled=False,
+        cache_enabled=True,
     )
     active_calibrated_thresholds = thresholds_from_evaluation_scores(
         active["metrics_path"],
@@ -1174,6 +1244,17 @@ def evaluate_model_pair_on_panel(
     if active.get("cache_status") == "miss":
         store_metric_cache(cache_root, str(active.get("cache_key")), cycle_dir / "evaluation" / panel_name / "active_before")
         active["cache_status"] = "miss_stored"
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "active_eval_done",
+        cycle_id=cycle_dir.name,
+        panel=panel_name,
+        gate_eval_profile=args.gate_eval_profile,
+        cache_status=active.get("cache_status"),
+        image_count=active.get("image_count"),
+    )
     candidate_decision_thresholds = thresholds_from_evaluation_scores(
         candidate["metrics_path"],
         evaluation_set_id=evaluation_set_id,
@@ -1183,6 +1264,20 @@ def evaluate_model_pair_on_panel(
     candidate = apply_decision_thresholds_to_evaluation(
         candidate,
         decision_thresholds=candidate_decision_thresholds,
+    )
+    if candidate.get("cache_status") == "miss":
+        store_metric_cache(cache_root, str(candidate.get("cache_key")), cycle_dir / "evaluation" / panel_name / "candidate")
+        candidate["cache_status"] = "miss_stored"
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "candidate_eval_done",
+        cycle_id=cycle_dir.name,
+        panel=panel_name,
+        gate_eval_profile=args.gate_eval_profile,
+        cache_status=candidate.get("cache_status"),
+        image_count=candidate.get("image_count"),
     )
     completed_at = datetime.now(UTC)
     duration = (completed_at - started_at).total_seconds()
@@ -1196,6 +1291,9 @@ def evaluate_model_pair_on_panel(
                 panel=panel_name,
                 role=role,
                 cache_status=payload.get("cache_status"),
+                gate_eval_profile=args.gate_eval_profile,
+                image_count=payload.get("image_count"),
+                metric_timings=payload.get("metric_timings") or {},
             )
         metric_timings = payload.get("metric_timings") or {}
         if metric_timings.get("aupimo_compute_seconds") is not None:
@@ -1207,6 +1305,9 @@ def evaluate_model_pair_on_panel(
                 panel=panel_name,
                 role=role,
                 cache_status=payload.get("cache_status"),
+                gate_eval_profile=args.gate_eval_profile,
+                image_count=payload.get("image_count"),
+                metric_timings=metric_timings,
             )
         if metric_timings.get("pixel_rank_metrics_seconds") is not None:
             record_timing(
@@ -1217,6 +1318,9 @@ def evaluate_model_pair_on_panel(
                 panel=panel_name,
                 role=role,
                 cache_status=payload.get("cache_status"),
+                gate_eval_profile=args.gate_eval_profile,
+                image_count=payload.get("image_count"),
+                metric_timings=metric_timings,
             )
     record_timing(
         artifacts,
@@ -1224,8 +1328,11 @@ def evaluate_model_pair_on_panel(
         duration_seconds=duration,
         cycle_id=cycle_dir.name,
         panel=panel_name,
+        gate_eval_profile=args.gate_eval_profile,
         active_cache_status=active.get("cache_status"),
         candidate_cache_status=candidate.get("cache_status"),
+        active_image_count=active.get("image_count"),
+        candidate_image_count=candidate.get("image_count"),
         active_metric_timings=active.get("metric_timings"),
         candidate_metric_timings=candidate.get("metric_timings"),
     )
@@ -1241,6 +1348,18 @@ def evaluate_model_pair_on_panel(
         duration_seconds=duration,
     )
     selected_metric = select_comparable_business_metric(active["metrics"], candidate["metrics"])
+    record_lifecycle_event(
+        artifacts,
+        state,
+        active_runtime,
+        "gate_metrics_computed",
+        cycle_id=cycle_dir.name,
+        panel=panel_name,
+        gate_eval_profile=args.gate_eval_profile,
+        selected_metric=selected_metric,
+        active_cache_status=active.get("cache_status"),
+        candidate_cache_status=candidate.get("cache_status"),
+    )
     if selected_metric is None:
         return {
             "panel": panel_name,
@@ -1255,6 +1374,7 @@ def evaluate_model_pair_on_panel(
             "gate_decision": "rejected",
             "gate_reason": "rejected_missing_comparable_metric",
             "promotion_status": "rejected_missing_comparable_metric",
+            "gate_eval_profile": args.gate_eval_profile,
             "active_eval_metrics_path": active["metrics_path"],
             "candidate_eval_metrics_path": candidate["metrics_path"],
             "active_cache_status": active.get("cache_status"),
@@ -1409,6 +1529,7 @@ def evaluate_reference_promotion_comparison(
         "max_good_red_regression": int(args.max_good_red_regression),
         "good_red_ok": good_red_ok,
         "thresholds_ok": thresholds_ok,
+        "gate_eval_profile": args.gate_eval_profile,
     }
 
     missing_comparable_metric = reference.get("selected_metric") is None
@@ -1460,6 +1581,7 @@ def evaluate_reference_promotion_comparison(
         "promotion_panel_decision": mvp_gate,
         "simplified_gate": mvp_gate,
         "mvp_gate": mvp_gate,
+        "gate_eval_profile": args.gate_eval_profile,
         "active_decision_thresholds": active_thresholds,
         "active_eval_metrics_path": reference.get("active_eval_metrics_path"),
         "candidate_eval_metrics_path": reference.get("candidate_eval_metrics_path"),
@@ -1515,6 +1637,10 @@ def evaluate_reference_model_on_set(
         checkpoint_path=checkpoint_path,
         evaluation_set_path=evaluation_set_path,
         evaluation_set_id=evaluation_set_id,
+        gt_masks_manifest=gt_masks_manifest or args.reference_gt_masks_manifest,
+        gate_eval_profile=args.gate_eval_profile,
+        threshold_orange=0.02,
+        threshold_red=0.05,
     )
     cached = load_metric_cache(cache_root, cache_key, output_dir) if cache_enabled else None
     if cached is not None:
@@ -1546,22 +1672,16 @@ def evaluate_reference_model_on_set(
             topk_fraction=CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
             threshold_orange=0.02,
             threshold_red=0.05,
+            metric_profile=args.gate_eval_profile,
         )
     )
     params = json.loads((output_dir / "params.json").read_text(encoding="utf-8")) if (output_dir / "params.json").is_file() else {}
     metrics = {
         metric: float(value)
         for metric, value in (result.get("metrics") or {}).items()
-        if value is not None
-        and metric
-        in {
-            *FEATURE_AE_BUSINESS_METRIC_PRIORITY,
-            "pixel_auroc",
-            "image_recall",
-            "false_negatives",
-            "orange_rate",
-        }
+        if value is not None and metric in GATE_METRICS_TO_KEEP
     }
+    image_count = len(result.get("images") or [])
     payload = {
         "model_version": model_version,
         "checkpoint_path": str(checkpoint_path),
@@ -1570,6 +1690,8 @@ def evaluate_reference_model_on_set(
         "params_path": str(output_dir / "params.json"),
         "metric_timings": result.get("metric_timings") or {},
         "eval_inference_seconds": params.get("duration_seconds"),
+        "gate_eval_profile": args.gate_eval_profile,
+        "image_count": image_count,
         "cache_status": "miss" if cache_enabled else "not_cached",
         "cache_hit": False,
         "cache_key": cache_key,
@@ -1584,16 +1706,26 @@ def metric_cache_key(
     checkpoint_path: Path,
     evaluation_set_path: Path,
     evaluation_set_id: str,
+    gt_masks_manifest: Path | None,
+    gate_eval_profile: str,
+    threshold_orange: float,
+    threshold_red: float,
 ) -> str:
     payload = {
         "model_version": model_version,
         "checkpoint_sha256": sha256_file(checkpoint_path),
+        "evaluation_set_path": str(evaluation_set_path),
         "evaluation_set_id": evaluation_set_id,
         "evaluation_set_sha256": sha256_file(evaluation_set_path),
+        "gt_masks_manifest_path": str(gt_masks_manifest) if gt_masks_manifest else "",
+        "gt_masks_manifest_sha256": sha256_file(gt_masks_manifest) if gt_masks_manifest and gt_masks_manifest.is_file() else "",
         "score_contract_version": CANONICAL_FEATURE_AE_PREPROCESSING.version,
         "score_image": CANONICAL_FEATURE_AE_PREPROCESSING.score_image,
         "topk_fraction": CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
         "roi_threshold": CANONICAL_FEATURE_AE_PREPROCESSING.roi_threshold,
+        "threshold_orange": float(threshold_orange),
+        "threshold_red": float(threshold_red),
+        "gate_eval_profile": gate_eval_profile,
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -1617,22 +1749,17 @@ def load_metric_cache(cache_root: Path, cache_key: str, output_dir: Path) -> dic
     metrics = {
         metric: float(value)
         for metric, value in (payload.get("metrics") or {}).items()
-        if value is not None
-        and metric
-        in {
-            *FEATURE_AE_BUSINESS_METRIC_PRIORITY,
-            "pixel_auroc",
-            "image_recall",
-            "false_negatives",
-            "orange_rate",
-        }
+        if value is not None and metric in GATE_METRICS_TO_KEEP
     }
+    image_count = len(payload.get("images") or [])
     return {
         "metrics": metrics,
         "metrics_path": str(output_dir / "metrics.json"),
         "params_path": str(output_dir / "params.json"),
         "metric_timings": payload.get("metric_timings") or {},
         "eval_inference_seconds": params.get("duration_seconds"),
+        "gate_eval_profile": params.get("metric_profile"),
+        "image_count": image_count,
     }
 
 
@@ -1852,7 +1979,7 @@ def tag_mlflow_promotion_evidence(cycle: dict[str, Any]) -> None:
         import mlflow
 
         client = mlflow.tracking.MlflowClient()
-        for key in [
+        tag_keys = [
             "promotion_policy",
             "active_model_before",
             "candidate_version",
@@ -1872,10 +1999,33 @@ def tag_mlflow_promotion_evidence(cycle: dict[str, Any]) -> None:
             "threshold_source",
             "active_false_negatives",
             "candidate_false_negatives",
-        ]:
+            "active_good_red_count",
+            "candidate_good_red_count",
+            "good_red_delta",
+            "fn_delta",
+            "registered_model_version",
+            "registry_alias",
+        ]
+        version_name = str(cycle.get("registered_model_name") or "")
+        version_number = str(cycle.get("registered_model_version") or "")
+        for key in tag_keys:
             value = cycle.get(key)
             if value is not None:
-                client.set_tag(run_id, key, str(value))
+                tag_value = str(value)
+                client.set_tag(run_id, key, tag_value)
+                if version_name and version_number:
+                    client.set_model_version_tag(version_name, version_number, key, tag_value)
+        if version_name and version_number:
+            description = (
+                f"{cycle.get('candidate_version', version_name)}: "
+                f"gate={cycle.get('gate_decision')} "
+                f"promotion={cycle.get('promotion_status')} "
+                f"metric={cycle.get('selected_metric')} "
+                f"delta={cycle.get('metric_delta')} "
+                f"fn={cycle.get('candidate_false_negatives')} "
+                f"good_red={cycle.get('candidate_good_red_count')}"
+            )
+            client.update_model_version(version_name, version_number, description=description)
     except Exception:
         return
 
@@ -2230,6 +2380,7 @@ def train_progressive_candidate(
         metric_eval_calibrate_normal=False,
         metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
         metric_eval_apply_score_region_to_map=True,
+        metric_eval_profile=args.gate_eval_profile,
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
@@ -2274,6 +2425,7 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         metric_eval_calibrate_normal=False,
         metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
         metric_eval_apply_score_region_to_map=True,
+        metric_eval_profile=args.gate_eval_profile,
         require_business_metric_for_early_stopping=True,
     )
     return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
