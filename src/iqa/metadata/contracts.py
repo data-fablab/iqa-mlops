@@ -171,6 +171,17 @@ MANIFEST_CONTRACTS: dict[str, MetadataManifestContract] = {
         validation_id="validation_set_replay_representative_v001",
         scenario_version="feature_ae_mvp_v001",
     ),
+    "validation_gate_set": MetadataManifestContract(
+        key="validation_gate_set",
+        path=Path("data/validation/validation_set_replay_gate_v001.csv"),
+        kind="validation",
+        manifest_id="validation_set_replay_gate_v001",
+        dataset_version="validation_set_replay_gate_v001",
+        historical_columns=VALIDATION_COLUMNS,
+        identity_column="event_id",
+        validation_id="validation_set_replay_gate_v001",
+        scenario_version="feature_ae_mvp_v001",
+    ),
     "calibration_set": MetadataManifestContract(
         key="calibration_set",
         path=Path("data/validation/calibration_good_reference_v001.csv"),

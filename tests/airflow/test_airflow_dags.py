@@ -266,6 +266,7 @@ def test_lifecycle_trigger_dag_collects_durable_signals_and_triggers_lifecycle()
     assert '"require_mlflow_registry": "{{ params.require_mlflow_registry }}"' in trigger
     assert '"mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}"' in trigger
     assert '"ml_image": "{{ params.ml_image }}"' in trigger
+    assert '"reference_eval_manifest": "data/validation/validation_set_replay_gate_v001.csv"' in trigger
     assert "iqa-run-lifecycle-decision" not in trigger
     assert "BashOperator(" not in trigger
     assert "bash_command" not in trigger
