@@ -52,6 +52,8 @@ def test_iqa_lifecycle_dag_source_declares_application_lifecycle_task() -> None:
         "--mode",
         "progressive-train",
         "--max-cycles",
+        "--max-steps",
+        "--gate-eval-profile",
         "--lifecycle-interval",
         "--promotion-min-delta",
         "--publish-minio",
@@ -157,10 +159,16 @@ def test_lifecycle_dag_declares_comparative_promotion_params() -> None:
     source = _read_dag_source("iqa_lifecycle.py")
 
     assert '"promotion_min_delta": 0.0' in source
+    assert '"gate_eval_profile": "fast"' in source
+    assert '"max_steps": None' in source
     assert '"require_mlflow_registry": False' in source
     assert '"mlflow_tracking_uri": "http://mlflow:5000"' in source
     assert '"MLFLOW_TRACKING_URI": "{{ params.mlflow_tracking_uri }}"' in source
     assert "--promotion-min-delta" in source
+    assert "--gate-eval-profile" in source
+    assert "--reference-eval-manifest" in source
+    assert "--reference-gt-masks-manifest" in source
+    assert "--max-steps" in source
     assert "--require-mlflow-registry" in source
 
 

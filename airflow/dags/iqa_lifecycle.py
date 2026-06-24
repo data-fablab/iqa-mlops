@@ -28,8 +28,10 @@ def _define() -> None:
             "--mode {{ params.mode }} "
             "--max-events {{ params.max_events }} "
             "--lifecycle-interval {{ params.lifecycle_interval }} "
-            "--max-cycles {{ params.max_cycles }} "
+            "{% if params.max_cycles not in [none, 'None', 'none', 'null', ''] %}--max-cycles {{ params.max_cycles }} {% endif %}"
             "--epochs {{ params.epochs }} "
+            "{% if params.max_steps not in [none, 'None', 'none', 'null', ''] %}--max-steps {{ params.max_steps }} {% endif %}"
+            "--gate-eval-profile {{ params.gate_eval_profile }} "
             "--target-stage {{ params.target_stage }} "
             "--promotion-min-delta {{ params.promotion_min_delta }} "
             "--anchor-good-manifest {{ params.anchor_good_manifest }} "
@@ -70,6 +72,8 @@ dag = build_container_dag(
         "lifecycle_interval": 50,
         "max_cycles": 3,
         "epochs": 10,
+        "max_steps": None,
+        "gate_eval_profile": "fast",
         "target_stage": "test",
         "promotion_min_delta": 0.0,
         "anchor_good_manifest": "data/model_datasets/feature_ae_good_mvp_v001.csv",
