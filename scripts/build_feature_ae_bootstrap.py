@@ -29,7 +29,7 @@ from iqa.training.feature_ae_evaluation import parse_layer_loss_weights
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=Path("data/metadata/feature_ae_bootstrap_events.csv"))
-    parser.add_argument("--validation-manifest", type=Path, default=Path("data/validation/validation_set_v001.csv"))
+    parser.add_argument("--validation-manifest", type=Path, default=Path("data/validation/validation_set_replay_representative_v001.csv"))
     parser.add_argument("--gt-masks-manifest", type=Path)
     parser.add_argument("--image-root", type=Path)
     parser.add_argument("--run-dir", type=Path, default=Path(".cache/iqa/models/rd_feature_ae_gated_v001_bootstrap/bootstrap_run"))
@@ -85,7 +85,7 @@ def main() -> None:
         reference,
         artifact_uri=args.artifact_uri,
         dataset_version="feature_ae_good_v001_bootstrap",
-        validation_set_id="validation_set_v001",
+        validation_set_id="validation_set_replay_representative_v001",
         roi_model_version=args.roi_model_version,
     )
     print(
@@ -164,7 +164,7 @@ def _train_bootstrap(args: argparse.Namespace) -> dict[str, object]:
             metric_eval_manifest_path=args.validation_manifest,
             metric_eval_roi_predictions_dirs=(args.roi_output_dir,),
             gt_masks_manifest=args.gt_masks_manifest,
-            validation_set_id="validation_set_v001",
+            validation_set_id="validation_set_replay_representative_v001",
             metric_eval_every_epochs=args.metric_eval_every_epochs,
             metric_eval_start_epoch=args.metric_eval_start_epoch,
             metric_eval_batch_size=args.metric_eval_batch_size,
@@ -190,4 +190,3 @@ def _train_bootstrap(args: argparse.Namespace) -> dict[str, object]:
 
 if __name__ == "__main__":
     main()
-

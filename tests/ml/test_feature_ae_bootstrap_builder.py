@@ -100,7 +100,7 @@ def test_materialize_and_update_bootstrap_manifest(tmp_path: Path) -> None:
     assert payload["selected_metric_value"] == 0.7
     assert payload["selected_epoch"] == 3
     assert payload["dataset_version"] == "feature_ae_good_v001_bootstrap"
-    assert payload["validation_set_id"] == "validation_set_v001"
+    assert payload["validation_set_id"] == "validation_set_replay_representative_v001"
     assert payload["preprocessing_contract_version"] == FEATURE_AE_PREPROCESSING_CONTRACT_VERSION
     assert payload["preprocessing_contract"]["image_size"] == 384
 

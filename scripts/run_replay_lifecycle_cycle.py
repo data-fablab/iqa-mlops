@@ -56,25 +56,23 @@ from iqa.registry.mlflow_registry import register_logged_feature_ae_model
 NATURAL_SCENARIO_ID = "production_replay_natural"
 DRIFT_SCENARIO_ID = "drift_domain_extension"
 REPLAY_PLANS = {
-    NATURAL_SCENARIO_ID: Path("data/metadata/casting_flux_replay_plan_natural.csv"),
+    NATURAL_SCENARIO_ID: Path("data/metadata/casting_flux_replay_plan_natural_v003.csv"),
     DRIFT_SCENARIO_ID: Path("data/metadata/casting_flux_replay_plan_drift.csv"),
 }
 CANDIDATE_DATASETS = {
-    NATURAL_SCENARIO_ID: "feature_ae_good_v002",
-    DRIFT_SCENARIO_ID: "feature_ae_good_v003",
+    NATURAL_SCENARIO_ID: "feature_ae_good_mvp_v001",
+    DRIFT_SCENARIO_ID: "feature_ae_good_mvp_v001",
 }
-VALIDATION_MANIFEST = Path("data/validation/validation_set_v001.csv")
+VALIDATION_MANIFEST = Path("data/validation/validation_set_replay_representative_v001.csv")
 VALIDATION_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
-DEFAULT_ANCHOR_GOOD_MANIFEST = Path("data/model_datasets/feature_ae_good_v002.csv")
+DEFAULT_ANCHOR_GOOD_MANIFEST = Path("data/model_datasets/feature_ae_good_mvp_v001.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/replay_lifecycle")
 Mode = Literal[
     "decision-only", "train-on-trigger", "progressive-decision", "progressive-train"
 ]
 PROGRESSIVE_MODES = {"progressive-decision", "progressive-train"}
 ACTIVE_REPLAY_SCENARIOS = Path("data/metadata/replay_scenarios.csv")
-PROGRESSIVE_PROMOTION_POLICY = (
-    "candidate_must_pass_reference_guardrail_and_progressive_factory_panel"
-)
+PROGRESSIVE_PROMOTION_POLICY = "candidate_must_improve_representative_validation_without_operational_regression"
 _LEGACY_REGISTER_RUN_TO_MODEL = register_run_to_model
 
 

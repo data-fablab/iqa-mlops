@@ -22,7 +22,7 @@ from iqa.models.artifacts import (
 )
 from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING
 
-DEFAULT_CALIBRATION_MANIFEST = Path("data/metadata/calibration_set_v001.csv")
+DEFAULT_CALIBRATION_MANIFEST = Path("data/validation/calibration_good_reference_v001.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/calibration")
 
 

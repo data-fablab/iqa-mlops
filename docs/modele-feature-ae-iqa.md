@@ -283,7 +283,7 @@ Commande serveur :
 uv run --extra cu128 iqa-calibrate-feature-ae-reference \
   --model-version rd_feature_ae_gated_v001_bootstrap \
   --image-root /opt/iqa/iqa-mlops/data/raw/hss-iad \
-  --validation-manifest data/validation/validation_set_v001.csv \
+  --validation-manifest data/validation/validation_set_replay_representative_v001.csv \
   --gt-masks-manifest data/validation/validation_gt_masks_v001.csv \
   --roi-mode soft_map \
   --layer-weights layer2=0.65 layer3=0.35 \
@@ -293,7 +293,7 @@ uv run --extra cu128 iqa-calibrate-feature-ae-reference \
 ```
 
 La commande restaure le Feature-AE depuis MinIO, score les images avec le
-contrat reference, materialise `predictions.npz`, `calibration_matrix.csv` et
+contrat reference, materialise `calibration_matrix.csv` et
 `calibration_summary.json`, puis ecrit les seuils dans le manifest modele :
 
 ```text
@@ -420,5 +420,4 @@ Hors perimetre MVP :
 - retour humain reel obligatoire.
 
 Le retour humain Sophie reste une vitrine. Le workflow operationnel MVP est automatise par l'oracle GT apres prediction.
-
 

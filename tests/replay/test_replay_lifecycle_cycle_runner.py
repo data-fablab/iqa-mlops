@@ -55,7 +55,6 @@ def _args(tmp_path: Path, *, scenario_id: str, mode: str = "decision-only", max_
         anchor_good_max_per_class=2,
         reference_eval_manifest=reference_eval,
         reference_gt_masks_manifest=reference_gt_masks,
-        progressive_min_defects_for_decision=5,
         max_good_red_regression=1,
         candidate_init_policy="fresh",
     )
@@ -169,7 +168,7 @@ def _mock_runtime(monkeypatch) -> list[argparse.Namespace]:
             "metrics_path": str(output_dir / "metrics.json"),
         }
 
-    monkeypatch.setattr(runner, "evaluate_progressive_model_on_set", fake_evaluate_progressive_model)
+    monkeypatch.setattr(runner, "evaluate_reference_model_on_set", fake_evaluate_progressive_model)
     monkeypatch.setattr(
         runner,
         "register_run_to_model",
@@ -298,7 +297,7 @@ def test_decision_only_triggers_natural_without_training(tmp_path: Path, monkeyp
 
     assert summary["trigger_lifecycle"] is True
     assert summary["trigger_reason"] == "natural_50_oracle_conformes"
-    assert summary["candidate_dataset_version"] == "feature_ae_good_v002"
+    assert summary["candidate_dataset_version"] == "feature_ae_good_mvp_v001"
     assert summary["status"] == "validated"
     assert train_calls == []
     lots = (Path(summary["output_dir"]) / "lots.jsonl").read_text(encoding="utf-8").splitlines()
@@ -325,9 +324,9 @@ def test_train_on_trigger_trains_candidate_once(tmp_path: Path, monkeypatch) -> 
 
     assert summary["status"] == "trained"
     assert summary["mlflow_run_id"] == "mlflow-run-001"
-    assert summary["candidate_checkpoint"].endswith("feature_ae_good_v002\\checkpoint.pt") or summary["candidate_checkpoint"].endswith("feature_ae_good_v002/checkpoint.pt")
+    assert summary["candidate_checkpoint"].endswith("feature_ae_good_mvp_v001\\checkpoint.pt") or summary["candidate_checkpoint"].endswith("feature_ae_good_mvp_v001/checkpoint.pt")
     assert len(train_calls) == 1
-    assert train_calls[0].dataset_version == "feature_ae_good_v002"
+    assert train_calls[0].dataset_version == "feature_ae_good_mvp_v001"
 
 
 def test_progressive_decision_records_multiple_cycles(tmp_path: Path, monkeypatch) -> None:
@@ -415,7 +414,7 @@ def test_progressive_train_activates_promoted_model_for_following_events(tmp_pat
     events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
     first_next_lot_event = events[50]
     assert first_next_lot_event["active_model_version"] == "rd_feature_ae_gated_natural_cycle_001"
-    assert first_next_lot_event["threshold_source"].startswith("panel_good_quantiles:reference_eval_v001")
+    assert first_next_lot_event["threshold_source"].startswith("panel_good_quantiles:reference_eval")
     assert first_next_lot_event["threshold_orange"] != 0.42
 
     cycles_path = run_dir / "cycles.jsonl"
@@ -449,7 +448,7 @@ def test_progressive_train_rejects_candidate_without_business_metrics(tmp_path: 
     monkeypatch.setattr(runner, "train_feature_ae_with_mlflow_logging", fake_train_without_metrics)
     monkeypatch.setattr(
         runner,
-        "evaluate_progressive_model_on_set",
+        "evaluate_reference_model_on_set",
         lambda *args, **kwargs: {
             "metrics": {},
             "metrics_path": str(kwargs["output_dir"] / "metrics.json"),
@@ -481,7 +480,7 @@ def test_progressive_train_rejects_candidate_that_does_not_improve_active_on_sam
     _mock_runtime(monkeypatch)
     monkeypatch.setattr(
         runner,
-        "evaluate_progressive_model_on_set",
+        "evaluate_reference_model_on_set",
         lambda args, model_version, checkpoint_path, evaluation_set_path, output_dir, **kwargs: {
             "model_version": model_version,
             "checkpoint_path": str(checkpoint_path),
@@ -546,18 +545,17 @@ def test_progressive_train_promotes_reference_win_despite_progressive_metric_reg
             "metrics_path": str(output_dir / "metrics.json"),
         }
 
-    monkeypatch.setattr(runner, "evaluate_progressive_model_on_set", fake_evaluate)
+    monkeypatch.setattr(runner, "evaluate_reference_model_on_set", fake_evaluate)
     args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
     args.max_cycles = 1
-    args.progressive_min_defects_for_decision = 0
 
     summary = runner.run_cycle(args)
 
     cycle = json.loads((Path(summary["output_dir"]) / "cycles.jsonl").read_text(encoding="utf-8"))
     assert cycle["reference_metric_delta"] > 0
-    assert cycle["progressive_metric_delta"] < 0
+    assert "progressive_metric_delta" not in cycle
     assert cycle["gate_decision"] == "passed"
-    assert cycle["gate_reason"] == "candidate_passed_reference_gate"
+    assert cycle["gate_reason"] == "candidate_passed_representative_validation_gate"
     assert cycle["promotion_status"] == "promoted"
     assert summary["promotion_chain"] == [
         runner.DEFAULT_FEATURE_AE_MODEL_VERSION,
@@ -601,7 +599,7 @@ def test_progressive_train_blocks_promotion_when_false_negatives_increase(tmp_pa
             "metrics_path": str(output_dir / "metrics.json"),
         }
 
-    monkeypatch.setattr(runner, "evaluate_progressive_model_on_set", fake_evaluate)
+    monkeypatch.setattr(runner, "evaluate_reference_model_on_set", fake_evaluate)
     args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID, mode="progressive-train")
     args.max_cycles = 1
 
@@ -650,7 +648,7 @@ def test_progressive_train_blocks_candidate_that_increases_good_red_count(tmp_pa
             "metrics_path": str(output_dir / "metrics.json"),
         }
 
-    monkeypatch.setattr(runner, "evaluate_progressive_model_on_set", fake_evaluate)
+    monkeypatch.setattr(runner, "evaluate_reference_model_on_set", fake_evaluate)
     monkeypatch.setattr(
         runner,
         "thresholds_from_evaluation_scores",
@@ -750,7 +748,7 @@ def test_drift_cycle_triggers_on_confirmed_drift(tmp_path: Path, monkeypatch) ->
 
     assert summary["trigger_lifecycle"] is True
     assert summary["trigger_reason"] == "drift_confirmed"
-    assert summary["candidate_dataset_version"] == "feature_ae_good_v003"
+    assert summary["candidate_dataset_version"] == "feature_ae_good_mvp_v001"
 
 
 def test_runtime_thresholds_require_reference_calibration(monkeypatch) -> None:
@@ -763,30 +761,27 @@ def test_runtime_thresholds_require_reference_calibration(monkeypatch) -> None:
         runner.resolve_runtime_thresholds("missing_thresholds")
 
 
-def test_prediction_cache_roundtrip(tmp_path: Path) -> None:
-    cache_root = tmp_path / "prediction_cache"
+def test_metric_cache_roundtrip(tmp_path: Path) -> None:
+    cache_root = tmp_path / "metric_cache"
     output_dir = tmp_path / "cycle_eval"
     output_dir.mkdir()
     (output_dir / "metrics.json").write_text(
         json.dumps(
             {
                 "metrics": {"pixel_aupimo_1e-5_1e-3": 0.2, "pixel_ap": 0.1},
-                "per_class_metrics": {"Casting_class1": {"pixel_ap": 0.1}},
-                "aupimo_stability": {"aupimo_unstable": False},
             }
         ),
         encoding="utf-8",
     )
-    (output_dir / "predictions.npz").write_bytes(b"predictions")
     (output_dir / "params.json").write_text(
-        json.dumps({"prediction_schema_version": runner.PREDICTION_SCHEMA_VERSION}),
+        json.dumps({"duration_seconds": 1.2}),
         encoding="utf-8",
     )
 
-    runner.store_prediction_cache(cache_root, "abc123", output_dir)
-    loaded = runner.load_prediction_cache(cache_root, "abc123", tmp_path / "loaded_eval")
+    runner.store_metric_cache(cache_root, "abc123", output_dir)
+    loaded = runner.load_metric_cache(cache_root, "abc123", tmp_path / "loaded_eval")
 
     assert loaded is not None
     assert loaded["metrics"]["pixel_aupimo_1e-5_1e-3"] == 0.2
     assert (cache_root / "index.json").exists()
-    assert (tmp_path / "loaded_eval" / "predictions.npz").read_bytes() == b"predictions"
+    assert (tmp_path / "loaded_eval" / "metrics.json").exists()

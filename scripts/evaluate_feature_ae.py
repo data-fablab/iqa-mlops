@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--roi-predictions-dir", action="append", type=Path, default=[])
     parser.add_argument("--gt-masks-manifest", type=Path)
-    parser.add_argument("--validation-set-id", default="validation_set_v001")
+    parser.add_argument("--validation-set-id", default="validation_set_replay_representative_v001")
     parser.add_argument("--image-size", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.image_size)
     parser.add_argument("--context-size", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.context_size)
     parser.add_argument("--tile-stride", type=int, default=CANONICAL_FEATURE_AE_PREPROCESSING.tile_stride)

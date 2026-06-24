@@ -152,13 +152,13 @@ dag = build_container_dag(
     params={
         "scenario_id": "production_replay_natural",
         "drift_scenario_id": "drift_domain_extension",
-        "natural_candidate_dataset_version": "feature_ae_good_v002",
-        "drift_candidate_dataset_version": "feature_ae_good_v003",
+        "natural_candidate_dataset_version": "feature_ae_good_mvp_v001",
+        "drift_candidate_dataset_version": "feature_ae_good_mvp_v001",
         "natural_anchor_good_manifest": (
-            "data/model_datasets/feature_ae_good_v002.csv"
+            "data/model_datasets/feature_ae_good_mvp_v001.csv"
         ),
         "drift_anchor_good_manifest": (
-            "data/model_datasets/feature_ae_good_v003.csv"
+            "data/model_datasets/feature_ae_good_mvp_v001.csv"
         ),
         "roi_window_size": 100,
         "min_natural_conforming": 50,
@@ -170,7 +170,7 @@ dag = build_container_dag(
         "target_stage": "test",
         "promotion_min_delta": 0.0,
         "anchor_good_max_per_class": 256,
-        "reference_eval_manifest": "data/validation/validation_set_v001.csv",
+        "reference_eval_manifest": "data/validation/validation_set_replay_representative_v001.csv",
         "reference_gt_masks_manifest": (
             "data/validation/validation_gt_masks_v001.csv"
         ),

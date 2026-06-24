@@ -7,8 +7,8 @@ from dataclasses import asdict, dataclass
 NATURAL_REPLAY_SCENARIO_ID = "production_replay_natural"
 DRIFT_REPLAY_SCENARIO_ID = "drift_domain_extension"
 NATURAL_CONFORMING_VALIDATED_TRIGGER_COUNT = 50
-FEATURE_AE_V002_DATASET_VERSION = "feature_ae_good_v002"
-FEATURE_AE_V003_DATASET_VERSION = "feature_ae_good_v003"
+FEATURE_AE_V002_DATASET_VERSION = "feature_ae_good_mvp_v001"
+FEATURE_AE_V003_DATASET_VERSION = "feature_ae_good_mvp_v001"
 
 
 @dataclass(frozen=True)
