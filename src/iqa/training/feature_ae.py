@@ -242,15 +242,16 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
             checkpoint = periodic
 
         if _should_run_metric_eval(config, epoch):
+            metric_eval_manifest_path = config.metric_eval_manifest_path or config.manifest_path
             eval_result = evaluate_feature_ae_checkpoint(
                 FeatureAEEvaluationConfig(
                     checkpoint_path=checkpoint,
-                    manifest_path=config.metric_eval_manifest_path or config.manifest_path,
+                    manifest_path=metric_eval_manifest_path,
                     image_root=config.image_root,
                     output_dir=run_dir / "metric_eval" / f"epoch_{epoch:03d}",
                     roi_predictions_dirs=config.metric_eval_roi_predictions_dirs or config.roi_predictions_dirs,
                     gt_masks_manifest=config.gt_masks_manifest,
-                    validation_set_id=config.validation_set_id,
+                    validation_set_id=metric_eval_manifest_path.stem,
                     image_size=config.image_size,
                     context_size=config.context_size,
                     tile_stride=config.metric_eval_tile_stride or config.tile_stride,

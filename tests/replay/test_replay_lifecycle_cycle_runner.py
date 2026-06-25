@@ -378,7 +378,8 @@ def test_progressive_train_promotes_multiple_test_models(tmp_path: Path, monkeyp
     assert len(train_calls) == 2
     assert train_calls[0].candidate_version == "rd_feature_ae_gated_natural_cycle_001"
     assert train_calls[0].dataset_version == "feature_ae_natural_cycle_001"
-    assert train_calls[0].gt_masks_manifest == runner.VALIDATION_GT_MASKS_MANIFEST
+    assert train_calls[0].metric_eval_manifest_path == args.reference_eval_manifest
+    assert train_calls[0].gt_masks_manifest == args.reference_gt_masks_manifest
     snapshot = Path(train_calls[0].manifest_path)
     assert snapshot.exists()
     assert "oracle_gt_seen_lots" in snapshot.read_text(encoding="utf-8")
