@@ -6,10 +6,11 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from iqa.inference.contracts import InferenceRequest, placeholder_inference
+from iqa.inference.contracts import InferenceRequest, InferenceResult
+from iqa.inference.runtime import run_inference_pipeline
 from iqa.runtime import gpu_lock
 
 
@@ -17,14 +18,20 @@ def _demo_hold_enabled() -> bool:
     return os.environ.get("IQA_GPU_DEMO_HOLD", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _inference_device() -> str:
+    return os.environ.get("IQA_INFERENCE_DEVICE", "cpu").strip() or "cpu"
+
+
+def _run_real_inference(request: InferenceRequest) -> InferenceResult:
+    return run_inference_pipeline(
+        request,
+        device=_inference_device(),
+    ).result
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Hold the GPU lock for the whole demo when ``IQA_GPU_DEMO_HOLD`` is set.
-
-    This guarantees no ``iqa-trainer`` can grab the single GPU while the live
-    inference demo is running. Acquire is blocking: the demo waits for any
-    in-flight training run to release the GPU before serving.
-    """
+    """Hold the GPU lock for the whole demo when requested."""
 
     if _demo_hold_enabled():
         with gpu_lock(owner="iqa-inference-demo", blocking=True):
@@ -47,6 +54,10 @@ class InferenceServiceRequest(BaseModel):
     piece_event_id: str
     scenario_id: str = "production_replay_natural"
     image_uri: str
+    sha256: str | None = None
+    lot_id: str | None = None
+    source_class: str | None = None
+    dataset_version: str | None = None
 
 
 @app.get("/health")
@@ -70,14 +81,48 @@ def metrics() -> str:
 
 @app.post("/predict")
 def predict(request: InferenceServiceRequest) -> dict[str, str | float | None]:
-    result = placeholder_inference(
-        InferenceRequest(
-            piece_event_id=request.piece_event_id,
-            scenario_id=request.scenario_id,
-            image_uri=request.image_uri,
-        )
+    inference_request = InferenceRequest(
+        piece_event_id=request.piece_event_id,
+        scenario_id=request.scenario_id,
+        image_uri=request.image_uri,
+        sha256=request.sha256,
+        lot_id=request.lot_id,
+        source_class=request.source_class,
+        dataset_version=request.dataset_version,
     )
+
+    try:
+        result = _run_real_inference(inference_request)
+    except FileNotFoundError as error:
+        detail = str(error)
+        if detail.startswith("Input image not found"):
+            raise HTTPException(status_code=404, detail=detail) from error
+        raise HTTPException(
+            status_code=503,
+            detail=f"Inference unavailable: {detail}",
+        ) from error
+    except ValueError as error:
+        detail = str(error)
+        if "Input image checksum mismatch" in detail:
+            raise HTTPException(status_code=422, detail=detail) from error
+        raise HTTPException(
+            status_code=503,
+            detail=f"Inference unavailable: {detail}",
+        ) from error
+    except (ImportError, RuntimeError, OSError) as error:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Inference unavailable: {error}",
+        ) from error
+
     return result.to_dict()
 
 
-__all__ = ["InferenceServiceRequest", "app", "health", "lifespan", "metrics", "predict"]
+__all__ = [
+    "InferenceServiceRequest",
+    "app",
+    "health",
+    "lifespan",
+    "metrics",
+    "predict",
+]
