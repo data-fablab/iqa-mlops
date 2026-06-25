@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 NATURAL_REPLAY_SCENARIO_ID = "production_replay_natural"
+NATURAL_TRAIN_REPLAY_SCENARIO_ID = "production_replay_natural_train_v004"
+NATURAL_REPLAY_SCENARIO_IDS = frozenset(
+    {
+        NATURAL_REPLAY_SCENARIO_ID,
+        NATURAL_TRAIN_REPLAY_SCENARIO_ID,
+    }
+)
 DRIFT_REPLAY_SCENARIO_ID = "drift_domain_extension"
 NATURAL_CONFORMING_VALIDATED_TRIGGER_COUNT = 50
 FEATURE_AE_V002_DATASET_VERSION = "feature_ae_good_mvp_v001"
@@ -42,7 +49,7 @@ def evaluate_lifecycle_signal(
 ) -> LifecycleDecision:
     """Evaluate data-event lifecycle rules without launching training."""
 
-    if signal.scenario_id == NATURAL_REPLAY_SCENARIO_ID:
+    if signal.scenario_id in NATURAL_REPLAY_SCENARIO_IDS:
         count = signal.conforming_validated_count
         triggered = count >= int(min_natural_conforming)
         return LifecycleDecision(
@@ -91,6 +98,8 @@ __all__ = [
     "LifecycleSignal",
     "NATURAL_CONFORMING_VALIDATED_TRIGGER_COUNT",
     "NATURAL_REPLAY_SCENARIO_ID",
+    "NATURAL_REPLAY_SCENARIO_IDS",
+    "NATURAL_TRAIN_REPLAY_SCENARIO_ID",
     "evaluate_lifecycle_signal",
     "should_trigger_lifecycle",
 ]

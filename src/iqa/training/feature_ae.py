@@ -37,7 +37,11 @@ from iqa.training.feature_ae_contracts import (
 )
 
 
-REPLAY_SCENARIOS = {"production_replay_natural", "drift_domain_extension"}
+REPLAY_SCENARIOS = {
+    "production_replay_natural",
+    "production_replay_natural_train_v004",
+    "drift_domain_extension",
+}
 
 
 @dataclass(frozen=True)

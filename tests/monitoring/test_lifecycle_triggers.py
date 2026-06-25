@@ -38,6 +38,21 @@ def test_natural_replay_triggers_feature_ae_v002_at_50_oracle_conformes() -> Non
     assert should_trigger_lifecycle(signal)
 
 
+def test_natural_train_replay_triggers_feature_ae_at_50_oracle_conformes() -> None:
+    signal = LifecycleSignal(
+        scenario_id="production_replay_natural_train_v004",
+        conforming_validated_count=50,
+        drift_confirmed=False,
+    )
+
+    decision = evaluate_lifecycle_signal(signal)
+
+    assert decision.trigger_lifecycle
+    assert decision.trigger_reason == "natural_50_oracle_conformes"
+    assert decision.candidate_dataset_version == FEATURE_AE_V002_DATASET_VERSION
+    assert should_trigger_lifecycle(signal)
+
+
 def test_drift_replay_waits_for_confirmed_drift() -> None:
     signal = LifecycleSignal(
         scenario_id="drift_domain_extension",
