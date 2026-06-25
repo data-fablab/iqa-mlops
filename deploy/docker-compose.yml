@@ -230,6 +230,21 @@ services:
     command: ["--statsd.listen-udp=:9125", "--web.listen-address=:9102"]
     expose: ["9102", "9125"]
 
+  # Model-quality exporter (Issue 1 tracer bullet): reads the latest AUPIMO per
+  # (model_version, stage) from MLflow's iqa-model-quality experiment and exposes
+  # it as a Prometheus gauge. Runs via `python -m` against the mounted src so a
+  # rebuild is not required to pick up the new module.
+  model-quality-exporter:
+    image: iqa-ml:local
+    command: python -m iqa.monitoring.model_quality_exporter --port 9105
+    env_file: ../.env
+    environment:
+      MLFLOW_TRACKING_URI: ${IQA_MLFLOW_TRACKING_URI:-http://mlflow:5000}
+    ports: ["9105:9105"]
+    volumes:
+      - ../src:/app/src:ro
+    depends_on: [mlflow]
+
   mlflow:
     # Pinned by digest: ghcr publishes mlflow only under :latest, so we freeze
     # the exact manifest instead of a moving tag (run `docker manifest inspect`

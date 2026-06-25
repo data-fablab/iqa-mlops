@@ -8,7 +8,7 @@
   "timezone": "browser",
   "title": "IQA - Vue d'ensemble",
   "uid": "iqa-overview",
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "id": 1,
@@ -180,6 +180,30 @@
       "targets": [
         { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_invalid_feedback_total", "legendFormat": "feedback invalide" },
         { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_reload_refused_total", "legendFormat": "reload refuse" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Qualite modele - AUPIMO (prod / candidat)",
+      "description": "Derniere valeur AUPIMO par modele et stage, lue dans MLflow (iqa-model-quality) via l'exporter model-quality.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 3,
+          "min": 0,
+          "max": 1
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "iqa_model_pixel_aupimo",
+          "legendFormat": "{{stage}} - {{model_version}}"
+        }
       ]
     }
   ]

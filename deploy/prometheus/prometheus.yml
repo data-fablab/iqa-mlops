@@ -39,3 +39,9 @@ scrape_configs:
     metrics_path: /minio/v2/metrics/cluster
     static_configs:
       - targets: ["minio:9000"]
+
+  # Model-quality exporter (Issue 1): MLflow AUPIMO per model_version/stage.
+  - job_name: model-quality-exporter
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["model-quality-exporter:9105"]
