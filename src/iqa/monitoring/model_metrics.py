@@ -106,6 +106,81 @@ def log_model_quality_metrics(
         return run.info.run_id
 
 
+def fetch_latest_quality_metrics(
+    stage: str,
+    *,
+    tracking_uri: str | None = None,
+    experiment: str = MODEL_QUALITY_EXPERIMENT,
+    model_version: str | None = None,
+) -> dict[str, float]:
+    """Read the latest run's business metrics for a ``stage`` (e.g. ``"prod"``).
+
+    Queries the ``iqa-model-quality`` experiment for runs tagged with ``stage``
+    (and optionally ``model_version``), keeps the most recent by ``start_time``,
+    and returns its known business metrics. Returns ``{}`` when the experiment or a
+    matching run does not exist, so the candidate-vs-prod regression gate can treat
+    a missing prod baseline as "not evaluable" rather than crashing.
+    """
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(tracking_uri=tracking_uri)
+    found = client.get_experiment_by_name(experiment)
+    if found is None:
+        return {}
+
+    filters = [f"tags.{TAG_STAGE} = '{stage}'"]
+    if model_version:
+        filters.append(f"tags.{TAG_MODEL_VERSION} = '{model_version}'")
+    runs = client.search_runs(
+        [found.experiment_id],
+        filter_string=" and ".join(filters),
+        order_by=["attributes.start_time DESC"],
+        max_results=1,
+    )
+    if not runs:
+        return {}
+    metrics = getattr(runs[0].data, "metrics", None) or {}
+    return {
+        key: float(value)
+        for key, value in metrics.items()
+        if key in ALL_LOGGED_METRIC_KEYS
+    }
+
+
+def log_per_class_quality_metrics(
+    per_class_metrics: dict[str, dict[str, Any]],
+    *,
+    run_id: str,
+    tracking_uri: str | None = None,
+) -> dict[str, float]:
+    """Log per-source-class business metrics so incremental coverage is visible.
+
+    Flattens ``{source_class: {metric: value}}`` to ``{metric}__{source_class}``
+    metric names on the given run (the model-quality run created by
+    ``log_model_quality_metrics``). ``None`` values (e.g. pixel metrics without GT
+    masks for a class) are skipped. Returns the flat name->value map logged, so the
+    incremental coverage of class1/class2/class3 can be charted in Grafana.
+    """
+    import mlflow
+
+    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    logged: dict[str, float] = {}
+    for source_class in sorted(per_class_metrics):
+        class_metrics = per_class_metrics[source_class] or {}
+        for key in ALL_LOGGED_METRIC_KEYS:
+            value = class_metrics.get(key)
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            name = f"{key}__{source_class}"
+            client.log_metric(run_id, name, numeric)
+            logged[name] = numeric
+    return logged
+
+
 __all__ = [
     "ALL_LOGGED_METRIC_KEYS",
     "AUPIMO_KEY",
@@ -117,5 +192,7 @@ __all__ = [
     "TAG_MODEL_VERSION",
     "TAG_STAGE",
     "extract_model_quality_metrics",
+    "fetch_latest_quality_metrics",
     "log_model_quality_metrics",
+    "log_per_class_quality_metrics",
 ]

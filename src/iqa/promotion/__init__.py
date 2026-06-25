@@ -21,6 +21,7 @@ _SUBMODULE_BY_NAME = {
     "evaluate_ap_regression_gate": "gates",
     "evaluate_orange_rate_gate": "gates",
     "evaluate_latency_gate": "gates",
+    "evaluate_quality_regression_gates": "gates",
     "evaluate_promotion_gates": "gates",
     "evaluate_gates_for_promotion": "promotion",
     "transition_model_stage": "promotion",

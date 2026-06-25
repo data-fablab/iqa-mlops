@@ -6,6 +6,7 @@ Airflow context: context["params"] for DAG params, context["ti"].xcom_pull() for
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,12 @@ import yaml
 from iqa.datasets import build_candidate_dataset, iter_manifest_image_samples
 from iqa.inference.model_loader import ProdModelLoader
 from iqa.monitoring import LifecycleSignal, evaluate_lifecycle_signal
-from iqa.monitoring.model_metrics import log_model_quality_metrics
+from iqa.monitoring.model_metrics import (
+    extract_model_quality_metrics,
+    fetch_latest_quality_metrics,
+    log_model_quality_metrics,
+    log_per_class_quality_metrics,
+)
 from iqa.promotion import (
     evaluate_promotion_gates,
     promote_model_with_gates,
@@ -27,6 +33,8 @@ from iqa.training import evaluate_feature_ae_checkpoint
 from iqa.training.feature_ae import FeatureAETrainingConfig
 from iqa.training.feature_ae_evaluation import FeatureAEEvaluationConfig
 from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
+
+logger = logging.getLogger(__name__)
 
 
 def _get_git_commit() -> str:
@@ -62,6 +70,52 @@ def _xcom_pull(context: dict[str, Any], task_id: str) -> Any:
 
 def _skipped(reason: str, **extra: Any) -> dict[str, Any]:
     return {"status": "skipped", "reason": reason, **extra}
+
+
+def _prod_quality_baseline(params: dict[str, Any]) -> dict[str, float]:
+    """Read the current prod quality baseline; empty dict if unavailable.
+
+    A missing baseline must not crash the gate: the non-regression check simply
+    becomes non-evaluable (vacuous pass), which matches "no prod to regress against".
+    """
+    stage = params.get("prod_quality_stage", "prod")
+    model_version = params.get("prod_quality_model_version")
+    try:
+        return fetch_latest_quality_metrics(
+            stage,
+            tracking_uri=params.get("mlflow_tracking_uri"),
+            model_version=model_version,
+        )
+    except Exception as error:  # pragma: no cover - defensive (MLflow offline)
+        logger.warning("Could not fetch prod quality baseline: %s", error)
+        return {}
+
+
+def _log_gate_verdicts(gates_result: dict[str, Any]) -> None:
+    """Journal each gate verdict (and per-metric quality verdict) into the run log."""
+    for name, result in gates_result.get("gates", {}).items():
+        verdict = "PASS" if result.get("passed") else "FAIL"
+        logger.info("gate %s: %s", name, verdict)
+        if name != "quality_regression":
+            continue
+        quality = result.get("verdict", {})
+        for metric, detail in quality.get("metrics", {}).items():
+            logger.info(
+                "  quality %s: %s regression=%.4f max=%.4f candidate=%.4f prod=%.4f",
+                metric,
+                "PASS" if detail["passed"] else "FAIL",
+                detail["regression"],
+                detail["max_regression"],
+                detail["candidate"],
+                detail["prod"],
+            )
+        for skipped_metric in quality.get("skipped_metrics", []):
+            logger.info("  quality %s: SKIPPED (candidate or prod value absent)", skipped_metric)
+        logger.info(
+            "  quality decisive_metric=%s fallback_to_image_ap=%s",
+            quality.get("decisive_metric"),
+            quality.get("fallback_to_image_ap"),
+        )
 
 
 def task_lifecycle_decision(**context: Any) -> dict[str, Any]:
@@ -210,12 +264,27 @@ def task_eval(**context: Any) -> dict[str, Any]:
         or params.get("feature_ae_version", "")
     )
     stage = params.get("eval_stage", "candidate")
+    tracking_uri = params.get("mlflow_tracking_uri")
     model_quality_run_id = log_model_quality_metrics(
         metrics,
         model_version=model_version,
         stage=stage,
-        tracking_uri=params.get("mlflow_tracking_uri"),
+        tracking_uri=tracking_uri,
     )
+
+    # Per-class metrics (class1/class2/class3) make incremental drift coverage
+    # visible in Grafana; attach them to the same model-quality run (Issue 4).
+    per_class_metrics = result.get("per_class_metrics", {})
+    if per_class_metrics:
+        log_per_class_quality_metrics(
+            per_class_metrics,
+            run_id=model_quality_run_id,
+            tracking_uri=tracking_uri,
+        )
+
+    # The 4 business metrics drive the candidate-vs-prod non-regression gate; carry
+    # them forward so task_gates can compare against the prod baseline.
+    quality_metrics = extract_model_quality_metrics(metrics)
 
     return {
         "recall": metrics.get("image_recall", 0.0),
@@ -226,6 +295,8 @@ def task_eval(**context: Any) -> dict[str, Any]:
         "model_quality_run_id": model_quality_run_id,
         "model_version": model_version,
         "stage": stage,
+        "quality_metrics": quality_metrics,
+        "per_class_metrics": per_class_metrics,
     }
 
 
@@ -248,6 +319,11 @@ def task_gates(**context: Any) -> dict[str, Any]:
         return _skipped(eval_output["reason"], lifecycle_decision=eval_output.get("lifecycle_decision"))
     gates_config = _load_gates_config(params.get("gates_config_path"))
 
+    # When the candidate's 4 business metrics are available, gate on non-regression
+    # vs the prod baseline (ADR 0010 §6) instead of the legacy single-AP regression.
+    candidate_quality = eval_output.get("quality_metrics") or None
+    prod_quality = _prod_quality_baseline(params) if candidate_quality else None
+
     gates_result = evaluate_promotion_gates(
         candidate_recall=eval_output.get("recall", 0.0),
         candidate_ap=eval_output.get("ap", 0.0),
@@ -255,7 +331,11 @@ def task_gates(**context: Any) -> dict[str, Any]:
         candidate_latency_ms=eval_output.get("latency_ms", 0.0),
         prod_ap=eval_output.get("prod_ap"),
         gates_config=gates_config,
+        candidate_quality_metrics=candidate_quality,
+        prod_quality_metrics=prod_quality,
     )
+
+    _log_gate_verdicts(gates_result)
 
     if not gates_result["all_passed"]:
         raise Exception(
@@ -337,6 +417,11 @@ def task_promotion(**context: Any) -> dict[str, Any]:
         if not previous_prod["success"]:
             raise Exception(f"Could not save previous prod before promotion: {previous_prod.get('error')}")
 
+    # Re-evaluate the same 4-metric non-regression gate at promotion time so the
+    # MLflow transition only happens when the candidate does not regress vs prod.
+    candidate_quality = eval_output.get("quality_metrics") or None
+    prod_quality = _prod_quality_baseline(params) if candidate_quality else None
+
     result = promote_model_with_gates(
         registered_model_name=registered_model_name_str,
         version=version,
@@ -344,6 +429,8 @@ def task_promotion(**context: Any) -> dict[str, Any]:
         candidate_metrics=candidate_metrics,
         prod_metrics={"ap": eval_output["prod_ap"]} if "prod_ap" in eval_output else None,
         gates_config_path=params.get("gates_config_path"),
+        candidate_quality_metrics=candidate_quality,
+        prod_quality_metrics=prod_quality,
     )
 
     if not result["success"]:

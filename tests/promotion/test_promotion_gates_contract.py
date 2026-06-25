@@ -19,6 +19,15 @@ def test_defect_coverage_min_coverage_threshold_is_095() -> None:
     assert gates["defect_coverage"]["min_coverage"] == 0.95
 
 
+def test_quality_max_regression_covers_the_four_business_metrics() -> None:
+    gates = _load_gates()
+    quality = gates["feature_ae"]["quality_max_regression"]
+    for metric in ("pixel_aupimo_1e-5_1e-3", "pixel_ap", "image_ap", "image_auroc"):
+        assert metric in quality, f"seuil de regression manquant pour {metric}"
+        # Non-regression = max drop tolere, pas un seuil absolu bloquant.
+        assert 0.0 <= float(quality[metric]) < 1.0
+
+
 def test_roi_model_version_is_frozen_v001() -> None:
     gates = _load_gates()
     assert "roi" in gates, "section roi manquante"

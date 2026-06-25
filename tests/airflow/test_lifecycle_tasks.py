@@ -300,6 +300,51 @@ class TestEvalTask:
             assert result["model_version"] == "rd_feature_ae_gated_natural_cycle_001"
             assert result["stage"] == "candidate"
 
+    def test_eval_task_returns_quality_metrics_and_logs_per_class(self, tmp_path: Path) -> None:
+        """Eval forwards the 4 business metrics and logs per-class metrics (Issue 4)."""
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.return_value = {
+            "checkpoint": str(tmp_path / "checkpoint.pt"),
+            "run_id": "abc123",
+        }
+        context = {
+            "ti": mock_ti,
+            "params": {
+                "manifest_path": str(tmp_path / "val.csv"),
+                "image_root": str(tmp_path),
+                "candidate_version": "cand_v1",
+            },
+        }
+        eval_metrics = {
+            "pixel_aupimo_1e-5_1e-3": 0.42,
+            "pixel_ap": 0.61,
+            "image_ap": 0.87,
+            "image_auroc": 0.93,
+            "image_recall": 1.0,
+            "orange_rate": 0.05,
+            "latency_ms": 800.0,
+        }
+        per_class = {
+            "class1": {"image_ap": 0.95, "pixel_ap": 0.7},
+            "class2": {"image_ap": 0.80, "pixel_ap": 0.5},
+        }
+        with patch("iqa.dags.lifecycle_tasks.evaluate_feature_ae_checkpoint") as mock_eval, \
+             patch("iqa.dags.lifecycle_tasks.log_model_quality_metrics", return_value="q_run"), \
+             patch("iqa.dags.lifecycle_tasks.log_per_class_quality_metrics") as mock_per_class:
+            mock_eval.return_value = {
+                "metrics": eval_metrics,
+                "per_class_metrics": per_class,
+                "images": [],
+            }
+
+            result = task_eval(**context)
+
+            assert result["quality_metrics"]["pixel_aupimo_1e-5_1e-3"] == 0.42
+            assert result["quality_metrics"]["image_ap"] == 0.87
+            assert result["per_class_metrics"] == per_class
+            mock_per_class.assert_called_once()
+            assert mock_per_class.call_args.kwargs["run_id"] == "q_run"
+
     def test_eval_task_skips_when_train_skipped(self) -> None:
         """Eval task propagates a skip and does not log metrics when training was skipped."""
         mock_ti = MagicMock()
@@ -365,6 +410,59 @@ class TestGatesTask:
             )
 
             assert result["all_passed"] is True
+
+    def test_gates_task_runs_four_metric_regression_vs_prod_baseline(self) -> None:
+        """When candidate quality metrics exist, the gate fetches the prod baseline."""
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.return_value = {
+            "recall": 1.0, "ap": 0.87, "orange_rate": 0.05, "latency_ms": 800.0,
+            "quality_metrics": {
+                "pixel_aupimo_1e-5_1e-3": 0.42, "pixel_ap": 0.61,
+                "image_ap": 0.87, "image_auroc": 0.93,
+            },
+        }
+        prod_baseline = {
+            "pixel_aupimo_1e-5_1e-3": 0.40, "pixel_ap": 0.60,
+            "image_ap": 0.85, "image_auroc": 0.92,
+        }
+        with patch(
+            "iqa.dags.lifecycle_tasks.fetch_latest_quality_metrics",
+            return_value=prod_baseline,
+        ) as mock_fetch:
+            result = task_gates(
+                ti=mock_ti,
+                params={"gates_config_path": "configs/promotion_gates.yaml"},
+            )
+
+            mock_fetch.assert_called_once()
+            assert result["all_passed"] is True
+            quality = result["gates"]["quality_regression"]["verdict"]
+            assert quality["decisive_metric"] == "pixel_aupimo_1e-5_1e-3"
+            assert quality["all_passed"] is True
+
+    def test_gates_task_blocks_on_quality_regression_vs_prod(self) -> None:
+        """A candidate regressing past tolerance on the decisive metric is blocked."""
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.return_value = {
+            "recall": 1.0, "ap": 0.87, "orange_rate": 0.05, "latency_ms": 800.0,
+            "quality_metrics": {
+                "pixel_aupimo_1e-5_1e-3": 0.30,  # 0.10 drop vs prod 0.40
+                "pixel_ap": 0.61, "image_ap": 0.87, "image_auroc": 0.93,
+            },
+        }
+        prod_baseline = {
+            "pixel_aupimo_1e-5_1e-3": 0.40, "pixel_ap": 0.60,
+            "image_ap": 0.85, "image_auroc": 0.92,
+        }
+        with patch(
+            "iqa.dags.lifecycle_tasks.fetch_latest_quality_metrics",
+            return_value=prod_baseline,
+        ):
+            with pytest.raises(Exception, match="Gates failed"):
+                task_gates(
+                    ti=mock_ti,
+                    params={"gates_config_path": "configs/promotion_gates.yaml"},
+                )
 
 
 class TestMLflowTask:

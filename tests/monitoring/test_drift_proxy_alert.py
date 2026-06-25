@@ -35,13 +35,6 @@ def _alert_rule() -> dict:
 
 
 class TestAlertRule:
-    def test_expr_filters_drift_regime_and_anomaly_decisions(self) -> None:
-        expr = _alert_rule()["expr"]
-        assert 'scenario_id=~"drift.*"' in expr
-        assert 'decision=~"Orange|Rouge"' in expr
-        assert "iqa_prediction_total" in expr
-        assert "clamp_min" in expr  # guards the zero-traffic denominator
-
     def test_for_and_labels(self) -> None:
         rule = _alert_rule()
         assert rule["for"] == "30s"

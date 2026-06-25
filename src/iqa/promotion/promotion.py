@@ -15,6 +15,8 @@ def evaluate_gates_for_promotion(
     candidate_metrics: dict[str, float],
     gates_config: dict[str, Any],
     prod_metrics: dict[str, float] | None = None,
+    candidate_quality_metrics: dict[str, Any] | None = None,
+    prod_quality_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate promotion gates for a candidate model.
 
@@ -23,6 +25,9 @@ def evaluate_gates_for_promotion(
         candidate_metrics: Candidate model metrics (recall, ap, orange_rate, latency_ms)
         gates_config: Gate thresholds config
         prod_metrics: Production model metrics (optional, for AP regression check)
+        candidate_quality_metrics: Candidate's 4 business metrics (optional). With
+            ``prod_quality_metrics`` this enables the 4-metric non-regression gate.
+        prod_quality_metrics: Prod baseline's 4 business metrics (optional).
 
     Returns:
         Decision object with:
@@ -38,6 +43,8 @@ def evaluate_gates_for_promotion(
         candidate_latency_ms=candidate_metrics.get("latency_ms", 0.0),
         prod_ap=prod_metrics.get("ap") if prod_metrics else None,
         gates_config=gates_config,
+        candidate_quality_metrics=candidate_quality_metrics,
+        prod_quality_metrics=prod_quality_metrics,
     )
 
     blocked_reasons = [
@@ -179,6 +186,8 @@ def promote_model_with_gates(
     prod_metrics: dict[str, float] | None = None,
     gates_config_path: str | Path | None = None,
     tracking_uri: str | None = None,
+    candidate_quality_metrics: dict[str, Any] | None = None,
+    prod_quality_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Production workflow: evaluate gates, transition MLflow, resolve artifacts.
 
@@ -222,6 +231,8 @@ def promote_model_with_gates(
         candidate_metrics=candidate_metrics,
         gates_config=gates_config,
         prod_metrics=prod_metrics,
+        candidate_quality_metrics=candidate_quality_metrics,
+        prod_quality_metrics=prod_quality_metrics,
     )
 
     # If gates fail, return early with decision

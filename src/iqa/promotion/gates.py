@@ -2,7 +2,93 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+# Business-metric priority order and AUPIMO key, single-sourced from the metric
+# contract. Importing this stays torch-free (model_metrics only pulls ``typing``),
+# so ``iqa.promotion.gates`` keeps running on the data image (ADR 0008, issue 10).
+from iqa.monitoring.model_metrics import AUPIMO_KEY, MODEL_QUALITY_METRIC_KEYS
+
+# Default max allowed drop vs prod baseline for a business metric (ADR 0010 §6).
+DEFAULT_QUALITY_MAX_REGRESSION = 0.02
+# Pixel-level metrics require GT masks; their absence triggers the image_ap fallback.
+_PIXEL_METRIC_KEYS = (AUPIMO_KEY, "pixel_ap")
+QUALITY_FALLBACK_METRIC = "image_ap"
+
+
+def _finite_float(value: Any) -> float | None:
+    """Coerce to a finite float, or ``None`` when missing/non-finite."""
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def evaluate_quality_regression_gates(
+    candidate_metrics: dict[str, Any] | None,
+    prod_metrics: dict[str, Any] | None,
+    *,
+    max_regressions: dict[str, float] | None = None,
+    default_max_regression: float = DEFAULT_QUALITY_MAX_REGRESSION,
+) -> dict[str, Any]:
+    """Non-regression gate over the 4 business metrics vs the prod baseline.
+
+    Evaluates ``pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc``
+    (priority order). A metric is only *evaluable* when both candidate and prod
+    carry a finite value; pixel metrics are absent when GT masks are missing, so
+    the gate falls back to ``image_ap`` (ADR 0010 §6). For each evaluable metric
+    the regression is ``prod - candidate`` (higher is better) and the gate passes
+    when ``regression <= max_regression``. The overall verdict passes when every
+    evaluable metric passes; with no evaluable metric (no prod baseline) it is a
+    vacuous pass, since a non-regression gate needs a baseline to compare against.
+
+    Returns a dict with:
+    - ``all_passed``: overall non-regression verdict.
+    - ``metrics``: per-metric verdict (candidate, prod, regression, max_regression).
+    - ``evaluated_metrics`` / ``skipped_metrics``: metric keys, in priority order.
+    - ``decisive_metric``: the highest-priority evaluable metric (reference choice).
+    - ``fallback_to_image_ap``: True when no pixel metric was evaluable.
+    """
+    candidate_metrics = candidate_metrics or {}
+    prod_metrics = prod_metrics or {}
+    max_regressions = max_regressions or {}
+
+    per_metric: dict[str, dict[str, Any]] = {}
+    evaluated: list[str] = []
+    skipped: list[str] = []
+    for key in MODEL_QUALITY_METRIC_KEYS:
+        candidate_value = _finite_float(candidate_metrics.get(key))
+        prod_value = _finite_float(prod_metrics.get(key))
+        if candidate_value is None or prod_value is None:
+            skipped.append(key)
+            continue
+        max_regression = float(max_regressions.get(key, default_max_regression))
+        regression = prod_value - candidate_value
+        per_metric[key] = {
+            "passed": regression <= max_regression,
+            "candidate": candidate_value,
+            "prod": prod_value,
+            "regression": regression,
+            "max_regression": max_regression,
+        }
+        evaluated.append(key)
+
+    decisive_metric = evaluated[0] if evaluated else None
+    fallback_to_image_ap = bool(evaluated) and all(
+        key not in evaluated for key in _PIXEL_METRIC_KEYS
+    )
+    return {
+        "all_passed": all(result["passed"] for result in per_metric.values()),
+        "metrics": per_metric,
+        "evaluated_metrics": evaluated,
+        "skipped_metrics": skipped,
+        "decisive_metric": decisive_metric,
+        "fallback_to_image_ap": fallback_to_image_ap,
+    }
 
 
 def evaluate_recall_gate(recall: float, threshold: float = 1.0) -> dict[str, bool | float]:
@@ -108,6 +194,8 @@ def evaluate_promotion_gates(
     candidate_latency_ms: float,
     prod_ap: float | None = None,
     gates_config: dict[str, Any] | None = None,
+    candidate_quality_metrics: dict[str, Any] | None = None,
+    prod_quality_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate all promotion gates for a candidate model.
 
@@ -116,8 +204,12 @@ def evaluate_promotion_gates(
         candidate_ap: Candidate model average precision
         candidate_orange_rate: Candidate model orange rate
         candidate_latency_ms: Candidate model P95 latency
-        prod_ap: Production model AP (optional, for regression check)
+        prod_ap: Production model AP (optional, legacy single-metric regression)
         gates_config: Gate thresholds from config (optional)
+        candidate_quality_metrics: Candidate's 4 business metrics (optional). When
+            given together with ``prod_quality_metrics`` the 4-metric non-regression
+            gate (ADR 0010 §6) replaces the legacy single ``ap_regression`` gate.
+        prod_quality_metrics: Prod baseline's 4 business metrics (optional).
 
     Returns:
         Dict with keys:
@@ -134,8 +226,23 @@ def evaluate_promotion_gates(
     recall_threshold = gates_config.get("feature_ae", {}).get("recall_defect_min", 1.0)
     results["recall"] = evaluate_recall_gate(candidate_recall, threshold=recall_threshold)
 
-    # Evaluate AP regression gate (only if prod_ap provided)
-    if prod_ap is not None:
+    # Regression: prefer the 4-metric non-regression gate when the business metrics
+    # of candidate and prod are both available; otherwise fall back to the legacy
+    # single-metric image-AP regression gate (only if prod_ap provided).
+    if candidate_quality_metrics is not None and prod_quality_metrics is not None:
+        max_regressions = gates_config.get("feature_ae", {}).get(
+            "quality_max_regression", {}
+        )
+        quality_verdict = evaluate_quality_regression_gates(
+            candidate_quality_metrics,
+            prod_quality_metrics,
+            max_regressions=max_regressions,
+        )
+        results["quality_regression"] = {
+            "passed": quality_verdict["all_passed"],
+            "verdict": quality_verdict,
+        }
+    elif prod_ap is not None:
         max_regression = gates_config.get("feature_ae", {}).get("image_ap_max_regression", 0.02)
         results["ap_regression"] = evaluate_ap_regression_gate(
             candidate_ap, prod_ap, max_regression=max_regression
@@ -162,9 +269,12 @@ def evaluate_promotion_gates(
 
 
 __all__ = [
+    "DEFAULT_QUALITY_MAX_REGRESSION",
+    "QUALITY_FALLBACK_METRIC",
     "evaluate_recall_gate",
     "evaluate_ap_regression_gate",
     "evaluate_orange_rate_gate",
     "evaluate_latency_gate",
+    "evaluate_quality_regression_gates",
     "evaluate_promotion_gates",
 ]

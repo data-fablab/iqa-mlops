@@ -4,6 +4,17 @@ feature_ae:
   image_ap_max_regression: 0.02
   roi_fail_rate_max: 0.10
   latency_p95_ms_max: 1000
+  # Non-regression vs prod baseline on the 4 business metrics, in priority order
+  # pixel_aupimo -> pixel_ap -> image_ap -> image_auroc (ADR 0010 §6). These are
+  # max allowed *drops* vs current prod, NOT absolute thresholds: during the
+  # incremental drift coverage an untreated class would tank an absolute floor
+  # while the retrain strictly improved the targeted class. Fallback to image_ap
+  # when GT masks are absent (pixel metrics not computable).
+  quality_max_regression:
+    pixel_aupimo_1e-5_1e-3: 0.02
+    pixel_ap: 0.02
+    image_ap: 0.02
+    image_auroc: 0.02
 
 defect_coverage:
   # Gate de recevabilite : couverture minimale de defauts par source_class (IQA1_KEN02)
