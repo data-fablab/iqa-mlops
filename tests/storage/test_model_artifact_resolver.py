@@ -151,3 +151,54 @@ def test_model_manifest_path_honours_repo_root_env(tmp_path: Path, monkeypatch: 
     path = model_artifacts.model_manifest_path("demo_model")
 
     assert path == repo_root / "models" / "manifests" / "demo_model" / "model_manifest.json"
+
+
+def test_load_feature_ae_reference_contract_from_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifests_dir = tmp_path / "manifests"
+    model_dir = manifests_dir / model_artifacts.DEFAULT_FEATURE_AE_MODEL_VERSION
+    model_dir.mkdir(parents=True)
+
+    manifest = {
+        "model_version": model_artifacts.DEFAULT_FEATURE_AE_MODEL_VERSION,
+        "artifact_uri": "s3://iqa-models/feature/checkpoint.pt",
+        "decision_thresholds": {
+            "score_contract_version": model_artifacts.FEATURE_AE_REFERENCE_CONTRACT_VERSION,
+            "threshold_orange": 12.0,
+            "threshold_red": 20.0,
+        },
+        "feature_ae_reference_contract": {
+            "version": model_artifacts.FEATURE_AE_REFERENCE_CONTRACT_VERSION,
+            "teacher_weights": "IMAGENET1K_V1",
+            "tile_size": 384,
+            "context_size": 768,
+            "tile_stride": 384,
+            "layers": ["layer2", "layer3"],
+            "layer_weights": {"layer2": 0.65, "layer3": 0.35},
+            "score_smoothing": "median3",
+            "roi_mode": "soft_map",
+            "roi_threshold": 0.5,
+            "score_image": "topk_mean",
+            "topk_fraction": 0.005,
+            "layer_score_mode": "sqrt_l2_plus_cosine",
+            "layer_normalization": "good_p99",
+            "layer_normalization_stats": {"layer2": 2.0, "layer3": 4.0},
+            "cosine_weight": 0.75,
+        },
+    }
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(model_artifacts, "MODEL_MANIFESTS_DIR", manifests_dir)
+
+    contract = model_artifacts.load_feature_ae_reference_contract()
+
+    assert contract.layers == ("layer2", "layer3")
+    assert contract.layer_weights == {"layer2": 0.65, "layer3": 0.35}
+    assert contract.layer_normalization_stats == {"layer2": 2.0, "layer3": 4.0}
+    assert contract.roi_mode == "soft_map"
+    assert contract.topk_fraction == pytest.approx(0.005)
+    assert contract.cosine_weight == pytest.approx(0.75)

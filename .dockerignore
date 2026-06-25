@@ -27,3 +27,6 @@ data/raw
 data/processed
 source-datasets
 iqa-source-datasets
+
+# Local NAT12 audit files
+iqa_nat12_*.txt
