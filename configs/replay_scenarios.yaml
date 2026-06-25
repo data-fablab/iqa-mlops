@@ -3,6 +3,10 @@ scenarios:
     scenario_type: production
     source: historical_replay
     replay_plan: data/metadata/casting_flux_replay_plan_natural_v003.csv
+  - scenario_id: production_replay_natural_train_v004
+    scenario_type: production
+    source: historical_replay
+    replay_plan: data/metadata/casting_flux_replay_plan_natural_train_v004.csv
   - scenario_id: drift_domain_extension
     scenario_type: drift
     source: historical_replay

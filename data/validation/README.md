@@ -6,6 +6,18 @@ image-level reference panel where the bootstrap model has a non-zero AUPIMO
 signal, so the fast gate can compare candidates without collapsing the
 localisation metric.
 
+`validation_set_replay_gate_v002` is a rebuilt piece-level candidate promotion
+gate panel. It keeps the defect reserve available in validation/gate data and
+adds 120 good pieces held out from bootstrap, calibration and natural replay.
+It is designed to test a more production-like gate/calibration surface before
+changing the Airflow default.
+
+`validation_set_replay_gate_v003` is the Scenario-B fixed holdout gate. It is
+split out of the natural replay source before progressive training starts:
+10 defect pieces and 120 good pieces are reserved for promotion decisions, while
+`casting_flux_replay_plan_natural_train_v004.csv` carries the remaining replay
+stream. This is the default gate for progressive Feature-AE lifecycle runs.
+
 `validation_set_replay_representative_v001` is the larger representative audit
 set for full validation and release evidence. It is excluded from bootstrap,
 calibration, replay plans, candidate Feature-AE datasets and threshold
@@ -14,6 +26,19 @@ calibration, but it is not the default fast promotion gate.
 `calibration_good_reference_v001` is a good-only set reserved for Feature-AE
 threshold calibration. It is excluded from bootstrap, replay, train and
 validation.
+
+`scripts/build_validation_gate_v2.py` rebuilds
+`validation_set_replay_gate_v002.csv` deterministically from the source
+metadata. The historical source contains no defect pieces left outside all
+existing replay/validation reserves, so v002 uses reserved validation defects
+and fresh held-out good pieces. Defect coverage of late replay events remains
+limited until new labeled defect reserves are collected.
+
+`scripts/build_replay_holdout_split.py` rebuilds Scenario B deterministically:
+`data/metadata/casting_flux_replay_plan_natural_train_v004.csv` plus
+`data/validation/validation_set_replay_gate_v003.csv`. The train replay and
+gate holdout are disjoint and their union reconstructs the natural replay v003
+source events.
 
 Required invariant:
 

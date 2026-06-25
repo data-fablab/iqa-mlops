@@ -67,6 +67,7 @@ def _lifecycle_conf(
         "lifecycle_decision_json": (
             "{{ ti.xcom_pull(task_ids='" + decision_task_id + "') }}"
         ),
+        "image_root": "{{ params.image_root }}",
         "mode": "{{ params.mode }}",
         "max_events": "{{ params.max_events }}",
         "lifecycle_interval": "{{ params.lifecycle_interval }}",
@@ -155,7 +156,7 @@ dag = build_container_dag(
     max_active_runs=1,
     catchup=False,
     params={
-        "scenario_id": "production_replay_natural",
+        "scenario_id": "production_replay_natural_train_v004",
         "drift_scenario_id": "drift_domain_extension",
         "natural_candidate_dataset_version": "feature_ae_good_mvp_v001",
         "drift_candidate_dataset_version": "feature_ae_good_mvp_v001",
@@ -167,6 +168,7 @@ dag = build_container_dag(
         ),
         "roi_window_size": 100,
         "min_natural_conforming": 50,
+        "image_root": "/opt/iqa/iqa-mlops/data/raw/hss-iad",
         "mode": "progressive-train",
         "max_events": 260,
         "lifecycle_interval": 50,
@@ -177,7 +179,7 @@ dag = build_container_dag(
         "target_stage": "test",
         "promotion_min_delta": 0.0,
         "anchor_good_max_per_class": 256,
-        "reference_eval_manifest": "data/validation/validation_set_replay_gate_v001.csv",
+        "reference_eval_manifest": "data/validation/validation_set_replay_gate_v003.csv",
         "reference_gt_masks_manifest": (
             "data/validation/validation_gt_masks_v001.csv"
         ),

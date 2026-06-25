@@ -65,7 +65,7 @@ dag = build_container_dag(
     max_active_runs=1,
     catchup=False,
     params={
-        "scenario_id": "production_replay_natural",
+        "scenario_id": "production_replay_natural_train_v004",
         "repo_root": "/opt/iqa/iqa-mlops",
         "image_root": "/opt/iqa/iqa-mlops/data/raw/hss-iad",
         "mode": "progressive-train",
@@ -79,7 +79,7 @@ dag = build_container_dag(
         "promotion_min_delta": 0.0,
         "anchor_good_manifest": "data/model_datasets/feature_ae_good_mvp_v001.csv",
         "anchor_good_max_per_class": 256,
-        "reference_eval_manifest": "data/validation/validation_set_replay_gate_v001.csv",
+        "reference_eval_manifest": "data/validation/validation_set_replay_gate_v003.csv",
         "reference_gt_masks_manifest": "data/validation/validation_gt_masks_v001.csv",
         "max_good_red_regression": 1,
         "candidate_init_policy": "stable_base",
