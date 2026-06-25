@@ -21,6 +21,7 @@ from iqa.monitoring.model_metrics import (
     fetch_latest_quality_metrics,
     log_model_quality_metrics,
     log_per_class_quality_metrics,
+    record_prod_promotion_quality,
 )
 from iqa.promotion import (
     evaluate_promotion_gates,
@@ -437,6 +438,18 @@ def task_promotion(**context: Any) -> dict[str, Any]:
         raise Exception(
             f"Promotion blocked: {result.get('blocked_reasons', 'unknown reason')}"
         )
+
+    # On a successful prod promotion, advance the quality baseline so the exporter
+    # exposes prod vs previous_prod gauges for the regression rule (Issue 5).
+    if target_stage == "prod" and candidate_quality:
+        try:
+            result["quality_baseline"] = record_prod_promotion_quality(
+                candidate_quality,
+                model_version=eval_output.get("model_version", ""),
+                tracking_uri=params.get("mlflow_tracking_uri"),
+            )
+        except Exception as error:  # pragma: no cover - defensive (MLflow offline)
+            logger.warning("Could not record prod quality baseline: %s", error)
 
     return result
 

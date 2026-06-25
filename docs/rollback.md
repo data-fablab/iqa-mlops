@@ -231,6 +231,41 @@ s3://iqa-models/feature_ae__production_replay_natural/3/
 
 ---
 
+## Déclencheur automatique (Issue 5)
+
+Le rollback **manuel** ci-dessous reste disponible, mais la régression métrique
+est désormais détectée et déclenchée automatiquement, en réutilisant le module
+`rollback.py` (aucune logique de restauration réécrite). La chaîne reprend
+exactement le pattern du drift (règle Prometheus → Alertmanager → sensor) :
+
+```
+model-quality-exporter (gauges prod / previous_prod)
+  → règle Prometheus IqaModelRegression (deploy/prometheus/rules/iqa_model_regression.rules.yml)
+  → Alertmanager (route catch-all) → webhook-catcher
+  → iqa_rollback_sensor (lit la série ALERTS via /api/v1/query)
+  → iqa_rollback (iqa-run-rollback → rollback_model → reload)
+```
+
+- **Gauges prod vs previous_prod** : à chaque promotion prod, `task_promotion`
+  appelle `record_prod_promotion_quality(...)` qui rétrograde la run
+  `stage=prod` courante en `stage=previous_prod` et logue le nouveau modèle en
+  `stage=prod`. L'exporter (Issues 1/2) expose alors les deux séries.
+- **Règle de régression** : `IqaModelRegression` tire quand
+  `previous_prod − prod > 0.02` sur `pixel_aupimo` (métrique décisive), avec repli
+  sur `image_ap` quand les gauges pixel sont absentes (masques GT manquants).
+- **Cohérence avec l'Issue 4** : le seuil `0.02` est celui du gate de promotion
+  (`configs/promotion_gates.yaml` → `feature_ae.quality_max_regression`) ; un test
+  de contrat (`tests/monitoring/test_model_regression_alert.py`) interdit toute
+  divergence silencieuse. Même notion de non-régression vs baseline, ici
+  `previous_prod` joue la baseline et le prod courant le « candidat ».
+- **Sensor** : `iqa_rollback_sensor` (mode `reschedule`, stdlib only, aucun import
+  `iqa` dans le scheduler — ADR 0008) lit `ALERTS{alertname="IqaModelRegression"}`
+  et déclenche `iqa_rollback`, avec anti-rejeu (pas de second run en vol) et
+  cooldown post-rollback.
+- **Exécution** : `iqa_rollback` lance `iqa-run-rollback` (résout le prod courant
+  comme version fautive, appelle `rollback_model` → restaure `previous_prod`,
+  archive la fautive) puis `iqa-run-reload`.
+
 ## Alertes et conditions de rollback
 
 ### Conditions automatiques (futur)

@@ -147,6 +147,67 @@ def fetch_latest_quality_metrics(
     }
 
 
+def record_prod_promotion_quality(
+    metrics: dict[str, Any],
+    *,
+    model_version: str,
+    tracking_uri: str | None = None,
+    experiment: str = MODEL_QUALITY_EXPERIMENT,
+) -> dict[str, Any]:
+    """Move the quality baseline forward at a prod promotion (Issue 5).
+
+    On promotion to prod, the regression rule needs to compare the **new prod**
+    against the **previous prod** on the exported gauges. This:
+
+    1. archives any stale ``stage=previous_prod`` runs (keep exactly one),
+    2. demotes the run currently tagged ``stage=prod`` to ``stage=previous_prod``,
+    3. logs the promoted model's metrics as a fresh ``stage=prod`` run.
+
+    Re-tagging by *current stage* (not by version) keeps a single prod / single
+    previous_prod series so ``iqa_model_*{stage="previous_prod"}`` vs ``{stage="prod"}``
+    is unambiguous. Returns the new prod run id and the demoted model_version (if any).
+    """
+    import mlflow
+
+    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    found = client.get_experiment_by_name(experiment)
+    previous_prod_model_version: str | None = None
+    if found is not None:
+        # Keep a single previous_prod: archive any stale ones first.
+        for stale in client.search_runs(
+            [found.experiment_id],
+            filter_string=f"tags.{TAG_STAGE} = 'previous_prod'",
+            max_results=1000,
+        ):
+            client.set_tag(stale.info.run_id, TAG_STAGE, "archived")
+        # Demote the current prod baseline (latest first); archive any extras so
+        # exactly one previous_prod remains.
+        prod_runs = client.search_runs(
+            [found.experiment_id],
+            filter_string=f"tags.{TAG_STAGE} = 'prod'",
+            order_by=["attributes.start_time DESC"],
+            max_results=1000,
+        )
+        for index, run in enumerate(prod_runs):
+            new_stage = "previous_prod" if index == 0 else "archived"
+            client.set_tag(run.info.run_id, TAG_STAGE, new_stage)
+            if index == 0:
+                previous_prod_model_version = (run.data.tags or {}).get(TAG_MODEL_VERSION)
+
+    prod_run_id = log_model_quality_metrics(
+        metrics,
+        model_version=model_version,
+        stage="prod",
+        tracking_uri=tracking_uri,
+        experiment=experiment,
+    )
+    return {
+        "prod_run_id": prod_run_id,
+        "prod_model_version": model_version,
+        "previous_prod_model_version": previous_prod_model_version,
+    }
+
+
 def log_per_class_quality_metrics(
     per_class_metrics: dict[str, dict[str, Any]],
     *,
@@ -195,4 +256,5 @@ __all__ = [
     "fetch_latest_quality_metrics",
     "log_model_quality_metrics",
     "log_per_class_quality_metrics",
+    "record_prod_promotion_quality",
 ]

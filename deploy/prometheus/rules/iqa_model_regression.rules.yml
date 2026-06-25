@@ -1,0 +1,38 @@
+groups:
+  - name: iqa_model_regression
+    rules:
+      # Regression du modele promu vs le previous_prod, sur les gauges exportees
+      # par le model-quality-exporter (Issues 1/2). Declenche le chemin de rollback
+      # existant (rollback.py) via iqa_rollback_sensor -> iqa_rollback (Issue 5).
+      #
+      # Coherent avec le gate de promotion (Issue 4) : meme notion de
+      # non-regression vs baseline et meme seuil 0.02
+      # (configs/promotion_gates.yaml: feature_ae.quality_max_regression). Ici la
+      # baseline est previous_prod et le "candidat" est le prod courant.
+      #
+      # Metrique decisive = pixel_aupimo ; repli sur image_ap quand les gauges
+      # pixel sont absentes (masques GT manquants), comme le fallback du gate.
+      - alert: IqaModelRegression
+        expr: |
+          (
+            max(iqa_model_pixel_aupimo{stage="previous_prod"})
+            - max(iqa_model_pixel_aupimo{stage="prod"})
+            > 0.02
+          )
+          or
+          (
+            (
+              max(iqa_model_image_ap{stage="previous_prod"})
+              - max(iqa_model_image_ap{stage="prod"})
+              > 0.02
+            )
+            and on()
+            absent(iqa_model_pixel_aupimo{stage="prod"})
+          )
+        for: 1m
+        labels:
+          severity: critical
+          signal: model_regression
+        annotations:
+          summary: "Regression metrique du modele prod vs previous_prod"
+          description: "Le modele en prod regresse de plus de 0.02 vs previous_prod (pixel_aupimo, repli image_ap si masques GT absents). Doit declencher le rollback iqa_rollback (restaure previous_prod, archive la version fautive)."

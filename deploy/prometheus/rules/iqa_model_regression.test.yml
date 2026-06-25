@@ -1,0 +1,95 @@
+# promtool test rules deploy/prometheus/rules/iqa_model_regression.test.yml
+rule_files:
+  - iqa_model_regression.rules.yml
+
+evaluation_interval: 15s
+
+tests:
+  # Regression pixel_aupimo : previous_prod 0.80 vs prod 0.65 (-0.15 > 0.02) -> tire.
+  - interval: 15s
+    input_series:
+      - series: 'iqa_model_pixel_aupimo{model_version="prev",stage="previous_prod"}'
+        values: "0.80x20"
+      - series: 'iqa_model_pixel_aupimo{model_version="bad",stage="prod"}'
+        values: "0.65x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IqaModelRegression
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              signal: model_regression
+            exp_annotations:
+              summary: "Regression metrique du modele prod vs previous_prod"
+              description: "Le modele en prod regresse de plus de 0.02 vs previous_prod (pixel_aupimo, repli image_ap si masques GT absents). Doit declencher le rollback iqa_rollback (restaure previous_prod, archive la version fautive)."
+
+  # Pas de regression : prod >= previous_prod -> pas d'alerte (pas de faux positif).
+  - interval: 15s
+    input_series:
+      - series: 'iqa_model_pixel_aupimo{model_version="prev",stage="previous_prod"}'
+        values: "0.80x20"
+      - series: 'iqa_model_pixel_aupimo{model_version="good",stage="prod"}'
+        values: "0.82x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IqaModelRegression
+        exp_alerts: []
+
+  # Drop sous tolerance (0.01 <= 0.02) -> pas d'alerte.
+  - interval: 15s
+    input_series:
+      - series: 'iqa_model_pixel_aupimo{model_version="prev",stage="previous_prod"}'
+        values: "0.80x20"
+      - series: 'iqa_model_pixel_aupimo{model_version="cand",stage="prod"}'
+        values: "0.79x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IqaModelRegression
+        exp_alerts: []
+
+  # Masques GT absents (pas de gauge pixel_aupimo) + regression image_ap -> repli, tire.
+  - interval: 15s
+    input_series:
+      - series: 'iqa_model_image_ap{model_version="prev",stage="previous_prod"}'
+        values: "0.90x20"
+      - series: 'iqa_model_image_ap{model_version="bad",stage="prod"}'
+        values: "0.80x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IqaModelRegression
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              signal: model_regression
+            exp_annotations:
+              summary: "Regression metrique du modele prod vs previous_prod"
+              description: "Le modele en prod regresse de plus de 0.02 vs previous_prod (pixel_aupimo, repli image_ap si masques GT absents). Doit declencher le rollback iqa_rollback (restaure previous_prod, archive la version fautive)."
+
+  # Masques GT absents + image_ap stable -> pas d'alerte.
+  - interval: 15s
+    input_series:
+      - series: 'iqa_model_image_ap{model_version="prev",stage="previous_prod"}'
+        values: "0.90x20"
+      - series: 'iqa_model_image_ap{model_version="ok",stage="prod"}'
+        values: "0.91x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IqaModelRegression
+        exp_alerts: []
+
+  # Pixel present + image_ap regresse mais aupimo OK : le repli ne s'active pas
+  # (aupimo present) et aupimo ne regresse pas -> pas d'alerte.
+  - interval: 15s
+    input_series:
+      - series: 'iqa_model_pixel_aupimo{model_version="prev",stage="previous_prod"}'
+        values: "0.80x20"
+      - series: 'iqa_model_pixel_aupimo{model_version="ok",stage="prod"}'
+        values: "0.81x20"
+      - series: 'iqa_model_image_ap{model_version="prev",stage="previous_prod"}'
+        values: "0.90x20"
+      - series: 'iqa_model_image_ap{model_version="ok",stage="prod"}'
+        values: "0.70x20"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IqaModelRegression
+        exp_alerts: []

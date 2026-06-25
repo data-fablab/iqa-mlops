@@ -572,6 +572,29 @@ class TestPromotionTask:
             assert mock_promote.call_args.kwargs["target_stage"] == "prod"
             assert result["success"] is True
 
+    def test_promotion_task_records_quality_baseline_on_prod(self) -> None:
+        """A successful prod promotion advances prod/previous_prod quality gauges (Issue 5)."""
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.side_effect = lambda task_ids: {
+            "mlflow": {"registered_model_name": "feature_ae__drift_domain_extension", "version": "3"},
+            "eval": {
+                "recall": 1.0, "ap": 0.87, "orange_rate": 0.05, "latency_ms": 800.0,
+                "model_version": "cand_v3",
+                "quality_metrics": {"pixel_aupimo_1e-5_1e-3": 0.42, "image_ap": 0.87},
+            },
+        }[task_ids]
+
+        with patch("iqa.dags.lifecycle_tasks.save_previous_prod_before_promotion", return_value={"success": True}), \
+             patch("iqa.dags.lifecycle_tasks.promote_model_with_gates") as mock_promote, \
+             patch("iqa.dags.lifecycle_tasks.record_prod_promotion_quality", return_value={"prod_run_id": "p1"}) as mock_record:
+            mock_promote.return_value = {"success": True, "gates_passed": True, "transition": {"success": True}}
+
+            result = task_promotion(ti=mock_ti, params={"target_stage": "prod"})
+
+            mock_record.assert_called_once()
+            assert mock_record.call_args.kwargs["model_version"] == "cand_v3"
+            assert result["quality_baseline"] == {"prod_run_id": "p1"}
+
     def test_promotion_task_blocks_when_gates_fail(self) -> None:
         """Promotion task raises when gates fail."""
         mock_ti = MagicMock()
