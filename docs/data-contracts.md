@@ -133,14 +133,18 @@ La repartition v002 par label est :
 | `good` | 120 |
 | `defective` | 14 |
 
-Ce panel ne devient le default Airflow qu'apres validation serveur explicite de
-la metrique AUPIMO, des seuils et de la classification replay.
+Ce panel est le default Airflow pour la gate progressive rapide. Ses defauts
+sont couverts par `validation_gt_masks_v001.csv`, ce qui garantit une metrique
+AUPIMO definie pendant la promotion.
 
 `data/validation/validation_set_replay_gate_v003.csv` est le panel gate fixe du
 Scenario B. Il est extrait du replay naturel avant entrainement progressif :
 10 pieces defaut et 120 pieces good sont reservees pour la promotion, et le
 replay d'entrainement devient
 `data/metadata/casting_flux_replay_plan_natural_train_v004.csv`.
+Les defauts du replay naturel ne sont pas couverts par
+`validation_gt_masks_v001.csv`; v003 sert donc a auditer le split replay, mais
+ne doit pas etre utilise comme gate AUPIMO.
 
 La repartition v003 par label est :
 

@@ -179,7 +179,7 @@ dag = build_container_dag(
         "target_stage": "test",
         "promotion_min_delta": 0.0,
         "anchor_good_max_per_class": 256,
-        "reference_eval_manifest": "data/validation/validation_set_replay_gate_v003.csv",
+        "reference_eval_manifest": "data/validation/validation_set_replay_gate_v002.csv",
         "reference_gt_masks_manifest": (
             "data/validation/validation_gt_masks_v001.csv"
         ),
