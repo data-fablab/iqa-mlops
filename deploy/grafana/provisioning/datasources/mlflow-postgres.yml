@@ -1,0 +1,22 @@
+apiVersion: 1
+
+# Second transport (Issue 3): read-only Postgres datasource on the mlflow tracking
+# DB, complementing the Prometheus exporter (real-time) with rich per-run history.
+# Connects as grafana_ro (SELECT only) -> Grafana can never write to mlflow.
+datasources:
+  - name: MLflow Postgres
+    uid: mlflow-postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: grafana_ro
+    database: mlflow
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      maxOpenConns: 5
+      maxIdleConns: 2
+    secureJsonData:
+      password: grafana_ro_password
+    isDefault: false
+    editable: false

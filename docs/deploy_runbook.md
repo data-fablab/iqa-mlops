@@ -85,7 +85,15 @@ docker compose up -d mlflow
 ### 4.4 Observabilite + reverse proxy
 
 ```bash
-docker compose up -d statsd-exporter prometheus grafana reverse-proxy
+docker compose up -d statsd-exporter prometheus grafana reverse-proxy model-quality-exporter
+```
+
+La datasource Grafana « MLflow Postgres » (historique des metriques, Issue 3) se
+connecte en lecture seule via le role `grafana_ro`. Ce role doit etre cree une fois,
+apres que mlflow a migre son schema (cf. en-tete du fichier SQL) :
+
+```bash
+docker exec -i deploy-postgres-1 psql -U iqa -d mlflow -f - < deploy/postgres/grafana-readonly.sql
 ```
 
 ### 4.5 Airflow (LocalExecutor + pool GPU)

@@ -1,0 +1,105 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "tags": ["iqa", "model-quality", "mlflow"],
+  "time": { "from": "now-90d", "to": "now" },
+  "timezone": "browser",
+  "title": "IQA - Qualite modele Feature-AE (historique MLflow)",
+  "uid": "iqa-model-quality-history",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "AUPIMO (pixel) - historique par run",
+      "description": "pixel_aupimo_1e-5_1e-3 par run, candidat vs prod. Source: MLflow Postgres (lecture seule).",
+      "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 4, "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(r.start_time / 1000.0) AS \"time\", concat(ts.value, ' - ', tm.value) AS metric, m.value AS value FROM metrics m JOIN runs r ON r.run_uuid = m.run_uuid JOIN experiments e ON e.experiment_id = r.experiment_id AND e.name = 'iqa-model-quality' AND r.lifecycle_stage = 'active' LEFT JOIN tags ts ON ts.run_uuid = m.run_uuid AND ts.key = 'stage' LEFT JOIN tags tm ON tm.run_uuid = m.run_uuid AND tm.key = 'model_version' WHERE m.key = 'pixel_aupimo_1e-5_1e-3' AND $__timeFilter(to_timestamp(r.start_time / 1000.0)) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "pixel_ap - historique par run",
+      "description": "pixel_ap par run, candidat vs prod. Source: MLflow Postgres (lecture seule).",
+      "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 4, "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(r.start_time / 1000.0) AS \"time\", concat(ts.value, ' - ', tm.value) AS metric, m.value AS value FROM metrics m JOIN runs r ON r.run_uuid = m.run_uuid JOIN experiments e ON e.experiment_id = r.experiment_id AND e.name = 'iqa-model-quality' AND r.lifecycle_stage = 'active' LEFT JOIN tags ts ON ts.run_uuid = m.run_uuid AND ts.key = 'stage' LEFT JOIN tags tm ON tm.run_uuid = m.run_uuid AND tm.key = 'model_version' WHERE m.key = 'pixel_ap' AND $__timeFilter(to_timestamp(r.start_time / 1000.0)) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "image_ap - historique par run",
+      "description": "image_ap par run, candidat vs prod. Source: MLflow Postgres (lecture seule).",
+      "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 4, "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(r.start_time / 1000.0) AS \"time\", concat(ts.value, ' - ', tm.value) AS metric, m.value AS value FROM metrics m JOIN runs r ON r.run_uuid = m.run_uuid JOIN experiments e ON e.experiment_id = r.experiment_id AND e.name = 'iqa-model-quality' AND r.lifecycle_stage = 'active' LEFT JOIN tags ts ON ts.run_uuid = m.run_uuid AND ts.key = 'stage' LEFT JOIN tags tm ON tm.run_uuid = m.run_uuid AND tm.key = 'model_version' WHERE m.key = 'image_ap' AND $__timeFilter(to_timestamp(r.start_time / 1000.0)) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "image_auroc - historique par run",
+      "description": "image_auroc par run, candidat vs prod. Source: MLflow Postgres (lecture seule).",
+      "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 4, "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(r.start_time / 1000.0) AS \"time\", concat(ts.value, ' - ', tm.value) AS metric, m.value AS value FROM metrics m JOIN runs r ON r.run_uuid = m.run_uuid JOIN experiments e ON e.experiment_id = r.experiment_id AND e.name = 'iqa-model-quality' AND r.lifecycle_stage = 'active' LEFT JOIN tags ts ON ts.run_uuid = m.run_uuid AND ts.key = 'stage' LEFT JOIN tags tm ON tm.run_uuid = m.run_uuid AND tm.key = 'model_version' WHERE m.key = 'image_auroc' AND $__timeFilter(to_timestamp(r.start_time / 1000.0)) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Dernieres valeurs par run (4 metriques, candidat vs prod)",
+      "description": "latest_metrics par run de l'experience iqa-model-quality. Source: MLflow Postgres (lecture seule).",
+      "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 16 },
+      "options": { "showHeader": true },
+      "fieldConfig": { "defaults": { "decimals": 4 } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(r.start_time / 1000.0) AS \"time\", tm.value AS model_version, ts.value AS stage, max(CASE WHEN lm.key = 'pixel_aupimo_1e-5_1e-3' THEN lm.value END) AS aupimo, max(CASE WHEN lm.key = 'pixel_ap' THEN lm.value END) AS pixel_ap, max(CASE WHEN lm.key = 'image_ap' THEN lm.value END) AS image_ap, max(CASE WHEN lm.key = 'image_auroc' THEN lm.value END) AS image_auroc FROM latest_metrics lm JOIN runs r ON r.run_uuid = lm.run_uuid JOIN experiments e ON e.experiment_id = r.experiment_id AND e.name = 'iqa-model-quality' AND r.lifecycle_stage = 'active' LEFT JOIN tags ts ON ts.run_uuid = lm.run_uuid AND ts.key = 'stage' LEFT JOIN tags tm ON tm.run_uuid = lm.run_uuid AND tm.key = 'model_version' GROUP BY r.start_time, tm.value, ts.value ORDER BY r.start_time DESC"
+        }
+      ]
+    }
+  ]
+}
