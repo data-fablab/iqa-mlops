@@ -8,7 +8,20 @@ services:
     env_file: ../.env
     environment:
       IQA_INFERENCE_URL: http://iqa-inference:8100
+      # Real inference: iqa-api delegates /predict over HTTP to the GPU iqa-inference
+      # service (real Feature-AE reconstruction on the actual image) instead of the
+      # in-process synthetic domain scorer. Set to 0 to fall back to the placeholder.
+      IQA_REAL_INFERENCE: ${IQA_REAL_INFERENCE:-1}
+      # Live drift state read by the deterministic domain scorer (demo): the
+      # orchestrator drives per-class bands here so decisions recover to Vert
+      # once a retrain has covered the class.
+      IQA_DRIFT_STATE_FILE: /var/iqa/drift/state.json
     ports: ["8000:8000"]
+    volumes:
+      # Host src mounted so the scorer picks up changes without a rebuild.
+      - ../src:/app/src:ro
+      # Orchestrator-driven drift state (host-writable bind mount).
+      - ./drift-state:/var/iqa/drift
     depends_on: [iqa-inference, postgres]
 
   iqa-inference:
@@ -21,9 +34,34 @@ services:
     environment:
       IQA_GPU_LOCK_PATH: /var/run/iqa-gpu/gpu.lock
       IQA_GPU_DEMO_HOLD: ${IQA_GPU_DEMO_HOLD:-0}
+      # Real Feature-AE reconstruction scoring on the GPU (reverse-distillation
+      # student-teacher) instead of the synthetic placeholder. The baseline
+      # checkpoint is trained on Casting_class1, so OOD class2/class3 images
+      # reconstruct poorly -> high anomaly score -> Orange/Rouge.
+      IQA_REAL_INFERENCE: ${IQA_REAL_INFERENCE:-1}
+      IQA_INFERENCE_DEVICE: ${IQA_INFERENCE_DEVICE:-cuda}
+      IQA_FEATURE_AE_CHECKPOINT: ${IQA_FEATURE_AE_CHECKPOINT:-/opt/iqa/models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt}
+      # Decision thresholds on the real reconstruction score (set after calibration).
+      IQA_FEATURE_AE_THRESHOLD_ORANGE: ${IQA_FEATURE_AE_THRESHOLD_ORANGE:-0.02}
+      IQA_FEATURE_AE_THRESHOLD_RED: ${IQA_FEATURE_AE_THRESHOLD_RED:-0.05}
     ports: ["8100:8100"]
     volumes:
       - gpu_lock:/var/run/iqa-gpu
+      # Live src so the real scorer picks up changes without a rebuild.
+      - ../src:/app/src:ro
+      # Real checkpoints (host .cache) -> baseline + retrained candidates.
+      - ../.cache/iqa/models:/opt/iqa/models:ro
+      # Real casting images so the scorer reads actual pixels (same dataset the
+      # GPU trainer uses; the host path is a junction Docker can't follow, so we
+      # bind the real external dataset directly).
+      - "C:/Users/ftk/Documents/Projet ML/mar26_bds_anomalies_pieces_indus/data/raw/hss-iad:/opt/iqa/iqa-mlops/data/raw/hss-iad:ro"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   iqa-streamlit:
     image: python:3.12-slim

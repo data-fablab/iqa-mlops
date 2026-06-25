@@ -202,6 +202,14 @@ def _make_docker_task(
         mount_target = os.environ.get("IQA_AIRFLOW_REPO_MOUNT_TARGET", DEFAULT_REPO_MOUNT_PATH)
         environment.setdefault("IQA_REPO_ROOT", mount_target)
         mounts.append(Mount(source=mount_source, target=mount_target, type="bind"))
+        # Optional extra read-only data mount layered over the repo mount. Used when
+        # the raw dataset lives outside the repo tree (e.g. a Windows junction that
+        # the daemon's file sharing cannot follow): bind the real dataset directory
+        # straight onto its in-repo path. Both env vars must be set to take effect.
+        data_source = os.environ.get("IQA_AIRFLOW_DATA_MOUNT_SOURCE")
+        data_target = os.environ.get("IQA_AIRFLOW_DATA_MOUNT_TARGET")
+        if data_source and data_target:
+            mounts.append(Mount(source=data_source, target=data_target, type="bind", read_only=True))
     if mounts:
         params["mounts"] = mounts
     params.update(kwargs)

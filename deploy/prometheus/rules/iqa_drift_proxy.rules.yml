@@ -1,16 +1,34 @@
 groups:
   - name: iqa_drift_proxy
     rules:
-      # Proxy de drift (chemin B) — seuil calibré en issue 03
-      # (configs/drift_proxy_calibration.yaml). Part d'anomalies (Orange+Rouge)
-      # DANS le régime drift, bornée [0,1] et filtrée scenario_id=~"drift.*"
-      # (décision 15) pour ne pas être diluée par le trafic natural. La règle est
-      # l'unique autorité du seuil, partagée par notif / panel / sensor.
+      # Proxy de drift (chemin B) — deux niveaux de sévérité (décision 15).
+      # Part d'anomalies DANS le régime drift, bornée [0,1] et filtrée
+      # scenario_id=~"drift.*" pour ne pas être diluée par le trafic natural.
+      #
       # NB : le nom d'échantillon reste iqa_prediction_total (prometheus_client
       # retire _total du nom de famille mais pas de l'échantillon).
+
+      # Étage 1 — WARNING : part d'Orange > seuil. Alerte visible
+      # (Prometheus/Grafana/Alertmanager) SANS déclencher de réentraînement.
+      - alert: IqaDriftProxyWarning
+        expr: |
+          sum(rate(iqa_prediction_total{scenario_id=~"drift.*",decision="Orange"}[2m]))
+          /
+          clamp_min(sum(rate(iqa_prediction_total{scenario_id=~"drift.*"}[2m])), 1e-9)
+          > 0.5
+        for: 30s
+        labels:
+          severity: warning
+          signal: drift_proxy
+        annotations:
+          summary: "Drift de domaine naissant (proxy taux Orange)"
+          description: "Le taux d'anomalies Orange du regime drift depasse 0.5 — nouveau domaine OOD detecte. Surveiller : une escalade en Rouge declenchera le reentrainement."
+
+      # Étage 2 — CRITICAL : part de Rouge > seuil. C'est l'unique autorité du
+      # seuil de réentraînement, surveillée par iqa_drift_sensor -> iqa_lifecycle.
       - alert: IqaDriftProxy
         expr: |
-          sum(rate(iqa_prediction_total{scenario_id=~"drift.*",decision=~"Orange|Rouge"}[2m]))
+          sum(rate(iqa_prediction_total{scenario_id=~"drift.*",decision="Rouge"}[2m]))
           /
           clamp_min(sum(rate(iqa_prediction_total{scenario_id=~"drift.*"}[2m])), 1e-9)
           > 0.5
@@ -19,5 +37,5 @@ groups:
           severity: critical
           signal: drift_proxy
         annotations:
-          summary: "Drift de domaine detecte (proxy taux d'anomalies)"
-          description: "Le taux d'anomalies du regime drift depasse le seuil calibre (0.5) — domaine OOD (Casting_class2/class3). Doit declencher le reentrainement iqa_lifecycle."
+          summary: "Drift de domaine confirme (proxy taux Rouge)"
+          description: "Le taux d'anomalies Rouge du regime drift depasse le seuil calibre (0.5) — domaine OOD (Casting_class2/class3). Doit declencher le reentrainement iqa_lifecycle."

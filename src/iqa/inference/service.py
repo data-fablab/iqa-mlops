@@ -11,6 +11,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from iqa.inference.contracts import InferenceRequest, placeholder_inference
+from iqa.inference.real_inference import get_scorer, real_inference_enabled
 from iqa.runtime import gpu_lock
 
 
@@ -71,14 +72,31 @@ def metrics() -> str:
 
 @app.post("/predict")
 def predict(request: InferenceServiceRequest) -> dict[str, str | float | None]:
-    result = placeholder_inference(
-        InferenceRequest(
-            piece_event_id=request.piece_event_id,
-            scenario_id=request.scenario_id,
-            image_uri=request.image_uri,
-        )
+    inference_request = InferenceRequest(
+        piece_event_id=request.piece_event_id,
+        scenario_id=request.scenario_id,
+        image_uri=request.image_uri,
     )
-    return result.to_dict()
+    # Real Feature-AE reconstruction on the actual image (GPU) when enabled; fall
+    # back to the synthetic placeholder if it is off or the image cannot be scored.
+    if real_inference_enabled():
+        try:
+            return get_scorer().predict(inference_request).to_dict()
+        except Exception:  # noqa: BLE001 - never 500 the demo; degrade to placeholder
+            pass
+    return placeholder_inference(inference_request).to_dict()
+
+
+@app.post("/reload-model")
+def reload_model(checkpoint_path: str | None = None) -> dict[str, str | None]:
+    """Drop the cached model so the next prediction loads a fresh checkpoint.
+
+    Called after a retrain promotes a new Feature-AE so recovery to Vert reflects
+    the updated model. Optional ``checkpoint_path`` switches the active checkpoint.
+    """
+    scorer = get_scorer()
+    scorer.reload(checkpoint_path)
+    return {"status": "reloaded", "checkpoint_path": scorer.checkpoint_path, "feature_ae_version": scorer.feature_ae_version}
 
 
 __all__ = ["InferenceServiceRequest", "app", "health", "lifespan", "metrics", "predict"]

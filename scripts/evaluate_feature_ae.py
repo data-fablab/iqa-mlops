@@ -44,6 +44,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-score-maps", action="store_true")
     parser.add_argument("--save-previews", action="store_true")
     parser.add_argument("--max-previews", type=int, default=31)
+    # Model-quality metric logging to MLflow (feeds the Grafana dashboards and the
+    # promotion/rollback gates -- see src/iqa/monitoring/model_metrics.py).
+    parser.add_argument("--log-mlflow", action="store_true", help="Log business metrics to MLflow.")
+    parser.add_argument("--model-version", default="", help="Model version tag for the logged metrics.")
+    parser.add_argument("--stage", default="candidate", help="Stage tag (prod|candidate|previous_prod).")
+    parser.add_argument("--mlflow-tracking-uri", default=None)
+    parser.add_argument("--mlflow-run-id", default=None, help="Attach metrics to an existing run instead of a new one.")
     return parser.parse_args()
 
 
@@ -94,6 +101,18 @@ def main() -> None:
             max_previews=args.max_previews,
         )
     )
+    if args.log_mlflow:
+        from iqa.monitoring.model_metrics import extract_model_quality_metrics, log_model_quality_metrics
+
+        run_id = log_model_quality_metrics(
+            result["metrics"],
+            model_version=args.model_version or args.checkpoint.parent.name,
+            stage=args.stage,
+            tracking_uri=args.mlflow_tracking_uri,
+            run_id=args.mlflow_run_id,
+        )
+        result["mlflow_run_id"] = run_id
+        result["mlflow_logged_metrics"] = sorted(extract_model_quality_metrics(result["metrics"]))
     print(json.dumps(result, indent=2, sort_keys=True))
 
 

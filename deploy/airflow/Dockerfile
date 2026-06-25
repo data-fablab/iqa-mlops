@@ -5,4 +5,4 @@
 FROM apache/airflow:2.10.5-python3.12
 
 # apache-airflow-providers-docker pulls the docker SDK (docker.types.Mount).
-RUN pip install --no-cache-dir "apache-airflow-providers-docker>=3.12,<4"
+RUN --mount=type=cache,target=/root/.cache/pip pip install "apache-airflow-providers-docker>=3.12,<4"

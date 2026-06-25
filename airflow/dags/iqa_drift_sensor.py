@@ -186,6 +186,12 @@ def _define() -> None:
         conf={
             "scenario_id": DRIFT_SCENARIO_ID,
             "drift_confirmed": "True",
+            # Demo-friendly retrain: fast train-on-trigger on GPU so the chain is
+            # watchable end-to-end (the reference flow uses progressive-train).
+            "mode": "train-on-trigger",
+            "max_events": 8,
+            "epochs": 1,
+            "max_cycles": 1,
         },
     )
 
@@ -201,6 +207,8 @@ dag = build_container_dag(
     tags=["iqa", "drift", "sensor"],
     params={
         # Post-promotion cooldown (seconds) -- 0 disables it (decision 17).
-        "cooldown_seconds": 900,
+        # Lowered for the watchable demo so the class2 then class3 retrains can
+        # both fire within one session (reference default was 900).
+        "cooldown_seconds": 120,
     },
 )

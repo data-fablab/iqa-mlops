@@ -27,7 +27,7 @@ from iqa.api.schemas import (
 
 
 from iqa.feedback import OracleFeedbackRequest, oracle_gt_verdict
-from iqa.inference.contracts import InferenceRequest, placeholder_inference
+from iqa.inference.contracts import InferenceRequest, InferenceResult, placeholder_inference
 from iqa.metadata.repository import MEMORY_BACKEND, MetadataRepository, create_metadata_repository, metadata_backend
 from iqa.registry import ModelRegistryRef, registered_model_name
 from iqa.replay import ReplayRunStore, list_replay_scenarios
@@ -392,20 +392,64 @@ def reset_replay_run(replay_run_id: str) -> dict[str, Any]:
         raise AssertionError("unreachable") from exc
 
 
+def _real_inference_enabled() -> bool:
+    return os.environ.get("IQA_REAL_INFERENCE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _delegate_inference(request: PredictRequest) -> InferenceResult | None:
+    """Delegate scoring to the GPU iqa-inference service over HTTP (stdlib only).
+
+    Returns ``None`` on any failure so the caller falls back to the in-process
+    placeholder -- the gateway never 500s the demo on an inference hiccup.
+    """
+    import urllib.error
+    import urllib.request
+
+    base = os.environ.get("IQA_INFERENCE_URL", "http://iqa-inference:8100").rstrip("/")
+    payload = json.dumps(
+        {
+            "piece_event_id": request.piece_event_id,
+            "scenario_id": request.scenario_id,
+            "image_uri": request.image_uri,
+        }
+    ).encode("utf-8")
+    http_request = urllib.request.Request(
+        f"{base}/predict", data=payload, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=30) as response:  # noqa: S310 - internal host
+            body = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+    return InferenceResult(
+        piece_event_id=body.get("piece_event_id", request.piece_event_id),
+        scenario_id=body.get("scenario_id", request.scenario_id),
+        score=float(body.get("score", 0.0)),
+        decision=body.get("decision", "Vert"),
+        heatmap_uri=body.get("heatmap_uri"),
+        roi_status=body.get("roi_status"),
+        roi_model_version=body.get("roi_model_version", "roi_segmenter_v001_fixed"),
+        feature_ae_version=body.get("feature_ae_version", "rd_feature_ae_gated_v001_bootstrap"),
+    )
+
+
 @app.post("/predict")
 def predict(request: PredictRequest) -> dict[str, Any]:
     _started = time.perf_counter()
-    inference_result = placeholder_inference(
-        InferenceRequest(
-            piece_event_id=request.piece_event_id,
-            scenario_id=request.scenario_id,
-            image_uri=request.image_uri,
-            sha256=request.sha256,
-            lot_id=request.lot_id,
-            source_class=request.source_class,
-            dataset_version=request.dataset_version,
-        )
+    inference_request = InferenceRequest(
+        piece_event_id=request.piece_event_id,
+        scenario_id=request.scenario_id,
+        image_uri=request.image_uri,
+        sha256=request.sha256,
+        lot_id=request.lot_id,
+        source_class=request.source_class,
+        dataset_version=request.dataset_version,
     )
+    inference_result = None
+    if _real_inference_enabled():
+        inference_result = _delegate_inference(request)
+    if inference_result is None:
+        inference_result = placeholder_inference(inference_request)
     _record_prediction_metrics(
         inference_result.to_dict(), time.perf_counter() - _started, request.scenario_id
     )

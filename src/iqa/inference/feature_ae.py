@@ -139,13 +139,19 @@ def compute_feature_ae_score_maps(
     pretrained_teacher: bool = True,
     layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
     reference_contract: FeatureAEReferenceContract = REFERENCE_FEATURE_AE_CONTRACT,
+    model: torch.nn.Module | None = None,
+    teacher: torch.nn.Module | None = None,
 ) -> FeatureAEScoreMaps:
     layers = normalize_feature_layers(layers)
     torch_device = torch.device(device)
     if torch_device.type == "cuda" and not torch.cuda.is_available():
         torch_device = torch.device("cpu")
-    model = load_rd_feature_ae_gated(checkpoint_path, layers=layers, map_location="cpu").to(torch_device)
-    teacher = ResNetTeacherFeatures(layers=layers, pretrained=pretrained_teacher).to(torch_device)
+    # Preloaded model/teacher (cached by a long-lived scorer) skip the per-call
+    # 30MB checkpoint load + ResNet teacher build; otherwise load from disk.
+    if model is None:
+        model = load_rd_feature_ae_gated(checkpoint_path, layers=layers, map_location="cpu").to(torch_device)
+    if teacher is None:
+        teacher = ResNetTeacherFeatures(layers=layers, pretrained=pretrained_teacher).to(torch_device)
     model.eval()
     teacher.eval()
     contract = FeatureAEReferenceContract(
