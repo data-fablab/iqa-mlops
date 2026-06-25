@@ -62,6 +62,59 @@ def aggregate_lots(events: list[dict[str, Any]], *, active_model: str = "") -> l
     return sorted(rows, key=lambda row: row["lot_id"])
 
 
+def classification_quality_rows(events: list[dict[str, Any]], *, group_key: str = "active_model_version") -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for event in events:
+        group = str(event.get(group_key) or "-")
+        row = groups.setdefault(
+            group,
+            {
+                group_key: group,
+                "pieces": 0,
+                "oracle_conforme": 0,
+                "oracle_defective": 0,
+                "true_good": 0,
+                "defect_detected": 0,
+                "false_negative": 0,
+                "false_positive": 0,
+                "false_positive_orange": 0,
+                "false_positive_red": 0,
+            },
+        )
+        oracle_defective = _is_oracle_defective(event.get("oracle_verdict"))
+        predicted_alert = _decision_bucket(event.get("decision")) in {"orange", "rouge"}
+        predicted_red = _decision_bucket(event.get("decision")) == "rouge"
+
+        row["pieces"] += 1
+        if oracle_defective:
+            row["oracle_defective"] += 1
+            if predicted_alert:
+                row["defect_detected"] += 1
+            else:
+                row["false_negative"] += 1
+        else:
+            row["oracle_conforme"] += 1
+            if predicted_alert:
+                row["false_positive"] += 1
+                if predicted_red:
+                    row["false_positive_red"] += 1
+                else:
+                    row["false_positive_orange"] += 1
+            else:
+                row["true_good"] += 1
+
+    rows = []
+    for row in groups.values():
+        defects = max(int(row["oracle_defective"]), 1)
+        alerts = int(row["defect_detected"]) + int(row["false_positive"])
+        row["defect_recall"] = round(int(row["defect_detected"]) / defects, 3)
+        row["alert_precision"] = round(int(row["defect_detected"]) / max(alerts, 1), 3)
+        row["false_negative_rate"] = round(int(row["false_negative"]) / defects, 3)
+        row["false_positive_rate"] = round(int(row["false_positive"]) / max(int(row["oracle_conforme"]), 1), 3)
+        rows.append(row)
+    return sorted(rows, key=lambda item: item[group_key])
+
+
 def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for cycle in cycles:
@@ -156,6 +209,10 @@ def _decision_bucket(value: Any) -> str:
     if normalized in {"red", "rouge", "defective"}:
         return "rouge"
     return "orange"
+
+
+def _is_oracle_defective(value: Any) -> bool:
+    return str(value or "").lower() in {"defective", "defaut", "defectueux", "non_conforme", "non conforme"}
 
 
 def _lot_status(lot: dict[str, Any]) -> str:
