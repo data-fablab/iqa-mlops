@@ -91,6 +91,27 @@ gates : recall, AP, orange rate et latence. Les metriques de type
 `defect_coverage` complet et `roi_fail_rate` complet restent des cibles si elles
 ne sont pas calculees dans cette tache.
 
+La tache loggue aussi les 4 metriques metier canoniques dans l'experience MLflow
+`iqa-model-quality` via `log_model_quality_metrics`, avec les tags `model_version`
+/ `stage` (`candidate` par defaut). Ces cles alimentent les dashboards Grafana
+(Issues 1-3) et le gate candidat-vs-prod (Issue 4) :
+
+- `pixel_aupimo_1e-5_1e-3` (AUPIMO)
+- `pixel_ap`
+- `image_ap`
+- `image_auroc`
+
+L'ordre ci-dessus est la priorite de promotion (source de verite :
+`src/iqa/monitoring/model_metrics.py`). Le `model_version` provient du parametre
+`candidate_version` (a defaut `dataset_version` du run de train), et le `stage`
+du parametre `eval_stage`. Le run id de qualite est renvoye dans
+`model_quality_run_id`.
+
+> Reference prod pour la comparaison candidat-vs-prod (Issue 4) : reloguer les
+> memes 4 metriques pour le modele `prod` avec
+> `python scripts/evaluate_feature_ae.py --log-mlflow --stage prod --model-version <prod_version> ...`
+> afin que le gate dispose d'une reference a jour dans `iqa-model-quality`.
+
 ### `task_gates`
 
 Charge `configs/promotion_gates.yaml` puis appelle

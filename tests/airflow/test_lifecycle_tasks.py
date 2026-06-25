@@ -246,11 +246,74 @@ class TestEvalTask:
                 "images": [],
             }
 
-            result = task_eval(**context)
+            with patch("iqa.dags.lifecycle_tasks.log_model_quality_metrics", return_value="quality_run_1"):
+                result = task_eval(**context)
 
             mock_ti.xcom_pull.assert_called_once_with(task_ids="train")
             assert result["recall"] == 1.0
             assert result["ap"] == 0.87
+
+    def test_eval_task_logs_business_metrics_to_model_quality_experiment(self, tmp_path: Path) -> None:
+        """Eval task logs the 4 business metrics to iqa-model-quality with model_version/stage tags."""
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.return_value = {
+            "checkpoint": str(tmp_path / "checkpoint.pt"),
+            "run_id": "abc123",
+            "dataset_version": "feature_ae_good_v002",
+        }
+        context = {
+            "ti": mock_ti,
+            "params": {
+                "manifest_path": str(tmp_path / "val.csv"),
+                "image_root": str(tmp_path),
+                "candidate_version": "rd_feature_ae_gated_natural_cycle_001",
+                "mlflow_tracking_uri": "http://mlflow:5000",
+            },
+        }
+
+        eval_metrics = {
+            "pixel_aupimo_1e-5_1e-3": 0.42,
+            "pixel_ap": 0.61,
+            "image_ap": 0.87,
+            "image_auroc": 0.93,
+            "image_recall": 1.0,
+            "orange_rate": 0.05,
+            "latency_ms": 800.0,
+            "false_negatives": 0,
+        }
+        with patch("iqa.dags.lifecycle_tasks.evaluate_feature_ae_checkpoint") as mock_eval, \
+             patch("iqa.dags.lifecycle_tasks.log_model_quality_metrics") as mock_log:
+            mock_eval.return_value = {"metrics": eval_metrics, "images": []}
+            mock_log.return_value = "quality_run_42"
+
+            result = task_eval(**context)
+
+            mock_log.assert_called_once()
+            logged_metrics = mock_log.call_args.args[0]
+            for key in ("pixel_aupimo_1e-5_1e-3", "pixel_ap", "image_ap", "image_auroc"):
+                assert logged_metrics[key] == eval_metrics[key]
+            call_kwargs = mock_log.call_args.kwargs
+            assert call_kwargs["model_version"] == "rd_feature_ae_gated_natural_cycle_001"
+            assert call_kwargs["stage"] == "candidate"
+            assert call_kwargs["tracking_uri"] == "http://mlflow:5000"
+            assert result["model_quality_run_id"] == "quality_run_42"
+            assert result["model_version"] == "rd_feature_ae_gated_natural_cycle_001"
+            assert result["stage"] == "candidate"
+
+    def test_eval_task_skips_when_train_skipped(self) -> None:
+        """Eval task propagates a skip and does not log metrics when training was skipped."""
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.return_value = {
+            "status": "skipped",
+            "reason": "lifecycle_decision_not_triggered",
+        }
+        context = {"ti": mock_ti, "params": {}}
+
+        with patch("iqa.dags.lifecycle_tasks.log_model_quality_metrics") as mock_log:
+            result = task_eval(**context)
+
+            mock_log.assert_not_called()
+            assert result["status"] == "skipped"
 
 
 class TestGatesTask:

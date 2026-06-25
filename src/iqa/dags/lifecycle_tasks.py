@@ -15,6 +15,7 @@ import yaml
 from iqa.datasets import build_candidate_dataset, iter_manifest_image_samples
 from iqa.inference.model_loader import ProdModelLoader
 from iqa.monitoring import LifecycleSignal, evaluate_lifecycle_signal
+from iqa.monitoring.model_metrics import log_model_quality_metrics
 from iqa.promotion import (
     evaluate_promotion_gates,
     promote_model_with_gates,
@@ -177,7 +178,8 @@ def task_eval(**context: Any) -> dict[str, Any]:
         manifest_path, image_root, output_dir, validation_set_id
 
     Returns:
-        Dict with metrics: image_recall, image_ap, orange_rate, latency_ms.
+        Dict with metrics: image_recall, image_ap, orange_rate, latency_ms, plus
+        the model-quality run id where the 4 business metrics were logged.
     """
     params = context.get("params", {})
     ti = context["ti"]
@@ -199,12 +201,31 @@ def task_eval(**context: Any) -> dict[str, Any]:
     result = evaluate_feature_ae_checkpoint(config)
     metrics = result["metrics"]
 
+    # Log the canonical business metrics (AUPIMO, pixel_ap, image_ap, image_auroc)
+    # to the iqa-model-quality experiment so the Grafana dashboards (Issues 1-3) and
+    # the candidate-vs-prod gate (Issue 4) have an up-to-date source for this run.
+    model_version = (
+        params.get("candidate_version")
+        or train_output.get("dataset_version")
+        or params.get("feature_ae_version", "")
+    )
+    stage = params.get("eval_stage", "candidate")
+    model_quality_run_id = log_model_quality_metrics(
+        metrics,
+        model_version=model_version,
+        stage=stage,
+        tracking_uri=params.get("mlflow_tracking_uri"),
+    )
+
     return {
         "recall": metrics.get("image_recall", 0.0),
         "ap": metrics.get("image_ap") or 0.0,
         "orange_rate": metrics.get("orange_rate", 0.0),
         "latency_ms": metrics.get("latency_ms", 0.0),
         "false_negatives": metrics.get("false_negatives", 0),
+        "model_quality_run_id": model_quality_run_id,
+        "model_version": model_version,
+        "stage": stage,
     }
 
 
