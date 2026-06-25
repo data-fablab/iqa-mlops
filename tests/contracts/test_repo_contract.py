@@ -58,6 +58,8 @@ def test_validation_set_contract_is_documented() -> None:
     assert readme.is_file()
     content = readme.read_text(encoding="utf-8")
     assert "validation_set_replay_gate_v001" in content
+    assert "validation_set_replay_gate_v002" in content
+    assert "validation_set_replay_gate_v003" in content
     assert "validation_set_replay_representative_v001" in content
 
 

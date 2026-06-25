@@ -161,7 +161,8 @@ def test_lifecycle_dag_declares_comparative_promotion_params() -> None:
 
     assert '"promotion_min_delta": 0.0' in source
     assert '"gate_eval_profile": "fast"' in source
-    assert '"reference_eval_manifest": "data/validation/validation_set_replay_gate_v001.csv"' in source
+    assert '"scenario_id": "production_replay_natural_train_v004"' in source
+    assert '"reference_eval_manifest": "data/validation/validation_set_replay_gate_v003.csv"' in source
     assert '"max_steps": None' in source
     assert '"require_mlflow_registry": False' in source
     assert '"mlflow_tracking_uri": "http://mlflow:5000"' in source
@@ -281,7 +282,8 @@ def test_lifecycle_trigger_dag_evaluates_in_container_and_triggers_lifecycle() -
         '"ml_image": "{{ params.ml_image }}"',
     ]:
         assert relayed_param in trigger
-    assert '"reference_eval_manifest": "data/validation/validation_set_replay_gate_v001.csv"' in trigger
+    assert '"scenario_id": "production_replay_natural_train_v004"' in trigger
+    assert '"reference_eval_manifest": "data/validation/validation_set_replay_gate_v003.csv"' in trigger
     # No shell / no eager iqa import in the scheduler.
     assert "BashOperator(" not in trigger
     assert "bash_command" not in trigger

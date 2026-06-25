@@ -72,6 +72,8 @@ def test_validation_calibration_bootstrap_and_replay_are_disjoint() -> None:
 def test_validation_and_calibration_roles_are_explicit() -> None:
     validation = _read_csv(VALIDATION / "validation_set_replay_representative_v001.csv")
     gate = _read_csv(VALIDATION / "validation_set_replay_gate_v001.csv")
+    gate_v2 = _read_csv(VALIDATION / "validation_set_replay_gate_v002.csv")
+    gate_v3 = _read_csv(VALIDATION / "validation_set_replay_gate_v003.csv")
     calibration = _read_csv(VALIDATION / "calibration_good_reference_v001.csv")
 
     assert {row["validation_set_id"] for row in validation} == {"validation_set_replay_representative_v001"}
@@ -93,14 +95,71 @@ def test_validation_and_calibration_roles_are_explicit() -> None:
         "Casting_class2": 25,
         "Casting_class3": 11,
     }
+    assert {row["validation_set_id"] for row in gate_v2} == {"validation_set_replay_gate_v002"}
+    assert {row["validation_role"] for row in gate_v2} == {"mvp_gate_piece_level_reference"}
+    assert len(gate_v2) == 134
+    assert sum(row["is_defective"].lower() == "true" for row in gate_v2) == 14
+    assert sum(row["is_defective"].lower() == "false" for row in gate_v2) == 120
+    assert any(int(row["n_images"]) > 1 for row in gate_v2)
+    assert _counts(gate_v2, "source_class") == {
+        "Casting_class1": 23,
+        "Casting_class2": 73,
+        "Casting_class3": 38,
+    }
+    assert {row["validation_set_id"] for row in gate_v3} == {"validation_set_replay_gate_v003"}
+    assert {row["validation_role"] for row in gate_v3} == {"mvp_gate_replay_holdout_reference"}
+    assert len(gate_v3) == 130
+    assert sum(row["is_defective"].lower() == "true" for row in gate_v3) == 10
+    assert sum(row["is_defective"].lower() == "false" for row in gate_v3) == 120
+    assert any(int(row["n_images"]) > 1 for row in gate_v3)
+    assert _counts(gate_v3, "source_class") == {
+        "Casting_class1": 23,
+        "Casting_class2": 71,
+        "Casting_class3": 36,
+    }
     assert {row["validation_set_id"] for row in calibration} == {"calibration_good_reference_v001"}
     assert {row["label"] for row in calibration} == {"good"}
     assert {row["is_defective"].lower() for row in calibration} == {"false"}
 
 
+def test_validation_gate_v2_good_rows_do_not_overlap_replay_or_calibration() -> None:
+    gate_v2 = _read_csv(VALIDATION / "validation_set_replay_gate_v002.csv")
+    natural_replay_ids = _ids(_read_csv(METADATA / "casting_flux_replay_plan_natural_v003.csv"), "source_event_id")
+    calibration_ids = _ids(_read_csv(VALIDATION / "calibration_good_reference_v001.csv"))
+    bootstrap_ids = _ids(_read_csv(METADATA / "feature_ae_bootstrap_events.csv"))
+    good_ids = {row["event_id"] for row in gate_v2 if row["is_defective"].lower() == "false"}
+
+    assert good_ids.isdisjoint(natural_replay_ids)
+    assert good_ids.isdisjoint(calibration_ids)
+    assert good_ids.isdisjoint(bootstrap_ids)
+
+
+def test_scenario_b_replay_train_and_gate_holdout_are_disjoint_and_complete() -> None:
+    natural_replay = _read_csv(METADATA / "casting_flux_replay_plan_natural_v003.csv")
+    train_replay = _read_csv(METADATA / "casting_flux_replay_plan_natural_train_v004.csv")
+    gate_v3 = _read_csv(VALIDATION / "validation_set_replay_gate_v003.csv")
+
+    natural_ids = _ids(natural_replay, "source_event_id")
+    train_ids = _ids(train_replay, "source_event_id")
+    gate_ids = _ids(gate_v3)
+
+    assert len(natural_replay) == 562
+    assert len(train_replay) == 432
+    assert len(gate_v3) == 130
+    assert train_ids.isdisjoint(gate_ids)
+    assert train_ids | gate_ids == natural_ids
+    assert sum(row["is_defective"].lower() == "true" for row in train_replay) == 16
+    assert sum(row["is_defective"].lower() == "true" for row in gate_v3) == 10
+
+
 def test_replay_plans_carry_phase1_runtime_metadata() -> None:
     for path, scenario_id, dataset_version in [
         (METADATA / "casting_flux_replay_plan_natural_v003.csv", "production_replay_natural", "production_replay_natural_v002"),
+        (
+            METADATA / "casting_flux_replay_plan_natural_train_v004.csv",
+            "production_replay_natural_train_v004",
+            "production_replay_natural_train_v004",
+        ),
         (METADATA / "casting_flux_replay_plan_drift.csv", "drift_domain_extension", "drift_domain_extension_v001"),
     ]:
         rows = _read_csv(path)

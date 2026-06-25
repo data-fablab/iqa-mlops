@@ -43,16 +43,19 @@ from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
 from iqa.registry import register_run_to_model, registered_model_name
 
 NATURAL_SCENARIO_ID = "production_replay_natural"
+NATURAL_TRAIN_SCENARIO_ID = "production_replay_natural_train_v004"
 DRIFT_SCENARIO_ID = "drift_domain_extension"
 REPLAY_PLANS = {
     NATURAL_SCENARIO_ID: Path("data/metadata/casting_flux_replay_plan_natural_v003.csv"),
+    NATURAL_TRAIN_SCENARIO_ID: Path("data/metadata/casting_flux_replay_plan_natural_train_v004.csv"),
     DRIFT_SCENARIO_ID: Path("data/metadata/casting_flux_replay_plan_drift.csv"),
 }
 CANDIDATE_DATASETS = {
     NATURAL_SCENARIO_ID: "feature_ae_good_mvp_v001",
+    NATURAL_TRAIN_SCENARIO_ID: "feature_ae_good_mvp_v001",
     DRIFT_SCENARIO_ID: "feature_ae_good_mvp_v001",
 }
-VALIDATION_MANIFEST = Path("data/validation/validation_set_replay_gate_v001.csv")
+VALIDATION_MANIFEST = Path("data/validation/validation_set_replay_gate_v003.csv")
 VALIDATION_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
 DEFAULT_ANCHOR_GOOD_MANIFEST = Path("data/model_datasets/feature_ae_good_mvp_v001.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/replay_lifecycle")
@@ -305,7 +308,7 @@ class LifecycleArtifacts:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario-id", choices=sorted(REPLAY_PLANS), default=NATURAL_SCENARIO_ID)
+    parser.add_argument("--scenario-id", choices=sorted(REPLAY_PLANS), default=NATURAL_TRAIN_SCENARIO_ID)
     parser.add_argument("--image-root", type=Path, required=True)
     parser.add_argument("--stage", default="test")
     parser.add_argument(
@@ -2621,8 +2624,8 @@ def train_progressive_candidate(
         batch_size=args.batch_size,
         epochs=args.epochs,
         max_steps=args.max_steps,
-        metric_eval_manifest_path=VALIDATION_MANIFEST,
-        gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
+        metric_eval_manifest_path=args.reference_eval_manifest,
+        gt_masks_manifest=args.reference_gt_masks_manifest,
         metric_eval_device=args.device,
         metric_eval_every_epochs=1,
         metric_eval_start_epoch=1,
@@ -2666,8 +2669,8 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         batch_size=args.batch_size,
         epochs=args.epochs,
         max_steps=args.max_steps,
-        metric_eval_manifest_path=VALIDATION_MANIFEST,
-        gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
+        metric_eval_manifest_path=args.reference_eval_manifest,
+        gt_masks_manifest=args.reference_gt_masks_manifest,
         metric_eval_device=args.device,
         metric_eval_every_epochs=1,
         metric_eval_start_epoch=1,
