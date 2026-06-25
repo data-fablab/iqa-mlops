@@ -19,6 +19,9 @@ RUN uv sync --no-dev --extra serving
 
 # --- ml: iqa-inference, iqa-trainer (torch + scikit-learn + mlflow) ---
 FROM base AS ml
+COPY models/manifests ./models/manifests
+ENV IQA_REPO_ROOT=/app
+ENV IQA_MODEL_CACHE_DIR=/var/cache/iqa/models
 ARG IQA_TORCH_EXTRA=cpu
 RUN uv sync --no-dev --extra serving --extra ml --extra "$IQA_TORCH_EXTRA"
 

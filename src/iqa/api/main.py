@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -27,7 +30,7 @@ from iqa.api.schemas import (
 
 
 from iqa.feedback import OracleFeedbackRequest, oracle_gt_verdict
-from iqa.inference.contracts import InferenceRequest, placeholder_inference
+from iqa.inference.contracts import InferenceRequest, InferenceResult
 from iqa.metadata.repository import MEMORY_BACKEND, MetadataRepository, create_metadata_repository, metadata_backend
 from iqa.registry import ModelRegistryRef, registered_model_name
 from iqa.replay import ReplayRunStore, list_replay_scenarios
@@ -131,6 +134,232 @@ def _read_manifest(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"version": "missing", "manifest_path": str(path)}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _inference_http_error_detail(error: HTTPError) -> str:
+    try:
+        payload = json.loads(error.read().decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return str(error.reason or f"HTTP {error.code}")
+
+    if isinstance(payload, dict):
+        detail = payload.get("detail")
+        if isinstance(detail, str):
+            return detail
+        if detail is not None:
+            return json.dumps(detail, ensure_ascii=False)
+
+    return str(error.reason or f"HTTP {error.code}")
+
+
+def _call_inference_service(request: InferenceRequest) -> InferenceResult:
+    base_url = os.environ.get(
+        "IQA_INFERENCE_URL",
+        "http://iqa-inference:8100",
+    ).strip().rstrip("/")
+
+    if not base_url:
+        _raise_api_error(
+            status_code=503,
+            error_code="inference_service_configuration_error",
+            message="Inference service URL is not configured.",
+            reason="IQA_INFERENCE_URL is empty.",
+            details={"path": "/predict"},
+        )
+
+    timeout_raw = os.environ.get("IQA_INFERENCE_TIMEOUT_SECONDS", "120")
+    try:
+        timeout = float(timeout_raw)
+    except ValueError:
+        _raise_api_error(
+            status_code=503,
+            error_code="inference_service_configuration_error",
+            message="Inference service timeout is invalid.",
+            reason=f"Invalid IQA_INFERENCE_TIMEOUT_SECONDS: {timeout_raw!r}.",
+            details={"path": "/predict"},
+        )
+        raise AssertionError("unreachable")
+
+    if timeout <= 0:
+        _raise_api_error(
+            status_code=503,
+            error_code="inference_service_configuration_error",
+            message="Inference service timeout is invalid.",
+            reason="IQA_INFERENCE_TIMEOUT_SECONDS must be greater than zero.",
+            details={"path": "/predict"},
+        )
+
+    payload = {
+        "piece_event_id": request.piece_event_id,
+        "scenario_id": request.scenario_id,
+        "image_uri": request.image_uri,
+        "sha256": request.sha256,
+        "lot_id": request.lot_id,
+        "source_class": request.source_class,
+        "dataset_version": request.dataset_version,
+    }
+    http_request = UrlRequest(
+        f"{base_url}/predict",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(http_request, timeout=timeout) as response:
+            raw_response = response.read()
+    except HTTPError as error:
+        detail = _inference_http_error_detail(error)
+
+        if error.code == 404:
+            _raise_api_error(
+                status_code=404,
+                error_code="inference_input_not_found",
+                message="Inference input image was not found.",
+                reason=detail,
+                details={"path": "/predict", "upstream_status": error.code},
+            )
+        if error.code == 422:
+            _raise_api_error(
+                status_code=422,
+                error_code="inference_input_invalid",
+                message="Inference input was rejected.",
+                reason=detail,
+                details={"path": "/predict", "upstream_status": error.code},
+            )
+        if error.code == 503:
+            _raise_api_error(
+                status_code=503,
+                error_code="inference_service_unavailable",
+                message="Inference service is unavailable.",
+                reason=detail,
+                details={"path": "/predict", "upstream_status": error.code},
+            )
+
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_response",
+            message="Inference service returned an unexpected HTTP response.",
+            reason=detail,
+            details={"path": "/predict", "upstream_status": error.code},
+        )
+    except socket.timeout as error:
+        _raise_api_error(
+            status_code=504,
+            error_code="inference_service_timeout",
+            message="Inference service timed out.",
+            reason=str(error),
+            details={"path": "/predict"},
+        )
+    except URLError as error:
+        if isinstance(error.reason, (socket.timeout, TimeoutError)):
+            _raise_api_error(
+                status_code=504,
+                error_code="inference_service_timeout",
+                message="Inference service timed out.",
+                reason=str(error.reason),
+                details={"path": "/predict"},
+            )
+
+        _raise_api_error(
+            status_code=503,
+            error_code="inference_service_unavailable",
+            message="Inference service is unavailable.",
+            reason=str(error.reason),
+            details={"path": "/predict"},
+        )
+
+    try:
+        response_payload = json.loads(raw_response.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_response",
+            message="Inference service returned invalid JSON.",
+            reason=str(error),
+            details={"path": "/predict"},
+        )
+        raise AssertionError("unreachable")
+
+    if not isinstance(response_payload, dict):
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_response",
+            message="Inference service returned an invalid contract.",
+            reason="Expected a JSON object.",
+            details={"path": "/predict"},
+        )
+
+    required_fields = {
+        "piece_event_id",
+        "scenario_id",
+        "score",
+        "decision",
+        "heatmap_uri",
+        "roi_status",
+        "roi_model_version",
+        "feature_ae_version",
+    }
+    missing = sorted(required_fields - set(response_payload))
+    if missing:
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_response",
+            message="Inference service returned an incomplete contract.",
+            reason=f"Missing fields: {', '.join(missing)}.",
+            details={"path": "/predict"},
+        )
+
+    decision = response_payload["decision"]
+    if decision not in {"Vert", "Orange", "Rouge"}:
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_response",
+            message="Inference service returned an invalid decision.",
+            reason=f"Unsupported decision: {decision!r}.",
+            details={"path": "/predict"},
+        )
+
+    if (
+        response_payload["piece_event_id"] != request.piece_event_id
+        or response_payload["scenario_id"] != request.scenario_id
+    ):
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_response",
+            message="Inference service returned mismatched traceability identifiers.",
+            reason="piece_event_id or scenario_id does not match the request.",
+            details={"path": "/predict"},
+        )
+
+    try:
+        return InferenceResult(
+            piece_event_id=str(response_payload["piece_event_id"]),
+            scenario_id=str(response_payload["scenario_id"]),
+            score=float(response_payload["score"]),
+            decision=decision,
+            heatmap_uri=(
+                None
+                if response_payload["heatmap_uri"] is None
+                else str(response_payload["heatmap_uri"])
+            ),
+            roi_status=(
+                None
+                if response_payload["roi_status"] is None
+                else str(response_payload["roi_status"])
+            ),
+            roi_model_version=str(response_payload["roi_model_version"]),
+            feature_ae_version=str(response_payload["feature_ae_version"]),
+        )
+    except (TypeError, ValueError) as error:
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_response",
+            message="Inference service returned an invalid contract.",
+            reason=str(error),
+            details={"path": "/predict"},
+        )
+        raise AssertionError("unreachable")
 
 
 def _api_error_detail(
@@ -386,7 +615,7 @@ def reset_replay_run(replay_run_id: str) -> dict[str, Any]:
 @app.post("/predict")
 def predict(request: PredictRequest) -> dict[str, Any]:
     _started = time.perf_counter()
-    inference_result = placeholder_inference(
+    inference_result = _call_inference_service(
         InferenceRequest(
             piece_event_id=request.piece_event_id,
             scenario_id=request.scenario_id,
