@@ -1,8 +1,8 @@
-"""Unit tests for the model-quality Prometheus exporter (Issue 1 tracer bullet).
+"""Unit tests for the model-quality Prometheus exporter (Issues 1-2).
 
 The MLflow -> gauge transformation is pure and tested without a live MLflow:
-latest value per (model_version, stage), and clean degradation when MLflow is
-unreachable or the AUPIMO metric is absent.
+latest run per (model_version, stage), the 4 business gauges, missing metrics
+tolerated, and clean degradation when MLflow is unreachable.
 """
 
 from __future__ import annotations
@@ -12,66 +12,91 @@ from types import SimpleNamespace
 import pytest
 
 from iqa.monitoring import model_quality_exporter as mqe
-from iqa.monitoring.model_metrics import AUPIMO_KEY, TAG_MODEL_VERSION, TAG_STAGE
+from iqa.monitoring.model_metrics import (
+    AUPIMO_KEY,
+    MODEL_QUALITY_METRIC_KEYS,
+    TAG_MODEL_VERSION,
+    TAG_STAGE,
+)
 
 pytestmark = pytest.mark.unit
 
 
-def _run(*, model_version: str, stage: str, aupimo: float | None, start_time: int) -> SimpleNamespace:
-    metrics = {} if aupimo is None else {AUPIMO_KEY: aupimo}
+def _run(*, model_version: str, stage: str, metrics: dict[str, float], start_time: int) -> SimpleNamespace:
     tags = {}
     if model_version:
         tags[TAG_MODEL_VERSION] = model_version
     if stage:
         tags[TAG_STAGE] = stage
     return SimpleNamespace(
-        data=SimpleNamespace(metrics=metrics, tags=tags),
+        data=SimpleNamespace(metrics=dict(metrics), tags=tags),
         info=SimpleNamespace(start_time=start_time),
     )
 
 
-class TestLatestAupimoPerModel:
-    def test_keeps_latest_value_per_model_and_stage(self) -> None:
+_FULL = {AUPIMO_KEY: 0.42, "pixel_ap": 0.61, "image_ap": 0.87, "image_auroc": 0.93}
+
+
+class TestLatestMetricsPerModel:
+    def test_emits_all_four_metrics_for_a_pair(self) -> None:
+        samples = mqe.latest_metrics_per_model([_run(model_version="m1", stage="prod", metrics=_FULL, start_time=1)])
+
+        by_key = {s.metric_key: s.value for s in samples}
+        assert by_key == _FULL
+        assert {(s.model_version, s.stage) for s in samples} == {("m1", "prod")}
+
+    def test_latest_run_wins_per_model_and_stage(self) -> None:
         runs = [
-            _run(model_version="m1", stage="prod", aupimo=0.70, start_time=100),
-            _run(model_version="m1", stage="prod", aupimo=0.83, start_time=200),  # newer wins
-            _run(model_version="m1", stage="candidate", aupimo=0.60, start_time=150),
+            _run(model_version="m1", stage="prod", metrics={**_FULL, "image_ap": 0.70}, start_time=100),
+            _run(model_version="m1", stage="prod", metrics={**_FULL, "image_ap": 0.88}, start_time=200),  # newer
         ]
 
-        samples = mqe.latest_aupimo_per_model(runs)
+        samples = mqe.latest_metrics_per_model(runs)
 
-        by_key = {(s.model_version, s.stage): s.value for s in samples}
-        assert by_key == {("m1", "prod"): 0.83, ("m1", "candidate"): 0.60}
+        image_ap = next(s.value for s in samples if s.metric_key == "image_ap")
+        assert image_ap == 0.88
 
-    def test_skips_runs_missing_metric_or_tags(self) -> None:
+    def test_candidate_and_prod_coexist(self) -> None:
         runs = [
-            _run(model_version="m1", stage="prod", aupimo=None, start_time=100),  # no metric
-            _run(model_version="", stage="prod", aupimo=0.5, start_time=100),  # no model_version
-            _run(model_version="m2", stage="", aupimo=0.5, start_time=100),  # no stage
-            _run(model_version="m3", stage="candidate", aupimo=0.42, start_time=100),  # valid
+            _run(model_version="prod_m", stage="prod", metrics=_FULL, start_time=1),
+            _run(model_version="cand_m", stage="candidate", metrics=_FULL, start_time=1),
         ]
 
-        samples = mqe.latest_aupimo_per_model(runs)
+        pairs = {(s.model_version, s.stage) for s in mqe.latest_metrics_per_model(runs)}
 
-        assert [(s.model_version, s.stage, s.value) for s in samples] == [("m3", "candidate", 0.42)]
+        assert pairs == {("prod_m", "prod"), ("cand_m", "candidate")}
+
+    def test_tolerates_missing_metrics_and_skips_untagged(self) -> None:
+        runs = [
+            _run(model_version="m1", stage="prod", metrics={AUPIMO_KEY: 0.42}, start_time=1),  # only aupimo
+            _run(model_version="", stage="prod", metrics=_FULL, start_time=1),  # no model_version -> skipped
+        ]
+
+        samples = mqe.latest_metrics_per_model(runs)
+
+        assert [(s.metric_key, s.model_version) for s in samples] == [(AUPIMO_KEY, "m1")]
 
 
 class TestRenderMetrics:
-    def test_renders_gauge_with_labels_and_exporter_up(self) -> None:
-        samples = [mqe.AupimoSample(model_version="m1", stage="prod", value=0.83)]
+    def test_renders_four_gauges_with_labels(self) -> None:
+        samples = mqe.latest_metrics_per_model([_run(model_version="m1", stage="prod", metrics=_FULL, start_time=1)])
 
         text = mqe.render_metrics(samples, exporter_up=True)
 
-        assert f"# TYPE {mqe.AUPIMO_GAUGE} gauge" in text
-        assert f'{mqe.AUPIMO_GAUGE}{{model_version="m1",stage="prod"}} 0.83' in text
+        for metric_key in MODEL_QUALITY_METRIC_KEYS:
+            gauge = mqe.GAUGE_NAMES[metric_key]
+            assert f"# TYPE {gauge} gauge" in text
+            assert f'{gauge}{{model_version="m1",stage="prod"}} ' in text
         assert f"{mqe.EXPORTER_UP_GAUGE} 1" in text
 
     def test_marks_exporter_down_with_no_samples(self) -> None:
         text = mqe.render_metrics([], exporter_up=False)
 
         assert f"{mqe.EXPORTER_UP_GAUGE} 0" in text
-        assert mqe.AUPIMO_GAUGE in text  # HELP/TYPE still present
-        assert "{model_version=" not in text  # but no sample lines
+        # HELP/TYPE for all gauges still present, but no sample lines.
+        for metric_key in MODEL_QUALITY_METRIC_KEYS:
+            assert f"# TYPE {mqe.GAUGE_NAMES[metric_key]} gauge" in text
+        assert "{model_version=" not in text
 
 
 class TestCollectMetricsText:
@@ -85,8 +110,8 @@ class TestCollectMetricsText:
 
         assert f"{mqe.EXPORTER_UP_GAUGE} 0" in text
 
-    def test_up_with_no_samples_when_metric_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        runs = [_run(model_version="m1", stage="prod", aupimo=None, start_time=1)]
+    def test_up_with_no_samples_when_metrics_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runs = [_run(model_version="m1", stage="prod", metrics={}, start_time=1)]
         monkeypatch.setattr(mqe, "_fetch_runs", lambda **_kwargs: runs)
 
         text = mqe.collect_metrics_text()

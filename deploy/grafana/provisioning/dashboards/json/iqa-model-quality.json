@@ -1,0 +1,81 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "tags": ["iqa", "model-quality", "feature-ae"],
+  "time": { "from": "now-24h", "to": "now" },
+  "timezone": "browser",
+  "title": "IQA - Qualite modele Feature-AE",
+  "uid": "iqa-model-quality",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Exporter qualite modele",
+      "description": "1 si le dernier scrape MLflow a reussi (l'exporter degrade a 0 si MLflow est indisponible).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "MLflow KO", "color": "red" }, "1": { "text": "OK", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+        }
+      },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_model_quality_exporter_up", "instant": true }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "AUPIMO (pixel, low-FPR)",
+      "description": "iqa_model_pixel_aupimo par modele et stage (candidat vs prod). Source: MLflow iqa-model-quality.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 3, "min": 0, "max": 1 } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_model_pixel_aupimo", "legendFormat": "{{stage}} - {{model_version}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Pixel AP",
+      "description": "iqa_model_pixel_ap par modele et stage (candidat vs prod). Source: MLflow iqa-model-quality.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 3, "min": 0, "max": 1 } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_model_pixel_ap", "legendFormat": "{{stage}} - {{model_version}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Image AP",
+      "description": "iqa_model_image_ap par modele et stage (candidat vs prod). Source: MLflow iqa-model-quality.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 3, "min": 0, "max": 1 } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_model_image_ap", "legendFormat": "{{stage}} - {{model_version}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Image AUROC",
+      "description": "iqa_model_image_auroc par modele et stage (candidat vs prod). Source: MLflow iqa-model-quality.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 3, "min": 0, "max": 1 } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_model_image_auroc", "legendFormat": "{{stage}} - {{model_version}}" }
+      ]
+    }
+  ]
+}
