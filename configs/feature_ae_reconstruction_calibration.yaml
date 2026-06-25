@@ -1,0 +1,59 @@
+# Calibration des seuils de reconstruction du chemin A reel (ADR 0010 §3, Issue 6).
+# Le RealFeatureAEScorer charge ce fichier au lieu de constantes 0.02/0.05 codees en dur.
+# Reproductible (GPU) : uv run --extra serving python scripts/calibrate_feature_ae_reconstruction.py --image-root data/raw/hss-iad --write-config
+
+reconstruction_calibration:
+  checkpoint: /opt/iqa/models/rd_feature_ae_class1_baseline/checkpoint.pt
+  computed_at: '2026-06-25T15:52:42.037211+00:00'
+  method: class1_percentile_plus_margin
+  orange_percentile: 95.0
+  red_percentile: 99.0
+  margin: 0.05
+  thresholds:
+    threshold_orange: 6.2251831340789785
+    threshold_red: 7.5614899957180075
+  class1_score_stats:
+    count: 142
+    min: 0.7080119848251343
+    max: 11.022727012634277
+    mean: 2.33856110589605
+    p99: 7.201419043540959
+  by_phase:
+    baseline_domain_class1:
+      total: 142
+      decisions:
+        Vert: 137
+        Orange: 3
+        Rouge: 2
+      anomaly_rate: 0.0352
+    domain_extension_class2:
+      total: 60
+      decisions:
+        Rouge: 19
+        Vert: 37
+        Orange: 4
+      anomaly_rate: 0.3833
+    domain_extension_class3:
+      total: 60
+      decisions:
+        Vert: 51
+        Rouge: 8
+        Orange: 1
+      anomaly_rate: 0.15
+  separation:
+    baseline_phase_anomaly_rate: 0.0352
+    extension_phase_anomaly_rate: 0.15
+    margin: 0.1148
+  hitl:
+    validated: false
+    validated_by: null
+    validated_on: null
+    note: 'Seuils mesures sur 142 images class1 (orange=p95+marge). Verify (sample
+      GPU) : class1 -> 3.5% (Vert), class2 -> 38%, class3 -> 15% d''anomalies. La
+      separation class2/class3 reste faible (marge ~0.11, attendu ~1.0) : le baseline
+      class1 reconstruit class3 presque aussi bien que class1. A retravailler cote
+      checkpoint baseline avant validation HITL (validated reste false).'
+  verify_sample:
+    class1_n: 142
+    class2_n: 60
+    class3_n: 60

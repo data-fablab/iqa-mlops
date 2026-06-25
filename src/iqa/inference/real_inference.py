@@ -23,6 +23,10 @@ import torch
 
 from iqa.inference.contracts import Decision, InferenceRequest, InferenceResult
 from iqa.inference.feature_ae import compute_feature_ae_score_maps
+from iqa.inference.reconstruction_calibration import (
+    DEFAULT_CALIBRATION_PATH,
+    load_reconstruction_calibration,
+)
 from iqa.models.feature_ae import (
     DEFAULT_FEATURE_LAYERS,
     ResNetTeacherFeatures,
@@ -30,8 +34,16 @@ from iqa.models.feature_ae import (
     normalize_feature_layers,
 )
 
-DEFAULT_CHECKPOINT = "/opt/iqa/models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt"
+# Deployed baseline is trained on Casting_class1 only (ADR 0010 §4): class2/class3
+# are then genuinely out-of-distribution.
+DEFAULT_CHECKPOINT = "/opt/iqa/models/rd_feature_ae_class1_baseline/checkpoint.pt"
 ROI_MODEL_VERSION = "roi_segmenter_v001_fixed"
+
+# Last-resort thresholds, only used when neither the calibration file nor the env
+# vars provide them. The calibrated file (configs/feature_ae_reconstruction_calibration.yaml)
+# is the intended source of truth (ADR 0010 §3).
+_FALLBACK_THRESHOLD_ORANGE = 0.02
+_FALLBACK_THRESHOLD_RED = 0.05
 
 
 def real_inference_enabled() -> bool:
@@ -67,6 +79,7 @@ class RealFeatureAEScorer:
         device: str | None = None,
         threshold_orange: float | None = None,
         threshold_red: float | None = None,
+        calibration_path: str | None = None,
         layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
     ) -> None:
         self.checkpoint_path = checkpoint_path or os.environ.get("IQA_FEATURE_AE_CHECKPOINT", DEFAULT_CHECKPOINT)
@@ -74,8 +87,28 @@ class RealFeatureAEScorer:
         if requested == "cuda" and not torch.cuda.is_available():
             requested = "cpu"
         self.device = requested
-        self.threshold_orange = threshold_orange if threshold_orange is not None else _env_float("IQA_FEATURE_AE_THRESHOLD_ORANGE", 0.02)
-        self.threshold_red = threshold_red if threshold_red is not None else _env_float("IQA_FEATURE_AE_THRESHOLD_RED", 0.05)
+        # Threshold resolution (most specific first): explicit arg -> calibration
+        # file (ADR 0010 §3) -> env var -> last-resort constant. The decision is no
+        # longer driven by constants hardcoded in the scorer.
+        self.calibration_path = calibration_path or os.environ.get(
+            "IQA_FEATURE_AE_CALIBRATION", str(DEFAULT_CALIBRATION_PATH)
+        )
+        calibrated = load_reconstruction_calibration(self.calibration_path)
+        self.threshold_source = "calibration_file" if calibrated is not None else "env_or_fallback"
+        if threshold_orange is not None:
+            self.threshold_orange = threshold_orange
+            self.threshold_source = "explicit"
+        elif calibrated is not None:
+            self.threshold_orange = calibrated.threshold_orange
+        else:
+            self.threshold_orange = _env_float("IQA_FEATURE_AE_THRESHOLD_ORANGE", _FALLBACK_THRESHOLD_ORANGE)
+        if threshold_red is not None:
+            self.threshold_red = threshold_red
+            self.threshold_source = "explicit"
+        elif calibrated is not None:
+            self.threshold_red = calibrated.threshold_red
+        else:
+            self.threshold_red = _env_float("IQA_FEATURE_AE_THRESHOLD_RED", _FALLBACK_THRESHOLD_RED)
         self.layers = normalize_feature_layers(layers)
         self.feature_ae_version = Path(self.checkpoint_path).parent.name or "rd_feature_ae"
         self._lock = threading.Lock()

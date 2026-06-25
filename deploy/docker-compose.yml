@@ -40,8 +40,12 @@ services:
       # reconstruct poorly -> high anomaly score -> Orange/Rouge.
       IQA_REAL_INFERENCE: ${IQA_REAL_INFERENCE:-1}
       IQA_INFERENCE_DEVICE: ${IQA_INFERENCE_DEVICE:-cuda}
-      IQA_FEATURE_AE_CHECKPOINT: ${IQA_FEATURE_AE_CHECKPOINT:-/opt/iqa/models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt}
-      # Decision thresholds on the real reconstruction score (set after calibration).
+      # Deploy the Casting_class1-only baseline (ADR 0010 §4): class2/class3 are then
+      # genuinely out-of-distribution so the drift demo is real.
+      IQA_FEATURE_AE_CHECKPOINT: ${IQA_FEATURE_AE_CHECKPOINT:-/opt/iqa/models/rd_feature_ae_class1_baseline/checkpoint.pt}
+      # Calibrated reconstruction thresholds (ADR 0010 §3) are the source of truth;
+      # the env thresholds below are only a fallback when the file is absent.
+      IQA_FEATURE_AE_CALIBRATION: ${IQA_FEATURE_AE_CALIBRATION:-/opt/iqa/iqa-mlops/configs/feature_ae_reconstruction_calibration.yaml}
       IQA_FEATURE_AE_THRESHOLD_ORANGE: ${IQA_FEATURE_AE_THRESHOLD_ORANGE:-0.02}
       IQA_FEATURE_AE_THRESHOLD_RED: ${IQA_FEATURE_AE_THRESHOLD_RED:-0.05}
     ports: ["8100:8100"]
@@ -49,6 +53,8 @@ services:
       - gpu_lock:/var/run/iqa-gpu
       # Live src so the real scorer picks up changes without a rebuild.
       - ../src:/app/src:ro
+      # Calibrated reconstruction thresholds, read by RealFeatureAEScorer.
+      - ../configs:/opt/iqa/iqa-mlops/configs:ro
       # Real checkpoints (host .cache) -> baseline + retrained candidates.
       - ../.cache/iqa/models:/opt/iqa/models:ro
       # Real casting images so the scorer reads actual pixels (same dataset the
