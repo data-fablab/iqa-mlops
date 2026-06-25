@@ -555,6 +555,11 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
     params = {
         "checkpoint": str(config.checkpoint_path),
         "checkpoint_sha256": sha256_file(config.checkpoint_path),
+        "manifest": str(config.manifest_path),
+        "manifest_sha256": sha256_file(config.manifest_path),
+        "gt_masks_manifest": str(config.gt_masks_manifest) if config.gt_masks_manifest else None,
+        "gt_masks_manifest_sha256": sha256_file(config.gt_masks_manifest) if config.gt_masks_manifest else None,
+        "image_root": str(config.image_root),
         "validation_set_id": config.validation_set_id,
         "score_contract": result["score_contract"],
         "threshold_orange": config.threshold_orange,
