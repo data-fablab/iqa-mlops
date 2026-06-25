@@ -55,7 +55,7 @@ CANDIDATE_DATASETS = {
     NATURAL_TRAIN_SCENARIO_ID: "feature_ae_good_mvp_v001",
     DRIFT_SCENARIO_ID: "feature_ae_good_mvp_v001",
 }
-VALIDATION_MANIFEST = Path("data/validation/validation_set_replay_gate_v003.csv")
+VALIDATION_MANIFEST = Path("data/validation/validation_set_replay_gate_v002.csv")
 VALIDATION_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
 DEFAULT_ANCHOR_GOOD_MANIFEST = Path("data/model_datasets/feature_ae_good_mvp_v001.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/replay_lifecycle")
