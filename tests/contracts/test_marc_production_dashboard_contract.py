@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path("deploy/streamlit").resolve()))
 
-from marc_lifecycle import aggregate_lots, lifecycle_rows, production_alerts
+from marc_lifecycle import aggregate_lots, classification_quality_rows, lifecycle_rows, production_alerts
 
 
 def test_marc_dashboard_exposes_lifecycle_run_and_api_history() -> None:
@@ -33,6 +33,15 @@ def test_marc_dashboard_exposes_production_and_lineage_terms() -> None:
 
     for expected in [
         "Conformite des lots",
+        "Distribution Conforme / A verifier / Non conforme",
+        "scale=alt.Scale",
+        "domain=[LABEL_CONFORME, LABEL_A_VERIFIER, LABEL_NON_CONFORME]",
+        "Performance classification modele vs oracle Sophie",
+        "Recall defauts",
+        "Precision alertes",
+        "Faux negatifs",
+        "Faux positifs",
+        "Detail modele vs oracle par lot",
         "Lifecycle Feature-AE",
         "Modele actif courant",
         "Journal lifecycle live",
@@ -75,6 +84,28 @@ def test_marc_lot_aggregation_counts_conformity_and_alerts() -> None:
     assert lots[1]["orange"] == 1
     assert lots[1]["roi_fail_rate"] == 100.0
     assert "LOT-001 contient 1 defaut(s) GT." in production_alerts(lots, [])
+
+
+def test_marc_classification_quality_compares_model_to_oracle() -> None:
+    events = [
+        {"lot_id": "LOT-001", "active_model_version": "m1", "oracle_verdict": "conforme", "decision": "green"},
+        {"lot_id": "LOT-001", "active_model_version": "m1", "oracle_verdict": "defective", "decision": "green"},
+        {"lot_id": "LOT-002", "active_model_version": "m2", "oracle_verdict": "defective", "decision": "red"},
+        {"lot_id": "LOT-002", "active_model_version": "m2", "oracle_verdict": "conforme", "decision": "orange"},
+    ]
+
+    rows = classification_quality_rows(events, group_key="active_model_version")
+
+    assert rows[0]["active_model_version"] == "m1"
+    assert rows[0]["true_good"] == 1
+    assert rows[0]["false_negative"] == 1
+    assert rows[0]["defect_recall"] == 0.0
+    assert rows[1]["active_model_version"] == "m2"
+    assert rows[1]["defect_detected"] == 1
+    assert rows[1]["false_positive"] == 1
+    assert rows[1]["false_positive_orange"] == 1
+    assert rows[1]["defect_recall"] == 1.0
+    assert rows[1]["alert_precision"] == 0.5
 
 
 def test_marc_lifecycle_rows_surface_aupimo_and_promotion() -> None:

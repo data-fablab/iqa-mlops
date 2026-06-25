@@ -6,10 +6,19 @@ import os
 from pathlib import Path
 from typing import Any
 
+import altair as alt
+import pandas as pd
 import requests
 import streamlit as st
 from iqa_client import API_URL, get
-from marc_lifecycle import aggregate_lots, lifecycle_rows, production_alerts, read_json, read_jsonl
+from marc_lifecycle import (
+    aggregate_lots,
+    classification_quality_rows,
+    lifecycle_rows,
+    production_alerts,
+    read_json,
+    read_jsonl,
+)
 from repo_paths import default_repo_root
 
 st.set_page_config(page_title="IQA - Dashboard Marc", layout="wide")
@@ -44,6 +53,35 @@ def _resolve_path(value: str | os.PathLike[str] | None) -> Path:
 
 def _sum(rows: list[dict[str, Any]], key: str) -> int:
     return sum(int(row.get(key) or 0) for row in rows)
+
+
+def _decision_distribution_chart(rows: list[dict[str, Any]], *, x_key: str, x_title: str) -> alt.Chart:
+    chart_rows: list[dict[str, Any]] = []
+    for row in rows:
+        chart_rows.extend(
+            [
+                {x_key: row[x_key], "decision": LABEL_CONFORME, "pieces": row["vert"]},
+                {x_key: row[x_key], "decision": LABEL_A_VERIFIER, "pieces": row["orange"]},
+                {x_key: row[x_key], "decision": LABEL_NON_CONFORME, "pieces": row["rouge"]},
+            ]
+        )
+    return (
+        alt.Chart(pd.DataFrame(chart_rows))
+        .mark_bar()
+        .encode(
+            x=alt.X(f"{x_key}:N", title=x_title, sort=None),
+            y=alt.Y("pieces:Q", title="Pieces"),
+            color=alt.Color(
+                "decision:N",
+                title="Decision modele",
+                scale=alt.Scale(
+                    domain=[LABEL_CONFORME, LABEL_A_VERIFIER, LABEL_NON_CONFORME],
+                    range=[COLOR_CONFORME, COLOR_A_VERIFIER, COLOR_NON_CONFORME],
+                ),
+            ),
+            tooltip=[x_key, "decision", "pieces"],
+        )
+    )
 
 
 if st.button("Rafraichir"):
@@ -81,6 +119,12 @@ with tab_run:
         )
         lots = aggregate_lots(events, active_model=active_model_current)
         lifecycle = lifecycle_rows(cycles)
+        quality_total = classification_quality_rows(
+            [dict(event, run_scope="Run complet") for event in events],
+            group_key="run_scope",
+        )
+        quality_by_model = classification_quality_rows(events, group_key="active_model_version")
+        quality_by_lot = classification_quality_rows(events, group_key="lot_id")
         alerts = production_alerts(lots, cycles)
 
         total_pieces = len(events)
@@ -144,14 +188,75 @@ with tab_run:
             )
 
         st.subheader("Distribution Conforme / A verifier / Non conforme")
-        st.bar_chart(
-            {
-                LABEL_CONFORME: {row["lot_id"]: row["vert"] for row in lots},
-                LABEL_A_VERIFIER: {row["lot_id"]: row["orange"] for row in lots},
-                LABEL_NON_CONFORME: {row["lot_id"]: row["rouge"] for row in lots},
-            },
-            color=[COLOR_CONFORME, COLOR_A_VERIFIER, COLOR_NON_CONFORME],
+        st.altair_chart(_decision_distribution_chart(lots, x_key="lot_id", x_title="Lot"), use_container_width=True)
+
+        st.divider()
+        st.subheader("Performance classification modele vs oracle Sophie")
+        if quality_total:
+            total_quality = quality_total[0]
+            q1, q2, q3, q4, q5 = st.columns(5)
+            q1.metric("Recall defauts", f"{100 * total_quality['defect_recall']:.1f} %")
+            q2.metric("Precision alertes", f"{100 * total_quality['alert_precision']:.1f} %")
+            q3.metric("Faux negatifs", int(total_quality["false_negative"]))
+            q4.metric("Faux positifs", int(total_quality["false_positive"]))
+            q5.metric("Defauts detectes", f"{total_quality['defect_detected']} / {total_quality['oracle_defective']}")
+
+        st.caption(
+            "Lecture binaire : oracle Sophie defectueux vs modele alerte (A verifier ou Non conforme). "
+            "Un faux negatif est un defaut oracle classe Conforme par le modele."
         )
+        st.dataframe(
+            quality_by_model,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "active_model_version": "Modele actif",
+                "pieces": "Pieces",
+                "oracle_conforme": "Conformes oracle",
+                "oracle_defective": "Defauts oracle",
+                "true_good": "Bons acceptes",
+                "defect_detected": "Defauts detectes",
+                "false_negative": "Faux negatifs",
+                "false_positive": "Faux positifs",
+                "false_positive_orange": "FP a verifier",
+                "false_positive_red": "FP non conformes",
+                "defect_recall": st.column_config.NumberColumn("Recall defauts", format="%.3f"),
+                "alert_precision": st.column_config.NumberColumn("Precision alertes", format="%.3f"),
+                "false_negative_rate": st.column_config.NumberColumn("Taux FN", format="%.3f"),
+                "false_positive_rate": st.column_config.NumberColumn("Taux FP", format="%.3f"),
+            },
+        )
+        st.line_chart(
+            {
+                "Recall defauts": {
+                    row["active_model_version"]: row["defect_recall"]
+                    for row in quality_by_model
+                    if row.get("active_model_version")
+                },
+                "Taux faux negatifs": {
+                    row["active_model_version"]: row["false_negative_rate"]
+                    for row in quality_by_model
+                    if row.get("active_model_version")
+                },
+            }
+        )
+        with st.expander("Detail modele vs oracle par lot"):
+            st.dataframe(
+                quality_by_lot,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "lot_id": "Lot",
+                    "pieces": "Pieces",
+                    "oracle_conforme": "Conformes oracle",
+                    "oracle_defective": "Defauts oracle",
+                    "defect_detected": "Defauts detectes",
+                    "false_negative": "Faux negatifs",
+                    "false_positive": "Faux positifs",
+                    "defect_recall": st.column_config.NumberColumn("Recall defauts", format="%.3f"),
+                    "alert_precision": st.column_config.NumberColumn("Precision alertes", format="%.3f"),
+                },
+            )
 
         st.divider()
         st.subheader("Lifecycle Feature-AE")
@@ -320,11 +425,7 @@ with tab_api:
                 "divergences": "Divergences",
             },
         )
-        st.bar_chart(
-            {
-                LABEL_CONFORME: {lot["scenario_id"]: lot["vert"] for lot in api_lots},
-                LABEL_A_VERIFIER: {lot["scenario_id"]: lot["orange"] for lot in api_lots},
-                LABEL_NON_CONFORME: {lot["scenario_id"]: lot["rouge"] for lot in api_lots},
-            },
-            color=[COLOR_CONFORME, COLOR_A_VERIFIER, COLOR_NON_CONFORME],
+        st.altair_chart(
+            _decision_distribution_chart(api_lots, x_key="scenario_id", x_title="Lot API"),
+            use_container_width=True,
         )
