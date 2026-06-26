@@ -763,6 +763,40 @@ def test_runtime_thresholds_require_reference_calibration(monkeypatch) -> None:
         runner.resolve_runtime_thresholds("missing_thresholds")
 
 
+def test_candidate_init_checkpoint_overrides_policy(tmp_path: Path, monkeypatch) -> None:
+    checkpoint = tmp_path / "warm.pt"
+    checkpoint.write_bytes(b"fake-checkpoint")
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID)
+    args.candidate_init_checkpoint = checkpoint
+    args.candidate_init_policy = "fresh"
+
+    active = SimpleNamespace(checkpoint=Path("other.pt"))
+    result = runner.resolve_candidate_initial_checkpoint(args, active_runtime=active)
+
+    assert result == checkpoint
+
+
+def test_candidate_init_checkpoint_none_falls_back_to_policy(tmp_path: Path) -> None:
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID)
+    args.candidate_init_checkpoint = None
+    args.candidate_init_policy = "fresh"
+
+    active = SimpleNamespace(checkpoint=Path("active.pt"))
+    result = runner.resolve_candidate_initial_checkpoint(args, active_runtime=active)
+
+    assert result is None
+
+
+def test_candidate_init_checkpoint_invalid_path_raises(tmp_path: Path) -> None:
+    args = _args(tmp_path, scenario_id=runner.NATURAL_SCENARIO_ID)
+    args.candidate_init_checkpoint = tmp_path / "nonexistent.pt"
+    args.candidate_init_policy = "fresh"
+
+    active = SimpleNamespace(checkpoint=Path("active.pt"))
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        runner.resolve_candidate_initial_checkpoint(args, active_runtime=active)
+
+
 def test_prediction_cache_roundtrip(tmp_path: Path) -> None:
     cache_root = tmp_path / "prediction_cache"
     output_dir = tmp_path / "cycle_eval"

@@ -1,12 +1,13 @@
-"""Tests for the PatchCore domain-drift detector seam (Issue 11).
+"""Tests for the PatchCore domain-drift detector seam (Issues 11, 19–22).
 
 TDD on the pure parts — max-patch aggregation, seeded coreset subsampling, p90
-calibration, regime mapping, and save/load round-trip — without a GPU or the
-ImageNet backbone. The bank construction / live scoring is verified against the
-GPU stack (verify), not here.
+calibration, regime mapping, save/load round-trip, multi-class balanced pooling,
+covered_classes manifest, and union helper — without a GPU or the ImageNet backbone.
 """
 
 from __future__ import annotations
+
+import json
 
 import pytest
 import torch
@@ -16,10 +17,12 @@ from iqa.inference.domain_drift import (
     OUT_OF_DOMAIN,
     DomainDriftCalibration,
     PatchCoreDomainDriftDetector,
+    balanced_pool,
     calibrate_threshold,
     coreset_subsample,
     max_patch_score,
     regime_for_score,
+    union_covered_classes,
 )
 
 pytestmark = pytest.mark.unit
@@ -114,3 +117,141 @@ def test_score_without_bank_raises():
     detector = PatchCoreDomainDriftDetector(device="cpu")
     with pytest.raises(RuntimeError):
         detector.score("/nonexistent.jpg")
+
+
+# ---- Issue 19: balanced_pool multi-class sampling ----
+
+
+def test_balanced_pool_splits_budget_equally():
+    images = {
+        "class1": [f"c1/{i}.jpg" for i in range(50)],
+        "class2": [f"c2/{i}.jpg" for i in range(50)],
+    }
+    pool = balanced_pool(images, budget=20, seed=42)
+    assert len(pool) == 20
+    c1 = [p for p in pool if p.startswith("c1/")]
+    c2 = [p for p in pool if p.startswith("c2/")]
+    assert len(c1) == 10
+    assert len(c2) == 10
+
+
+def test_balanced_pool_handles_odd_budget():
+    images = {
+        "class1": [f"c1/{i}.jpg" for i in range(50)],
+        "class2": [f"c2/{i}.jpg" for i in range(50)],
+        "class3": [f"c3/{i}.jpg" for i in range(50)],
+    }
+    pool = balanced_pool(images, budget=10, seed=42)
+    assert len(pool) == 10
+
+
+def test_balanced_pool_is_deterministic():
+    images = {"a": [f"a/{i}.jpg" for i in range(30)], "b": [f"b/{i}.jpg" for i in range(30)]}
+    a = balanced_pool(images, 10, seed=42)
+    b = balanced_pool(images, 10, seed=42)
+    c = balanced_pool(images, 10, seed=7)
+    assert a == b
+    assert a != c
+
+
+def test_balanced_pool_single_class_matches_budget():
+    images = {"class1": [f"c1/{i}.jpg" for i in range(100)]}
+    pool = balanced_pool(images, budget=20, seed=42)
+    assert len(pool) == 20
+    assert all(p.startswith("c1/") for p in pool)
+
+
+def test_balanced_pool_empty():
+    assert balanced_pool({}, budget=10) == []
+
+
+# ---- Issue 20: calibration on union holdouts ----
+
+
+def test_calibrate_threshold_on_union_scores():
+    scores_c1 = list(range(50))
+    scores_c2 = list(range(50, 100))
+    union = scores_c1 + scores_c2
+    threshold = calibrate_threshold(union, percentile=90.0)
+    assert threshold == pytest.approx(89.1)
+
+
+# ---- Issue 21: covered_classes manifest + union helper ----
+
+
+def test_default_covered_classes_is_class1():
+    detector = PatchCoreDomainDriftDetector(device="cpu")
+    assert detector.covered_classes == ["Casting_class1"]
+
+
+def test_covered_classes_in_manifest():
+    detector = PatchCoreDomainDriftDetector(
+        bank=torch.randn(16, 4),
+        calibration=DomainDriftCalibration(threshold=2.0),
+        device="cpu",
+        covered_classes=["Casting_class1", "Casting_class2"],
+    )
+    manifest = detector.manifest()
+    assert manifest["covered_classes"] == ["Casting_class1", "Casting_class2"]
+
+
+def test_covered_classes_sorted_and_deduped():
+    detector = PatchCoreDomainDriftDetector(
+        device="cpu", covered_classes=["Casting_class2", "Casting_class1", "Casting_class2"]
+    )
+    assert detector.covered_classes == ["Casting_class1", "Casting_class2"]
+
+
+def test_save_load_preserves_covered_classes(tmp_path):
+    bank = torch.randn(32, 8)
+    calibration = DomainDriftCalibration(threshold=2.5, percentile=90.0, class1_sample_count=20)
+    detector = PatchCoreDomainDriftDetector(
+        bank=bank, calibration=calibration, device="cpu",
+        covered_classes=["Casting_class1", "Casting_class2"],
+    )
+    directory = detector.save(tmp_path / "det")
+    reloaded = PatchCoreDomainDriftDetector.load(directory, device="cpu")
+    assert reloaded.covered_classes == ["Casting_class1", "Casting_class2"]
+
+
+def test_load_legacy_manifest_defaults_to_class1(tmp_path):
+    bank = torch.randn(16, 4)
+    calibration = DomainDriftCalibration(threshold=2.0)
+    detector = PatchCoreDomainDriftDetector(bank=bank, calibration=calibration, device="cpu")
+    directory = detector.save(tmp_path / "det")
+    manifest_path = directory / "model_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["covered_classes"]
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    reloaded = PatchCoreDomainDriftDetector.load(directory, device="cpu")
+    assert reloaded.covered_classes == ["Casting_class1"]
+
+
+def test_union_covered_classes_adds_new():
+    assert union_covered_classes(["Casting_class1"], "Casting_class2") == [
+        "Casting_class1", "Casting_class2"
+    ]
+
+
+def test_union_covered_classes_deduplicates():
+    assert union_covered_classes(["Casting_class1", "Casting_class2"], "Casting_class1") == [
+        "Casting_class1", "Casting_class2"
+    ]
+
+
+def test_union_covered_classes_stable_order():
+    result = union_covered_classes(["Casting_class2", "Casting_class1"], "Casting_class3")
+    assert result == ["Casting_class1", "Casting_class2", "Casting_class3"]
+
+
+# ---- Issue 20: holdout_sample_count roundtrip ----
+
+
+def test_calibration_holdout_sample_count_round_trips():
+    calib = DomainDriftCalibration(
+        threshold=3.0, percentile=90.0, class1_score_median=2.6,
+        class1_sample_count=40, holdout_sample_count=80,
+    )
+    restored = DomainDriftCalibration.from_dict(calib.to_dict())
+    assert restored == calib
+    assert restored.holdout_sample_count == 80

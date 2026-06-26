@@ -1,4 +1,4 @@
-"""PatchCore domain-drift detector (Issue 11).
+"""PatchCore domain-drift detector (Issues 11, 19–21).
 
 A distance-to-nominal detector that separates *product domains* (Casting_class1 vs
 class2/class3) where the Feature-AE reconstruction score cannot: empirically the AE
@@ -19,16 +19,16 @@ Canonical parameters (from the validated prototype):
   locally-aware patch embedding;
 - image score = ``max`` over patches of ``min_j || f_patch - bank_j ||_2`` (max-patch,
   the canonical PatchCore image score);
-- per-piece threshold = p90 of the scores on a class1 hold-out (never in the bank).
+- per-piece threshold = p90 of the scores on the union of covered hold-outs.
 
-Threshold ownership (ADR 0010 dec. 7): the **per-piece** threshold lives here, in the
-calibration; the **population** ratio (0.5) lives once in the Prometheus rule. No
-duplicated threshold.
+Multi-class coverage (Issue 19–21): the bank can cover N classes with balanced
+sampling; the manifest records ``covered_classes`` as the cumulative source of truth.
 """
 
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,11 +98,33 @@ def coreset_subsample(patches: torch.Tensor, n_patches: int, seed: int = DEFAULT
     return patches[index]
 
 
-def calibrate_threshold(class1_scores: Iterable[float], percentile: float = DEFAULT_PERCENTILE) -> float:
-    """Per-piece out-of-domain threshold = ``percentile`` of class1 hold-out scores."""
-    values = np.asarray([float(s) for s in class1_scores], dtype=np.float64)
+def balanced_pool(
+    images_by_class: dict[str, list[str | Path]],
+    budget: int,
+    seed: int = DEFAULT_SEED,
+) -> list[str]:
+    """Draw ``budget`` images balanced equally across classes (seeded, deterministic)."""
+    rng = random.Random(seed)
+    classes = sorted(images_by_class)
+    if not classes:
+        return []
+    per_class = budget // len(classes)
+    remainder = budget % len(classes)
+    pool: list[str] = []
+    for idx, cls in enumerate(classes):
+        paths = [str(p) for p in images_by_class[cls]]
+        shuffled = list(paths)
+        rng.shuffle(shuffled)
+        take = per_class + (1 if idx < remainder else 0)
+        pool.extend(shuffled[:take])
+    return pool
+
+
+def calibrate_threshold(scores: Iterable[float], percentile: float = DEFAULT_PERCENTILE) -> float:
+    """Per-piece out-of-domain threshold = ``percentile`` of nominal hold-out scores."""
+    values = np.asarray([float(s) for s in scores], dtype=np.float64)
     if values.size == 0:
-        raise ValueError("calibration needs at least one class1 score")
+        raise ValueError("calibration needs at least one score")
     return float(np.percentile(values, float(percentile)))
 
 
@@ -113,12 +135,13 @@ def regime_for_score(score: float, threshold: float) -> str:
 
 @dataclass(frozen=True)
 class DomainDriftCalibration:
-    """The calibrated per-piece threshold plus class1 provenance stats."""
+    """The calibrated per-piece threshold plus provenance stats."""
 
     threshold: float
     percentile: float = DEFAULT_PERCENTILE
     class1_score_median: float | None = None
     class1_sample_count: int = 0
+    holdout_sample_count: int = 0
 
     def to_dict(self) -> dict[str, float | int | None]:
         return {
@@ -128,6 +151,7 @@ class DomainDriftCalibration:
                 None if self.class1_score_median is None else float(self.class1_score_median)
             ),
             "class1_sample_count": int(self.class1_sample_count),
+            "holdout_sample_count": int(self.holdout_sample_count),
         }
 
     @classmethod
@@ -141,6 +165,7 @@ class DomainDriftCalibration:
                 else float(payload["class1_score_median"])
             ),
             class1_sample_count=int(payload.get("class1_sample_count", 0)),
+            holdout_sample_count=int(payload.get("holdout_sample_count", 0)),
         )
 
 
@@ -149,6 +174,8 @@ class DomainDriftCalibration:
 # --------------------------------------------------------------------------- #
 class PatchCoreDomainDriftDetector:
     """Distance-to-nominal domain-drift detector with a coreset memory bank."""
+
+    DEFAULT_COVERED_CLASSES: list[str] = ["Casting_class1"]
 
     def __init__(
         self,
@@ -160,6 +187,7 @@ class PatchCoreDomainDriftDetector:
         layers: Sequence[str] = DEFAULT_LAYERS,
         backbone_name: str = DEFAULT_BACKBONE,
         coreset_patches: int = DEFAULT_CORESET_PATCHES,
+        covered_classes: Sequence[str] | None = None,
     ) -> None:
         requested = device or "cuda"
         if requested == "cuda" and not torch.cuda.is_available():
@@ -169,6 +197,7 @@ class PatchCoreDomainDriftDetector:
         self.layers = tuple(layers)
         self.backbone_name = backbone_name
         self.coreset_patches = int(coreset_patches)
+        self.covered_classes: list[str] = sorted(set(covered_classes)) if covered_classes else list(self.DEFAULT_COVERED_CLASSES)
         self.calibration = calibration
         self._bank = None if bank is None else bank.to(self.device)
         self._backbone: torch.nn.Module | None = None
@@ -258,9 +287,12 @@ class PatchCoreDomainDriftDetector:
         return max_patch_score(embeds[0], self._bank)
 
     def calibrate(
-        self, holdout_paths: Sequence[str | Path], *, percentile: float = DEFAULT_PERCENTILE
+        self,
+        holdout_paths: Sequence[str | Path],
+        *,
+        percentile: float = DEFAULT_PERCENTILE,
     ) -> DomainDriftCalibration:
-        """Calibrate the per-piece threshold = ``percentile`` of class1 hold-out scores."""
+        """Calibrate the per-piece threshold = ``percentile`` of the union hold-out scores."""
         scores = [self.score(path) for path in holdout_paths]
         threshold = calibrate_threshold(scores, percentile)
         self.calibration = DomainDriftCalibration(
@@ -268,6 +300,7 @@ class PatchCoreDomainDriftDetector:
             percentile=percentile,
             class1_score_median=float(np.median(scores)) if scores else None,
             class1_sample_count=len(scores),
+            holdout_sample_count=len(scores),
         )
         return self.calibration
 
@@ -312,6 +345,7 @@ class PatchCoreDomainDriftDetector:
             "score_image": "max_patch_knn_l2",
             "regime_threshold": calibration["threshold"] if calibration else None,
             "calibration": calibration,
+            "covered_classes": list(self.covered_classes),
             "signal": "domain_drift",
             "purpose": "domain_drift_only_not_defect_detection",
         }
@@ -335,8 +369,14 @@ class PatchCoreDomainDriftDetector:
             layers=tuple(manifest.get("feature_layers", DEFAULT_LAYERS)),
             backbone_name=manifest.get("backbone", DEFAULT_BACKBONE),
             coreset_patches=int(manifest.get("coreset_patches", DEFAULT_CORESET_PATCHES)),
+            covered_classes=manifest.get("covered_classes"),
             **kwargs,
         )
+
+
+def union_covered_classes(current: Sequence[str], triggering_class: str) -> list[str]:
+    """Return the sorted, deduplicated union of ``current`` covered classes and ``triggering_class``."""
+    return sorted(set(current) | {triggering_class})
 
 
 __all__ = [
@@ -346,8 +386,10 @@ __all__ = [
     "MODEL_VERSION",
     "DomainDriftCalibration",
     "PatchCoreDomainDriftDetector",
+    "balanced_pool",
     "calibrate_threshold",
     "coreset_subsample",
     "max_patch_score",
     "regime_for_score",
+    "union_covered_classes",
 ]

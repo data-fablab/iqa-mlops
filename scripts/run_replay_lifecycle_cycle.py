@@ -318,6 +318,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--progressive-min-defects-for-decision", type=int, default=5)
     parser.add_argument("--max-good-red-regression", type=int, default=1)
     parser.add_argument("--candidate-init-policy", choices=["stable_base", "active", "fresh"], default="stable_base")
+    parser.add_argument("--candidate-init-checkpoint", type=Path, default=None, help="explicit checkpoint path for warm-start (overrides --candidate-init-policy)")
     return parser.parse_args()
 
 
@@ -2075,6 +2076,12 @@ def _best_candidate_seen(cycles: list[dict[str, Any]]) -> str | None:
 
 
 def resolve_candidate_initial_checkpoint(args: argparse.Namespace, *, active_runtime: ActiveRuntimeModel) -> Path | None:
+    explicit = getattr(args, "candidate_init_checkpoint", None)
+    if explicit is not None:
+        path = Path(explicit)
+        if not path.is_file():
+            raise FileNotFoundError(f"--candidate-init-checkpoint path does not exist: {path}")
+        return path
     if args.candidate_init_policy == "fresh":
         return None
     if args.candidate_init_policy == "active":

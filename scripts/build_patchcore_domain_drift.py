@@ -38,6 +38,7 @@ from iqa.inference.domain_drift import (
     DEFAULT_SEED,
     MODEL_VERSION,
     PatchCoreDomainDriftDetector,
+    balanced_pool,
     regime_for_score,
 )
 
@@ -61,37 +62,55 @@ def _list_images(dataset_root: str, pattern: str) -> list[str]:
 
 def build_and_evaluate(args: argparse.Namespace) -> dict:
     random.seed(args.seed)
-    class1 = _list_images(args.dataset_root, CLASS_GLOBS["class1"])
-    if len(class1) < args.holdout + 10:
-        raise SystemExit(f"not enough class1 images ({len(class1)}) for holdout {args.holdout}")
+    cover_classes: list[str] = list(args.cover_classes)
 
-    # Disjoint hold-out (calibration + class1 separation row) vs bank pool.
-    pool = list(class1)
-    random.shuffle(pool)
-    holdout = pool[: args.holdout]
-    bank_pool = pool[args.holdout :]
-    random.shuffle(bank_pool)
-    mem_paths = bank_pool[: args.mem_images]
-    log(f"class1 total {len(class1)}; holdout {len(holdout)}; bank images {len(mem_paths)}")
+    # Collect images for each covered class, split holdout vs bank pool.
+    bank_images_by_class: dict[str, list[str]] = {}
+    all_holdout: list[str] = []
+    for cls_key in cover_classes:
+        glob_key = cls_key.replace("Casting_", "")
+        pattern = CLASS_GLOBS.get(glob_key)
+        if pattern is None:
+            raise SystemExit(f"no glob pattern for class '{cls_key}' (tried key '{glob_key}')")
+        images = _list_images(args.dataset_root, pattern)
+        if len(images) < args.holdout + 10:
+            raise SystemExit(f"not enough {cls_key} images ({len(images)}) for holdout {args.holdout}")
+        pool = list(images)
+        random.shuffle(pool)
+        holdout = pool[: args.holdout]
+        bank_pool = pool[args.holdout :]
+        all_holdout.extend(holdout)
+        bank_images_by_class[cls_key] = bank_pool
+        log(f"{cls_key}: total {len(images)}, holdout {len(holdout)}, bank pool {len(bank_pool)}")
+
+    mem_paths = balanced_pool(bank_images_by_class, args.mem_images, seed=args.seed)
+    log(f"balanced bank pool: {len(mem_paths)} images across {len(cover_classes)} class(es)")
 
     detector = PatchCoreDomainDriftDetector(
-        device=args.device, seed=args.seed, coreset_patches=args.coreset
+        device=args.device, seed=args.seed, coreset_patches=args.coreset,
+        covered_classes=cover_classes,
     )
     log("building memory bank (WRN50 layer2+3, coreset)...")
     bank = detector.build_bank(mem_paths)
     log(f"bank shape {tuple(bank.shape)}")
 
-    log(f"calibrating per-piece threshold = p{args.percentile:g} of class1 hold-out...")
-    calibration = detector.calibrate(holdout, percentile=args.percentile)
+    log(f"calibrating per-piece threshold = p{args.percentile:g} of union hold-out ({len(all_holdout)} images)...")
+    calibration = detector.calibrate(all_holdout, percentile=args.percentile)
     threshold = calibration.threshold
-    log(f"threshold = {threshold:.4f} (class1 median {calibration.class1_score_median:.4f})")
+    log(f"threshold = {threshold:.4f} (holdout median {calibration.class1_score_median:.4f})")
 
-    # Separation metrics on good images per class (class1 = the hold-out).
-    eval_paths = {"class1": holdout}
-    for klass in ("class2", "class3"):
-        paths = _list_images(args.dataset_root, CLASS_GLOBS[klass])
-        random.shuffle(paths)
-        eval_paths[klass] = paths[: args.per_class_eval]
+    # Separation metrics on good images per class.
+    eval_paths: dict[str, list[str]] = {}
+    for cls_key in cover_classes:
+        glob_key = cls_key.replace("Casting_", "")
+        eval_paths[glob_key] = _list_images(args.dataset_root, CLASS_GLOBS[glob_key])
+        random.shuffle(eval_paths[glob_key])
+        eval_paths[glob_key] = eval_paths[glob_key][: args.per_class_eval]
+    for klass in ("class1", "class2", "class3"):
+        if klass not in eval_paths:
+            paths = _list_images(args.dataset_root, CLASS_GLOBS[klass])
+            random.shuffle(paths)
+            eval_paths[klass] = paths[: args.per_class_eval]
 
     rows: list[tuple[str, str, float]] = []
     summary: dict[str, dict[str, float]] = {}
@@ -105,11 +124,11 @@ def build_and_evaluate(args: argparse.Namespace) -> dict:
             "count": int(arr.size),
             "median": float(np.median(arr)) if arr.size else 0.0,
             "p90": float(np.percentile(arr, 90)) if arr.size else 0.0,
-            "rate_at_class1_p90": rate,
+            "rate_at_threshold": rate,
         }
         log(
             f"{klass:<7} n={summary[klass]['count']:>3} "
-            f"median={summary[klass]['median']:.3f} rate@class1_p90={rate:.2f}"
+            f"median={summary[klass]['median']:.3f} rate@threshold={rate:.2f}"
         )
 
     output_dir = Path(args.output_dir)
@@ -129,6 +148,7 @@ def build_and_evaluate(args: argparse.Namespace) -> dict:
         "output_dir": output_dir,
         "score_table": score_table,
         "mem_images": len(mem_paths),
+        "covered_classes": cover_classes,
     }
 
 
@@ -157,12 +177,13 @@ def log_mlflow(args: argparse.Namespace, result: dict) -> None:
                 "seed": args.seed,
                 "percentile": args.percentile,
                 "threshold_per_piece": round(calibration.threshold, 6),
+                "covered_classes": ",".join(result.get("covered_classes", ["Casting_class1"])),
             }
         )
         mlflow.log_metric("threshold_per_piece", calibration.threshold)
         for klass, stats in summary.items():
             mlflow.log_metric(f"{klass}_median", stats["median"])
-            mlflow.log_metric(f"{klass}_rate_at_class1_p90", stats["rate_at_class1_p90"])
+            mlflow.log_metric(f"{klass}_rate_at_threshold", stats.get("rate_at_threshold", stats.get("rate_at_class1_p90", 0.0)))
         mlflow.log_artifact(str(result["score_table"]), artifact_path="separation")
         mlflow.log_artifact(str(result["output_dir"] / "calibration.yaml"), artifact_path="detector")
         mlflow.log_artifact(str(result["output_dir"] / "model_manifest.json"), artifact_path="detector")
@@ -181,6 +202,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--per-class-eval", type=int, default=40, help="good images scored per class for separation")
     parser.add_argument("--percentile", type=float, default=DEFAULT_PERCENTILE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument(
+        "--cover-classes", nargs="+", default=["Casting_class1"],
+        help="classes to cover in the bank (e.g. Casting_class1 Casting_class2)",
+    )
     parser.add_argument("--tracking-uri", default=None, help="MLflow URI (default: env MLFLOW_TRACKING_URI)")
     parser.add_argument("--no-mlflow", action="store_true", help="skip the MLflow run (bank/calib only)")
     return parser.parse_args(argv)
@@ -200,11 +225,10 @@ def main(argv: list[str] | None = None) -> int:
             log_mlflow(args, result)
         except Exception as exc:  # noqa: BLE001 - the detector is already on disk
             log(f"WARNING: MLflow logging failed ({exc!r}); detector still saved on disk")
-    # Sanity: the prototype expects class2/class3 ~1.0 and class1 ~0.1 at class1_p90.
     summary = result["summary"]
     log(
         "separation summary: "
-        + " ".join(f"{k}@p90={v['rate_at_class1_p90']:.2f}" for k, v in summary.items())
+        + " ".join(f"{k}@thr={v['rate_at_threshold']:.2f}" for k, v in summary.items())
     )
     return 0
 
