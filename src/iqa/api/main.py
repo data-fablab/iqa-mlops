@@ -535,6 +535,25 @@ def _persist_metadata(
         raise HTTPException(status_code=503, detail=f"PostgreSQL metadata write failed during {operation}.") from exc
 
 
+
+def _read_metadata(
+    operation: str,
+    reader: Callable[[MetadataRepository], Any],
+    *,
+    default: Any = None,
+) -> Any:
+    try:
+        repository = METADATA_WRITE_THROUGH.repository()
+        if repository is None:
+            return default
+        return reader(repository)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"PostgreSQL metadata read failed during {operation}.",
+        ) from exc
+
+
 def _record_prediction_metrics(prediction: dict[str, Any], elapsed_seconds: float) -> None:
     decision = str(prediction.get("decision", "")).lower()
     key = f"decision_{decision}_total"
@@ -708,7 +727,14 @@ def predict_piece_event(event_id: str, request: PieceEventPredictRequest) -> dic
 
 
 def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any]:
-    prediction = PREDICTION_STORE.get(request.prediction_id)
+    prediction = _read_metadata(
+        "prediction lookup",
+        lambda repository: repository.get_prediction(request.prediction_id),
+    )
+    if prediction is None:
+        prediction = PREDICTION_STORE.get(request.prediction_id)
+    else:
+        PREDICTION_STORE[request.prediction_id] = prediction
 
     if prediction is None:
         _inc_security_metric("ai_security_incident_total")
@@ -938,7 +964,15 @@ def feedback(
     if not eligible_for_train:
         _inc_security_metric("unsafe_train_blocked_total")
 
-    display_feedback = DISPLAY_FEEDBACK_STORE.get(request.prediction_id)
+    display_feedback = _read_metadata(
+        "display feedback lookup",
+        lambda repository: repository.get_display_feedback(request.prediction_id),
+    )
+    if display_feedback is None:
+        display_feedback = DISPLAY_FEEDBACK_STORE.get(request.prediction_id)
+    else:
+        DISPLAY_FEEDBACK_STORE[request.prediction_id] = display_feedback
+
     conflict_logged = display_feedback is not None
     feedback_record = {
         "prediction_id": request.prediction_id,
@@ -1041,10 +1075,48 @@ def _oracle_divergence(decision: str, verdict: str | None) -> str | None:
 
 
 def _prediction_rows() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+    persisted_predictions = _read_metadata(
+        "prediction history lookup",
+        lambda repository: repository.list_predictions(),
+        default=[],
+    )
+
+    records: dict[str, dict[str, Any]] = {}
+
+    for record in persisted_predictions:
+        prediction_id = record.get("prediction_id")
+        if prediction_id:
+            records[prediction_id] = record
+            PREDICTION_STORE[prediction_id] = record
+
     for prediction_id, record in PREDICTION_STORE.items():
-        feedback = FEEDBACK_STORE.get(prediction_id)
-        display_feedback = DISPLAY_FEEDBACK_STORE.get(prediction_id)
+        records.setdefault(prediction_id, record)
+
+    rows: list[dict[str, Any]] = []
+
+    for prediction_id, record in records.items():
+        feedback = _read_metadata(
+            "oracle feedback lookup",
+            lambda repository, prediction_id=prediction_id: repository.get_feedback(
+                prediction_id
+            ),
+        )
+        if feedback is None:
+            feedback = FEEDBACK_STORE.get(prediction_id)
+        else:
+            FEEDBACK_STORE[prediction_id] = feedback
+
+        display_feedback = _read_metadata(
+            "display feedback lookup",
+            lambda repository, prediction_id=prediction_id: repository.get_display_feedback(
+                prediction_id
+            ),
+        )
+        if display_feedback is None:
+            display_feedback = DISPLAY_FEEDBACK_STORE.get(prediction_id)
+        else:
+            DISPLAY_FEEDBACK_STORE[prediction_id] = display_feedback
+
         feedback_trace = feedback or display_feedback or {}
         verdict = (feedback or {}).get("verdict", {}).get("verdict") if feedback else None
         decision = record.get("decision", "")
@@ -1068,17 +1140,28 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "sha256": record.get("sha256"),
                 "heatmap_uri": record.get("heatmap_uri"),
                 "dataset_version": record.get("dataset_version"),
-                **{field: record.get(field) for field in OPTIONAL_METADATA_TRACEABILITY_FIELDS},
+                **{
+                    field: record.get(field)
+                    for field in OPTIONAL_METADATA_TRACEABILITY_FIELDS
+                },
                 "decision": decision,
                 "model_version": record.get("model_version"),
                 "roi_model_version": record.get("roi_model_version"),
                 "created_at": record.get("created_at"),
                 "feedback_closed": record.get("feedback_closed", False),
-                "display_decision_source": feedback_trace.get("display_decision_source"),
-                "display_feedback_source": (display_feedback or {}).get("feedback_source"),
-                "display_feedback_status": (display_feedback or {}).get("feedback_status"),
+                "display_decision_source": feedback_trace.get(
+                    "display_decision_source"
+                ),
+                "display_feedback_source": (display_feedback or {}).get(
+                    "feedback_source"
+                ),
+                "display_feedback_status": (display_feedback or {}).get(
+                    "feedback_status"
+                ),
                 "human_feedback_present": display_feedback is not None,
-                "train_eligibility_source": feedback_trace.get("train_eligibility_source"),
+                "train_eligibility_source": feedback_trace.get(
+                    "train_eligibility_source"
+                ),
                 "eligible_for_train": feedback_trace.get("eligible_for_train"),
                 "train_block_reason": feedback_trace.get("train_block_reason"),
                 "conflict_logged": feedback_trace.get("conflict_logged", False),
@@ -1087,6 +1170,7 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 "audit_trail": audit_trail,
             }
         )
+
     rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
     return rows
 

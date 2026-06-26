@@ -21,6 +21,53 @@ for path in (ROOT, ROOT / "src", TESTS_DIR):
         sys.path.insert(0, path_text)
 
 
+@pytest.fixture(scope="session")
+def isolated_postgres_db_url():
+    """Create a disposable PostgreSQL schema for live contract tests."""
+    db_url = os.getenv("IQA_TEST_METADATA_DB_URL") or os.getenv("IQA_METADATA_DB_URL")
+    if not db_url:
+        pytest.skip("IQA_TEST_METADATA_DB_URL or IQA_METADATA_DB_URL is not set.")
+
+    from uuid import uuid4
+
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    params = conninfo_to_dict(db_url)
+
+    if params.get("host") == "postgres":
+        params["host"] = os.getenv("IQA_TEST_METADATA_HOST", "127.0.0.1")
+        params["port"] = os.getenv("IQA_TEST_METADATA_PORT", "5432")
+
+    host_db_url = make_conninfo(**params)
+    schema = f"iqa_test_{uuid4().hex}"
+
+    with psycopg.connect(host_db_url) as connection:
+        connection.execute(
+            sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema))
+        )
+
+    current_options = params.get("options")
+    search_path_option = f"-c search_path={schema}"
+    params["options"] = " ".join(
+        option
+        for option in (current_options, search_path_option)
+        if option
+    )
+    isolated_url = make_conninfo(**params)
+
+    try:
+        yield isolated_url
+    finally:
+        with psycopg.connect(host_db_url) as connection:
+            connection.execute(
+                sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                    sql.Identifier(schema)
+                )
+            )
+
+
 @pytest.fixture(autouse=True)
 def fake_inference_service(
     monkeypatch: pytest.MonkeyPatch,
