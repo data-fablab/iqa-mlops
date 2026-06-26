@@ -1,0 +1,27 @@
+# Retrain policy configuration (Issues 15-18, ADR 0010 amendment).
+#
+# Three independent triggers — any one suffices to launch a retrain.
+# These are TRIGGER thresholds, never promotion gates (gates remain
+# non-regression vs prod, decision 6).
+
+accumulation:
+  # Natural replay: trigger after N oracle-validated conformes (Issue 15).
+  min_conforming: 50
+
+metric_floor:
+  # Absolute floor targets on prod metrics (Issue 16). Trigger when prod
+  # is BELOW any of these. Seedées on demonstrated achievable values:
+  # retrain 420 images → aupimo 0.172 / pixel_ap 0.268.
+  pixel_aupimo_1e-5_1e-3: 0.15
+  pixel_ap: 0.20
+
+drift:
+  # PatchCore domain drift trigger (Issue 17). Trigger when the
+  # out-of-domain ratio exceeds this threshold for any class.
+  ood_ratio_threshold: 0.5
+
+anti_loop:
+  # Max consecutive gate failures before HITL escalation (Issue 18).
+  max_gate_failures: 2
+  # Minimum seconds between retrain attempts for the same condition.
+  cooldown_seconds: 900
