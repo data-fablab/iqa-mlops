@@ -188,7 +188,8 @@ def _evaluate_and_trigger(**context) -> bool:
         active_lifecycle_run=active,
     )
 
-    decision = evaluate_retrain_policy(signal)
+    cooldown = float(os.environ.get("IQA_RETRAIN_COOLDOWN_SECONDS", 900))
+    decision = evaluate_retrain_policy(signal, cooldown_seconds=cooldown)
 
     ti = context.get("ti")
     if ti is not None:

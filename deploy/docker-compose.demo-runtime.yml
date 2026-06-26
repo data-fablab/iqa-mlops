@@ -1,0 +1,35 @@
+# Demo runtime overrides for autonomous class1->2->3 rehearsal (Issue 27).
+#
+# Adjustments over the base compose for the live talk:
+#   - cooldown_seconds lowered to 60s so class3 can fire right after class2
+#   - IQA_GPU_DEMO_HOLD=0 so retrain can acquire the GPU
+#   - IQA_INFERENCE_CONTAINER set to the real container name on the box
+#   - Dataset mounted from the Linux host path (not the Windows junction)
+#
+# Use:
+#   docker compose \
+#     -f deploy/docker-compose.yml \
+#     -f deploy/docker-compose.demo.yml \
+#     -f deploy/docker-compose.demo-runtime.yml \
+#     up -d
+#
+# Revert to reference after the demo:
+#   docker compose -f deploy/docker-compose.yml up -d
+
+services:
+  iqa-inference:
+    environment:
+      IQA_GPU_DEMO_HOLD: "0"
+      IQA_INFERENCE_CONTAINER: ${IQA_INFERENCE_CONTAINER:-deploy-iqa-inference-1}
+    volumes:
+      - gpu_lock:/var/run/iqa-gpu
+      - ../src:/app/src:ro
+      - ../configs:/opt/iqa/iqa-mlops/configs:ro
+      - ../.cache/iqa/models:/opt/iqa/models:rw
+      - ${IQA_DATASET_HOST_PATH:-../data/raw/hss-iad}:/opt/iqa/iqa-mlops/data/raw/hss-iad:ro
+
+  airflow-scheduler:
+    environment:
+      # Sensor uses this cooldown override for fast demo cycling.
+      IQA_RETRAIN_COOLDOWN_SECONDS: "60"
+      IQA_INFERENCE_CONTAINER: ${IQA_INFERENCE_CONTAINER:-deploy-iqa-inference-1}
