@@ -1,0 +1,7 @@
+
+[2026-06-26T23:02:16.721+0000] {dagbag.py:588} INFO - Filling up the DagBag from /opt/airflow/dags
+DAG_IMPORT_OK
+dag_id=iqa_lifecycle_trigger
+schedule=@hourly
+max_active_runs=1
+tasks=['evaluate_decision', 'evaluate_drift_decision', 'gate_on_decision', 'gate_on_drift_decision', 'trigger_drift_lifecycle', 'trigger_lifecycle']

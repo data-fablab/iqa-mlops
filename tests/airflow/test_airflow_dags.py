@@ -248,9 +248,12 @@ def test_lifecycle_trigger_dag_collects_durable_signals_and_triggers_lifecycle()
     assert '"scenario_id",' in trigger
     assert '"drift_scenario_id",' in trigger
     assert "max_active_runs=1" in trigger
-    assert "ShortCircuitOperator(" in trigger
-    assert "PythonOperator(" in trigger
+    assert trigger.count("ShortCircuitOperator(") == 2
+    assert "PythonOperator(" not in trigger
     assert trigger.count("TriggerDagRunOperator(") == 2
+    assert "lifecycle_decision_json" in trigger
+    assert "feature_ae_good_v002" in trigger
+    assert "feature_ae_good_v003" in trigger
     assert "iqa-run-lifecycle-decision" not in trigger
     assert "BashOperator(" not in trigger
     assert "bash_command" not in trigger
@@ -272,13 +275,11 @@ def test_lifecycle_trigger_dag_has_trigger_chain() -> None:
         [
             "evaluate_decision",
             "gate_on_decision",
-            "build_trigger_conf",
             "trigger_lifecycle",
         ],
         [
             "evaluate_drift_decision",
             "gate_on_drift_decision",
-            "build_drift_trigger_conf",
             "trigger_drift_lifecycle",
         ],
     ]

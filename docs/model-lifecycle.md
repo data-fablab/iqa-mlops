@@ -51,17 +51,27 @@ les parametres et tags MLflow.
 
 ## Taches
 
-### `task_lifecycle_decision`
+### Collecte des signaux lifecycle
 
-Evalue les parametres data-event du run Airflow :
+Le DAG horaire `iqa_lifecycle_trigger` execute
+`iqa-collect-lifecycle-signal` dans l'image data.
 
-- `scenario_id`
-- `conforming_validated_count`
-- `drift_confirmed`
-- `roi_fail_rate`
+Le collecteur lit PostgreSQL et construit les signaux suivants :
 
-Elle retourne `trigger_lifecycle`, `trigger_reason` et
-`candidate_dataset_version`.
+- nouveaux feedbacks fermes `oracle_gt`, conformes et eligibles ;
+- dernier evenement drift versionne non consomme ;
+- taux `roi_fail_rate` sur une fenetre configurable.
+
+Chaque decision, positive ou negative, est journalisee dans
+`lifecycle_trigger_events`. Les decisions positives enregistrent aussi les
+identifiants de predictions ou de drift consommes et leur watermark. Un meme
+signal ne peut donc pas declencher deux fois le lifecycle apres un nouveau
+polling ou un redemarrage.
+
+Airflow utilise deux branches independantes, naturel et drift. Chaque branche
+suit le chemin conteneur de collecte, gate sans training si la decision est
+negative, puis `TriggerDagRunOperator` vers `iqa_lifecycle` si elle est positive.
+Le DAG impose `max_active_runs=1`.
 
 ### `task_dataset`
 

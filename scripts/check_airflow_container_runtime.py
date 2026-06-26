@@ -21,7 +21,7 @@ CONTAINER_DAGS = {
     "iqa_replay.py": "iqa-run-replay",
     "iqa_monitoring.py": "iqa-run-monitoring",
     "iqa_lifecycle.py": "iqa-run-replay-lifecycle-cycle",
-    "iqa_lifecycle_trigger.py": "iqa-run-lifecycle-decision",
+    "iqa_lifecycle_trigger.py": "iqa-collect-lifecycle-signal",
 }
 EXPECTED_DAG_IDS = {
     "iqa_ingestion",
