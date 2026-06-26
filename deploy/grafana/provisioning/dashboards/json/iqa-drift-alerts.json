@@ -1,0 +1,179 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "tags": ["iqa", "drift", "alerting"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "IQA - Drift & Alertes",
+  "uid": "iqa-drift-alerts",
+  "version": 1,
+  "description": "Visibilite Grafana des alertes du proxy de drift (scenario drift_domain_extension). Lit la serie ALERTS exposee par Prometheus (memes regles que Alertmanager) : etat firing des deux etages + ratios Orange/Rouge vs seuil 0.5.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "IqaDriftProxy (critique)",
+      "description": "Etat firing de l'alerte critique (part de Rouge > 0.5 dans le regime drift). C'est l'unique autorite de declenchement du reentrainement.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "inactif", "color": "green" }, "1": { "text": "FIRING", "color": "red" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(ALERTS{alertname=\"IqaDriftProxy\",alertstate=\"firing\"}) or vector(0)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "IqaDriftProxyWarning (naissant)",
+      "description": "Etat firing de l'alerte warning (part d'Orange > 0.5). Visible seulement, ne declenche pas de reentrainement.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "inactif", "color": "green" }, "1": { "text": "FIRING", "color": "orange" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(ALERTS{alertname=\"IqaDriftProxyWarning\",alertstate=\"firing\"}) or vector(0)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Ratio Rouge (regime drift)",
+      "description": "Part de decisions Rouge dans le regime drift (fenetre 2m). Seuil de declenchement = 0.5.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.5 } ] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\",decision=\"Rouge\"}[2m])) / clamp_min(sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\"}[2m])), 1e-9)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Ratio Orange (regime drift)",
+      "description": "Part de decisions Orange dans le regime drift (fenetre 2m). Seuil = 0.5.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.5 } ] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\",decision=\"Orange\"}[2m])) / clamp_min(sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\"}[2m])), 1e-9)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Ratios proxy vs seuil 0.5",
+      "description": "Evolution des ratios Orange et Rouge du regime drift. La ligne 0.5 est le seuil des regles Prometheus (source de verite unique).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "transparent", "value": null }, { "color": "red", "value": 0.5 } ] }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\",decision=\"Rouge\"}[2m])) / clamp_min(sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\"}[2m])), 1e-9)",
+          "legendFormat": "ratio Rouge"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\",decision=\"Orange\"}[2m])) / clamp_min(sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\"}[2m])), 1e-9)",
+          "legendFormat": "ratio Orange"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "state-timeline",
+      "title": "Historique des alertes drift (firing)",
+      "description": "Periodes ou chaque alerte du proxy de drift a ete en etat firing (serie ALERTS de Prometheus).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "firing", "color": "red" } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        }
+      },
+      "options": { "mergeValues": true, "showValue": "never", "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "ALERTS{alertname=~\"IqaDriftProxy.*\",alertstate=\"firing\"}",
+          "legendFormat": "{{alertname}} ({{severity}})"
+        }
+      ]
+    }
+  ]
+}

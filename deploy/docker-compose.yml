@@ -306,7 +306,19 @@ services:
     ports: ["9093:9093"]
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-    depends_on: [webhook-catcher]
+      # Slack webhook URL kept out of the repo (gitignored); read via api_url_file.
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro
+    depends_on: [webhook-catcher, mailpit]
+
+  # Faux SMTP local (decision 8 : alerte visible, zero secret externe). Alertmanager
+  # envoie les emails ici ; la boite de reception est consultable sur http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports: ["8025:8025"]
+    expose: ["1025"]
 
   # Webhook catcher local : rend l'alerte visible (décision 8), stdlib only.
   webhook-catcher:

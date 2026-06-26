@@ -48,3 +48,6 @@ tâche_s1_s2.md
 
 # Local work-tracking issues (not versioned)
 issue_to_do/
+
+# Alertmanager Slack webhook secret (local, never commit)
+deploy/alertmanager/secrets/slack_webhook_url
