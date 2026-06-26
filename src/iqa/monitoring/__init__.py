@@ -6,6 +6,7 @@ from iqa.monitoring.drift_baseline import (
     DriftBaselineStorage,
     DriftQualifier,
 )
+from iqa.monitoring.lifecycle_signals import collect_and_record_lifecycle_signal
 from iqa.monitoring.lifecycle import LifecycleDecision, LifecycleSignal, evaluate_lifecycle_signal, should_trigger_lifecycle
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "LifecycleSignal",
     "evaluate_lifecycle_signal",
     "should_trigger_lifecycle",
+    "collect_and_record_lifecycle_signal",
 ]

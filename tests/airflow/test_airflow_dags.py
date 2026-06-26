@@ -240,27 +240,21 @@ def test_iqa_lifecycle_dag_passes_dagbag_validation() -> None:
 
 
 @pytest.mark.unit
-def test_lifecycle_trigger_dag_evaluates_in_container_and_triggers_lifecycle() -> None:
-    """Trigger DAG (issue 16) evaluates the event rule in a container, then fires
-    iqa_lifecycle via native Airflow glue -- no manual trigger, no iqa import.
-
-    evaluate_decision runs iqa-run-lifecycle-decision on the data image; a
-    ShortCircuitOperator gates on the container's trigger_lifecycle decision; a
-    TriggerDagRunOperator launches iqa_lifecycle and relays the signal as conf.
-    """
+def test_lifecycle_trigger_dag_collects_durable_signals_and_triggers_lifecycle() -> None:
     trigger = _read_dag_source("iqa_lifecycle_trigger.py")
 
-    # The metier decision runs in the data-image container (ADR 0008).
-    assert "make_container_task(" in trigger
-    assert '"iqa-run-lifecycle-decision"' in trigger
-    assert '"{{ params.conforming_validated_count }}"' in trigger
-    assert '"--drift-confirmed", "{{ params.drift_confirmed }}"' in trigger
-    # Native Airflow glue: gate on the decision, then trigger the lifecycle.
-    assert "ShortCircuitOperator(" in trigger
-    assert "TriggerDagRunOperator(" in trigger
-    assert 'trigger_dag_id=LIFECYCLE_DAG_ID' in trigger or 'trigger_dag_id="iqa_lifecycle"' in trigger
-    assert "op_evaluate_decision >> op_gate_on_decision >> op_trigger_lifecycle" in trigger
-    # No shell / no eager iqa import in the scheduler.
+    assert trigger.count('"iqa-collect-lifecycle-signal"') == 1
+    assert '"{{ params." + scenario_param + " }}"' in trigger
+    assert '"scenario_id",' in trigger
+    assert '"drift_scenario_id",' in trigger
+    assert "max_active_runs=1" in trigger
+    assert trigger.count("ShortCircuitOperator(") == 2
+    assert "PythonOperator(" not in trigger
+    assert trigger.count("TriggerDagRunOperator(") == 2
+    assert "lifecycle_decision_json" in trigger
+    assert "feature_ae_good_v002" in trigger
+    assert "feature_ae_good_v003" in trigger
+    assert "iqa-run-lifecycle-decision" not in trigger
     assert "BashOperator(" not in trigger
     assert "bash_command" not in trigger
 
@@ -277,11 +271,23 @@ def test_lifecycle_trigger_dag_has_trigger_chain() -> None:
     if dag is None:
         pytest.skip("DAG is None (Airflow provider not available)")
 
-    expected_chain = ["evaluate_decision", "gate_on_decision", "trigger_lifecycle"]
+    expected_chains = [
+        [
+            "evaluate_decision",
+            "gate_on_decision",
+            "trigger_lifecycle",
+        ],
+        [
+            "evaluate_drift_decision",
+            "gate_on_drift_decision",
+            "trigger_drift_lifecycle",
+        ],
+    ]
     task_ids = {task.task_id for task in dag.tasks}
-    assert set(expected_chain) <= task_ids, f"Missing tasks: {set(expected_chain) - task_ids}"
 
-    for upstream, downstream in zip(expected_chain, expected_chain[1:]):
-        task = dag.get_task(upstream)
-        downstream_ids = {t.task_id for t in task.downstream_list}
-        assert downstream in downstream_ids, f"{upstream} should have {downstream} downstream"
+    for expected_chain in expected_chains:
+        assert set(expected_chain) <= task_ids
+        for upstream, downstream in zip(expected_chain, expected_chain[1:]):
+            task = dag.get_task(upstream)
+            downstream_ids = {item.task_id for item in task.downstream_list}
+            assert downstream in downstream_ids
