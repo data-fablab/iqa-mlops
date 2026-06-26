@@ -1,0 +1,3 @@
+37d1b8d62370f16ecdb5f4bbab66f39bafc39de99f22d6ab286860af57463cf4  /tmp/nat12-cuda-model-cache/roi_segmenter_v001_fixed/checkpoint.pt
+9e4e3cc84fb359408ec5c58020e799816942d6c46ae024b29acb82c1c8ebe146  /tmp/nat12-cuda-model-cache/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt
+ab598e6cd9d00859b7c0bbd0e8e37061b5e61efe6068e793cd5da492c5c054dc  /tmp/nat12-cuda-input/nat12_source.jpg
