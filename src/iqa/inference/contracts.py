@@ -33,6 +33,11 @@ class InferenceResult:
     roi_status: str | None
     roi_model_version: str
     feature_ae_version: str
+    # PatchCore domain-drift signal (Issue 12), scored alongside the AE. The AE
+    # detects defects; this separates product domains (class1 vs class2/class3).
+    # ``None`` when the detector is not loaded (e.g. placeholder inference).
+    domain_drift_score: float | None = None
+    domain_regime: str | None = None
 
     def to_dict(self) -> dict[str, str | float | None]:
         return asdict(self)

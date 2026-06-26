@@ -174,6 +174,114 @@
           "legendFormat": "{{alertname}} ({{severity}})"
         }
       ]
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Drift de domaine reel — PatchCore (distance-au-nominal)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "IqaDomainDriftPatchCore (critique)",
+      "description": "Etat firing de l'alerte drift de domaine PatchCore (part out-of-domain > 0.5). Vrai signal de changement de domaine, la ou le proxy AE est silencieux.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 23 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "inactif", "color": "green" }, "1": { "text": "FIRING", "color": "red" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(ALERTS{alertname=\"IqaDomainDriftPatchCore\",alertstate=\"firing\"}) or vector(0)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Ratio out-of-domain (PatchCore)",
+      "description": "Part de pieces out-of-domain selon PatchCore (fenetre 2m). Seuil de declenchement = 0.5 (source unique : regle Prometheus).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 23 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.5 } ] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(iqa_domain_drift_total{regime=\"out_of_domain\"}[2m])) / clamp_min(sum(rate(iqa_domain_drift_total[2m])), 1e-9)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Score drift PatchCore (derniere piece)",
+      "description": "Score de distance-au-nominal de la derniere piece scoree (gauge). Au-dessus du seuil p90 calibre => out-of-domain.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 23 },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 3.64 } ] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "iqa_domain_drift_score",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Ratio out-of-domain PatchCore vs seuil 0.5",
+      "description": "Evolution de la part out-of-domain (PatchCore). La ligne 0.5 est le seuil de la regle Prometheus IqaDomainDriftPatchCore.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 28 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "thresholdsStyle": { "mode": "line" } },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "transparent", "value": null }, { "color": "red", "value": 0.5 } ] }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(iqa_domain_drift_total{regime=\"out_of_domain\"}[2m])) / clamp_min(sum(rate(iqa_domain_drift_total[2m])), 1e-9)",
+          "legendFormat": "ratio out-of-domain (PatchCore)"
+        }
+      ]
     }
   ]
 }

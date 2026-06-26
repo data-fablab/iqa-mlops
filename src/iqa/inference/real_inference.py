@@ -22,6 +22,10 @@ from urllib.parse import urlparse
 import torch
 
 from iqa.inference.contracts import Decision, InferenceRequest, InferenceResult
+from iqa.inference.domain_drift import (
+    DEFAULT_DETECTOR_DIR as DEFAULT_DOMAIN_DRIFT_DIR,
+    PatchCoreDomainDriftDetector,
+)
 from iqa.inference.feature_ae import compute_feature_ae_score_maps
 from iqa.inference.reconstruction_calibration import (
     DEFAULT_CALIBRATION_PATH,
@@ -48,6 +52,15 @@ _FALLBACK_THRESHOLD_RED = 0.05
 
 def real_inference_enabled() -> bool:
     return os.environ.get("IQA_REAL_INFERENCE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def domain_drift_enabled() -> bool:
+    """Score the PatchCore domain-drift detector alongside the AE (Issue 12).
+
+    On by default in the real path: the detector is cheap (~17 ms) and resident.
+    ``IQA_DOMAIN_DRIFT=0`` turns it off (AE-only) without code changes.
+    """
+    return os.environ.get("IQA_DOMAIN_DRIFT", "1").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_float(name: str, default: float) -> float:
@@ -81,6 +94,7 @@ class RealFeatureAEScorer:
         threshold_red: float | None = None,
         calibration_path: str | None = None,
         layers: tuple[str, ...] = DEFAULT_FEATURE_LAYERS,
+        domain_drift_dir: str | None = None,
     ) -> None:
         self.checkpoint_path = checkpoint_path or os.environ.get("IQA_FEATURE_AE_CHECKPOINT", DEFAULT_CHECKPOINT)
         requested = device or os.environ.get("IQA_INFERENCE_DEVICE", "cuda")
@@ -114,6 +128,13 @@ class RealFeatureAEScorer:
         self._lock = threading.Lock()
         self._model: torch.nn.Module | None = None
         self._teacher: torch.nn.Module | None = None
+        # PatchCore domain-drift detector (Issue 12): loaded lazily from the
+        # registered dir (Issue 11), scored alongside the AE on each piece.
+        self.domain_drift_dir = domain_drift_dir or os.environ.get(
+            "IQA_DOMAIN_DRIFT_DIR", DEFAULT_DOMAIN_DRIFT_DIR
+        )
+        self._domain_drift: PatchCoreDomainDriftDetector | None = None
+        self._domain_drift_unavailable = False
 
     def _ensure_loaded(self) -> None:
         if self._model is not None and self._teacher is not None:
@@ -147,10 +168,39 @@ class RealFeatureAEScorer:
                 )
         return float(maps.score)
 
+    def _ensure_domain_drift(self) -> PatchCoreDomainDriftDetector | None:
+        """Lazily load the registered PatchCore detector; tolerate a missing dir."""
+        if self._domain_drift is not None or self._domain_drift_unavailable:
+            return self._domain_drift
+        if not domain_drift_enabled():
+            self._domain_drift_unavailable = True
+            return None
+        try:
+            self._domain_drift = PatchCoreDomainDriftDetector.load(
+                self.domain_drift_dir, device=self.device
+            )
+        except Exception:  # noqa: BLE001 - degrade to AE-only, never break /predict
+            self._domain_drift_unavailable = True
+            return None
+        return self._domain_drift
+
+    def domain_drift(self, image_path: str | Path) -> tuple[float | None, str | None]:
+        """Score the PatchCore domain-drift detector: ``(score, regime)`` or ``(None, None)``."""
+        detector = self._ensure_domain_drift()
+        if detector is None:
+            return None, None
+        with self._lock:
+            try:
+                score = detector.score(image_path)
+            except Exception:  # noqa: BLE001 - never break /predict on a drift hiccup
+                return None, None
+        return score, detector.regime(score)
+
     def predict(self, request: InferenceRequest) -> InferenceResult:
         image_path = resolve_image_path(request.image_uri)
         score = self.score(image_path)
         decision = self._decision(score)
+        drift_score, drift_regime = self.domain_drift(image_path)
         return InferenceResult(
             piece_event_id=request.piece_event_id,
             scenario_id=request.scenario_id,
@@ -160,6 +210,8 @@ class RealFeatureAEScorer:
             roi_status=None,
             roi_model_version=ROI_MODEL_VERSION,
             feature_ae_version=self.feature_ae_version,
+            domain_drift_score=drift_score,
+            domain_regime=drift_regime,
         )
 
     def _decision(self, score: float) -> Decision:
@@ -186,6 +238,7 @@ def get_scorer() -> RealFeatureAEScorer:
 
 __all__ = [
     "RealFeatureAEScorer",
+    "domain_drift_enabled",
     "get_scorer",
     "real_inference_enabled",
     "resolve_image_path",

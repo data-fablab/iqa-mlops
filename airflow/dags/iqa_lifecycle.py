@@ -46,6 +46,10 @@ def _define() -> None:
         env={
             "MLFLOW_TRACKING_URI": "{{ params.mlflow_tracking_uri }}",
             "PYTHONPATH": "{{ params.repo_root }}:{{ params.repo_root }}/src",
+            # Persist the torch.hub cache across ephemeral lifecycle containers so
+            # the ResNet18 / WideResNet50 base weights are reused (repo is bind-
+            # mounted RW), instead of re-downloading on every run.
+            "TORCH_HOME": "{{ params.repo_root }}/.cache/torch",
         },
         pool=GPU_POOL,
         gpu_lock=True,

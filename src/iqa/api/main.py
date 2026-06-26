@@ -70,6 +70,12 @@ PREDICTION_DECISIONS = ("Vert", "Orange", "Rouge")
 # drift signal filters scenario_id=~"drift.*").
 PREDICTION_DECISION_COUNTS: dict[tuple[str, str], int] = {}
 
+# PatchCore domain-drift signal (Issue 12), scored alongside the AE. The counter
+# (by regime) drives the ratio alert; the gauge carries the last score for Grafana.
+DOMAIN_REGIMES = ("in_domain", "out_of_domain")
+DOMAIN_DRIFT_REGIME_COUNTS: dict[str, int] = {}
+DOMAIN_DRIFT_METRICS: dict[str, float] = {"last_score": 0.0}
+
 OPTIONAL_METADATA_TRACEABILITY_FIELDS = (
     "raw_dataset_id",
     "manifest_id",
@@ -324,6 +330,12 @@ def _record_prediction_metrics(
         PREDICTION_METRICS["roi_fail_total"] += 1
     PREDICTION_METRICS["predict_latency_seconds_sum"] += elapsed_seconds
     PREDICTION_METRICS["predict_latency_seconds_count"] += 1
+    regime = prediction.get("domain_regime")
+    if regime in DOMAIN_REGIMES:
+        DOMAIN_DRIFT_REGIME_COUNTS[regime] = DOMAIN_DRIFT_REGIME_COUNTS.get(regime, 0) + 1
+    drift_score = prediction.get("domain_drift_score")
+    if drift_score is not None:
+        DOMAIN_DRIFT_METRICS["last_score"] = float(drift_score)
 
 
 @app.get("/health")
@@ -430,6 +442,8 @@ def _delegate_inference(request: PredictRequest) -> InferenceResult | None:
         roi_status=body.get("roi_status"),
         roi_model_version=body.get("roi_model_version", "roi_segmenter_v001_fixed"),
         feature_ae_version=body.get("feature_ae_version", "rd_feature_ae_gated_v001_bootstrap"),
+        domain_drift_score=body.get("domain_drift_score"),
+        domain_regime=body.get("domain_regime"),
     )
 
 
@@ -1101,6 +1115,15 @@ def metrics() -> str:
             f'iqa_prediction_total{{decision="{decision}",scenario_id="{scenario}"}} {count}'
             for (scenario, decision), count in sorted(PREDICTION_DECISION_COUNTS.items())
         ),
+        "# HELP iqa_domain_drift_total IQA PatchCore domain-drift decisions by regime (in_domain/out_of_domain)",
+        "# TYPE iqa_domain_drift_total counter",
+        *(
+            f'iqa_domain_drift_total{{regime="{regime}"}} {DOMAIN_DRIFT_REGIME_COUNTS.get(regime, 0)}'
+            for regime in DOMAIN_REGIMES
+        ),
+        "# HELP iqa_domain_drift_score IQA PatchCore domain-drift score of the last scored piece",
+        "# TYPE iqa_domain_drift_score gauge",
+        f"iqa_domain_drift_score {DOMAIN_DRIFT_METRICS['last_score']}",
         "# HELP iqa_roi_fail_total IQA ROI segmentation failures observed at predict time",
         "# TYPE iqa_roi_fail_total counter",
         f"iqa_roi_fail_total {int(PREDICTION_METRICS['roi_fail_total'])}",

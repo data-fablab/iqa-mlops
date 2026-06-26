@@ -1,0 +1,25 @@
+groups:
+  - name: iqa_domain_drift
+    rules:
+      # Drift de DOMAINE reel (PatchCore distance-au-nominal, Issue 12).
+      # Contrairement au proxy AE (qui detecte un DEFAUT, pas un changement de
+      # domaine), ce signal separe vraiment class1 vs class2/class3. La part de
+      # pieces out-of-domain est bornee [0,1]. Seuil par-piece = p90 calibre dans
+      # le detecteur (Issue 11) ; seuil de POPULATION 0.5 ici, source unique
+      # (ADR 0010 dec. 7 — pas de seuil duplique).
+      #
+      # NB : prometheus_client retire _total du nom de famille mais pas de
+      # l'echantillon -> on requete bien iqa_domain_drift_total.
+      - alert: IqaDomainDriftPatchCore
+        expr: |
+          sum(rate(iqa_domain_drift_total{regime="out_of_domain"}[2m]))
+          /
+          clamp_min(sum(rate(iqa_domain_drift_total[2m])), 1e-9)
+          > 0.5
+        for: 30s
+        labels:
+          severity: critical
+          signal: domain_drift
+        annotations:
+          summary: "Drift de domaine confirme (PatchCore distance-au-nominal)"
+          description: "La part de pieces out-of-domain (PatchCore) depasse 0.5 — nouveau domaine produit (Casting_class2/class3) detecte la ou le proxy AE reste silencieux. Routing critical existant (email Mailpit + Slack)."
