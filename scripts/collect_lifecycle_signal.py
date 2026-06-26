@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 from iqa.metadata.repository import (
     POSTGRES_BACKEND,
@@ -36,6 +37,7 @@ def main() -> None:
         min_natural_conforming=args.min_natural_conforming,
     )
     print_json(result)
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
 
 
 if __name__ == "__main__":

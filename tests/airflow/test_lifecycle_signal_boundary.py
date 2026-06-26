@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 
 import pytest
@@ -61,4 +62,8 @@ def test_collector_prints_persisted_decision(
     output = capsys.readouterr().out
     assert '"service": "iqa-lifecycle-signal-collector"' in output
     assert '"trigger_lifecycle": false' in output
+
+    xcom_payload = json.loads(output.strip().splitlines()[-1])
+    assert xcom_payload["service"] == "iqa-lifecycle-signal-collector"
+    assert xcom_payload["trigger_lifecycle"] is False
     assert len(repository.list_lifecycle_trigger_events()) == 1
