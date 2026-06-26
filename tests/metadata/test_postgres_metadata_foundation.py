@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from uuid import uuid4
 
 import pytest
@@ -89,13 +88,11 @@ def test_memory_repository_keeps_extended_metadata_events() -> None:
 
 
 @pytest.fixture(scope="module")
-def postgres_repo() -> PostgresMetadataRepository:
-    db_url = os.getenv("IQA_METADATA_DB_URL")
-    if not db_url:
-        pytest.skip("IQA_METADATA_DB_URL is not set.")
-
-    initialize_metadata_db(db_url)
-    return PostgresMetadataRepository(db_url)
+def postgres_repo(
+    isolated_postgres_db_url: str,
+) -> PostgresMetadataRepository:
+    initialize_metadata_db(isolated_postgres_db_url)
+    return PostgresMetadataRepository(isolated_postgres_db_url)
 
 
 @pytest.mark.postgres_contract
