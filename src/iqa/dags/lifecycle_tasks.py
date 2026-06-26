@@ -7,6 +7,7 @@ Airflow context: context["params"] for DAG params, context["ti"].xcom_pull() for
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -339,11 +340,26 @@ def task_gates(**context: Any) -> dict[str, Any]:
     _log_gate_verdicts(gates_result)
 
     if not gates_result["all_passed"]:
+        gates_result["status"] = "rejected"
+        gates_result["rejection_reason"] = _summarize_gate_failures(gates_result)
+        logger.warning(
+            "candidate rejected: %s", gates_result["rejection_reason"]
+        )
         raise Exception(
-            f"Gates failed: {gates_result['gates']}. Promotion blocked."
+            f"Gates failed: {gates_result['rejection_reason']}. Candidate logged as rejected. Promotion blocked."
         )
 
     return gates_result
+
+
+def _summarize_gate_failures(gates_result: dict[str, Any]) -> str:
+    """One-line summary of which gates failed (for logging / anti-loop)."""
+    failed = [
+        name
+        for name, result in gates_result.get("gates", {}).items()
+        if not result.get("passed")
+    ]
+    return f"gates_failed={','.join(failed)}" if failed else "unknown_gate_failure"
 
 
 def task_mlflow(**context: Any) -> dict[str, Any]:
@@ -454,14 +470,38 @@ def task_promotion(**context: Any) -> dict[str, Any]:
     return result
 
 
+def _notify_inference_service_reload() -> dict[str, Any]:
+    """POST /reload-model on the inference service so it drops its cached scorer.
+
+    Best-effort: if the service is unreachable (e.g. not running during a test),
+    the reload still succeeds from MLflow's perspective. The next ``/predict``
+    will load the promoted checkpoint lazily.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    base = os.environ.get("IQA_INFERENCE_URL", "http://iqa-inference:8100").rstrip("/")
+    try:
+        req = urllib.request.Request(
+            f"{base}/reload-model",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 - internal host
+            return _json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        logger.warning("inference service /reload-model unreachable: %s", exc)
+        return {"status": "unreachable", "error": str(exc)}
+
+
 def task_reload(**context: Any) -> dict[str, Any]:
-    """Reload production model in inference service.
+    """Reload production model in inference service after promotion.
 
-    Reads from context["params"]:
-        scenario_id
-
-    Returns:
-        Dict with loaded model version and artifact_uri.
+    Calls ``ProdModelLoader.reload()`` to fetch the promoted model from MLflow,
+    then notifies the running inference service via ``POST /reload-model`` so it
+    drops its cached scorer and picks up the new checkpoint (Issue 10).
     """
     params = context.get("params", {})
     target_stage = params.get("target_stage", "test")
@@ -477,10 +517,13 @@ def task_reload(**context: Any) -> dict[str, Any]:
     loader = ProdModelLoader(scenario_id)
     loaded_model = loader.reload()
 
+    inference_reload = _notify_inference_service_reload()
+
     return {
         "version": loaded_model.version,
         "artifact_uri": loaded_model.artifact_uri,
         "registered_model_name": loaded_model.registered_model_name,
+        "inference_service_reload": inference_reload,
     }
 
 

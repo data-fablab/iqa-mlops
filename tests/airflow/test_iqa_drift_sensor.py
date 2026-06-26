@@ -47,7 +47,8 @@ def test_sensor_dag_reads_alerts_via_prometheus_query_api() -> None:
 
     assert "/api/v1/query" in source
     assert 'ALERT_NAME = "IqaDriftProxy"' in source
-    assert 'alertname="{ALERT_NAME}"' in source
+    assert 'PATCHCORE_ALERT_NAME = "IqaDomainDriftPatchCore"' in source
+    assert 'alertname="{alert}"' in source
     assert 'alertstate="firing"' in source
 
 

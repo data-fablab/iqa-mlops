@@ -11,6 +11,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from iqa.inference.contracts import InferenceRequest, placeholder_inference
+from iqa.inference.prediction_journal import append_journal
 from iqa.inference.real_inference import get_scorer, real_inference_enabled
 from iqa.runtime import gpu_lock
 
@@ -77,14 +78,15 @@ def predict(request: InferenceServiceRequest) -> dict[str, str | float | None]:
         scenario_id=request.scenario_id,
         image_uri=request.image_uri,
     )
-    # Real Feature-AE reconstruction on the actual image (GPU) when enabled; fall
-    # back to the synthetic placeholder if it is off or the image cannot be scored.
     if real_inference_enabled():
         try:
-            return get_scorer().predict(inference_request).to_dict()
+            result = get_scorer().predict(inference_request).to_dict()
         except Exception:  # noqa: BLE001 - never 500 the demo; degrade to placeholder
-            pass
-    return placeholder_inference(inference_request).to_dict()
+            result = placeholder_inference(inference_request).to_dict()
+    else:
+        result = placeholder_inference(inference_request).to_dict()
+    append_journal(result)
+    return result
 
 
 @app.post("/reload-model")

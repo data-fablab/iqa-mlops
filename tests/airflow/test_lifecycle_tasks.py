@@ -644,3 +644,81 @@ class TestReloadTask:
             mock_loader_class.assert_not_called()
             assert result["status"] == "skipped"
             assert result["target_stage"] == "test"
+
+    def test_reload_task_notifies_inference_service(self) -> None:
+        """Prod reload calls /reload-model on the inference service (Issue 10)."""
+        context = {"params": {"scenario_id": "drift_domain_extension", "target_stage": "prod"}}
+
+        with patch("iqa.dags.lifecycle_tasks.ProdModelLoader") as mock_loader_class, \
+             patch("iqa.dags.lifecycle_tasks._notify_inference_service_reload") as mock_notify:
+            mock_loader = MagicMock()
+            mock_loader_class.return_value = mock_loader
+            mock_loaded = MagicMock()
+            mock_loaded.version = "3"
+            mock_loaded.artifact_uri = "s3://iqa-models/..."
+            mock_loaded.registered_model_name = "feature_ae__drift"
+            mock_loader.reload.return_value = mock_loaded
+            mock_notify.return_value = {"status": "reloaded"}
+
+            result = task_reload(**context)
+
+            mock_notify.assert_called_once()
+            assert result["inference_service_reload"]["status"] == "reloaded"
+
+    def test_reload_task_tolerates_inference_service_down(self) -> None:
+        """Reload succeeds even if the inference service is unreachable (Issue 10)."""
+        context = {"params": {"scenario_id": "drift", "target_stage": "prod"}}
+
+        with patch("iqa.dags.lifecycle_tasks.ProdModelLoader") as mock_loader_class, \
+             patch("iqa.dags.lifecycle_tasks._notify_inference_service_reload") as mock_notify:
+            mock_loader = MagicMock()
+            mock_loader_class.return_value = mock_loader
+            mock_loaded = MagicMock()
+            mock_loaded.version = "3"
+            mock_loaded.artifact_uri = "s3://..."
+            mock_loaded.registered_model_name = "feature_ae__drift"
+            mock_loader.reload.return_value = mock_loaded
+            mock_notify.return_value = {"status": "unreachable", "error": "connection refused"}
+
+            result = task_reload(**context)
+
+            assert result["version"] == "3"
+            assert result["inference_service_reload"]["status"] == "unreachable"
+
+
+class TestGateFailureHandling:
+    """Gate failure logs candidate as rejected (Issue 10)."""
+
+    def test_gate_failure_exception_includes_rejected(self) -> None:
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.return_value = {
+            "recall": 0.5, "ap": 0.3, "orange_rate": 0.2, "latency_ms": 2000.0
+        }
+
+        with patch("iqa.dags.lifecycle_tasks.evaluate_promotion_gates") as mock_gates:
+            mock_gates.return_value = {
+                "all_passed": False,
+                "gates": {"recall": {"passed": False}, "ap": {"passed": False}},
+            }
+
+            with pytest.raises(Exception, match="rejected"):
+                task_gates(ti=mock_ti, params={})
+
+    def test_gate_failure_records_rejection_reason(self) -> None:
+        mock_ti = MagicMock()
+        mock_ti.xcom_pull.return_value = {
+            "recall": 0.5, "ap": 0.3, "orange_rate": 0.2, "latency_ms": 2000.0
+        }
+
+        with patch("iqa.dags.lifecycle_tasks.evaluate_promotion_gates") as mock_gates:
+            mock_gates.return_value = {
+                "all_passed": False,
+                "gates": {
+                    "recall": {"passed": False},
+                    "ap": {"passed": True},
+                    "latency": {"passed": False},
+                },
+            }
+
+            with pytest.raises(Exception, match="recall"):
+                task_gates(ti=mock_ti, params={})

@@ -47,7 +47,9 @@ from iqa.dags import build_container_dag
 
 LIFECYCLE_DAG_ID = "iqa_lifecycle"
 ALERT_NAME = "IqaDriftProxy"
+PATCHCORE_ALERT_NAME = "IqaDomainDriftPatchCore"
 DRIFT_SCENARIO_ID = "drift_domain_extension"
+DEFAULT_TRIGGERING_CLASS = "Casting_class2"
 
 # @continuous needs Airflow >= 2.6 (project pins >= 2.10). On older Airflow,
 # replace with "*/2 * * * *" -- reschedule does the work between relaunches.
@@ -74,21 +76,56 @@ def _http_get_json(url: str, *, headers: dict[str, str] | None = None, timeout: 
 
 
 def _alert_is_firing() -> bool:
-    """True iff ``ALERTS{alertname=IqaDriftProxy,alertstate=firing}`` has a sample.
+    """True iff a drift alert (PatchCore or legacy proxy) is firing.
 
     Reads the shared rule via the Prometheus instant-query API -- the threshold
-    is never duplicated in the sensor (decision 7).
+    is never duplicated in the sensor (decision 7). Prefers the PatchCore alert
+    (Issue 12) and falls back to the legacy ``IqaDriftProxy``.
     """
-    promql = f'ALERTS{{alertname="{ALERT_NAME}",alertstate="firing"}}'
+    for alert in (PATCHCORE_ALERT_NAME, ALERT_NAME):
+        promql = f'ALERTS{{alertname="{alert}",alertstate="firing"}}'
+        url = f"{_prometheus_base_url()}/api/v1/query?{urllib.parse.urlencode({'query': promql})}"
+        try:
+            payload = _http_get_json(url)
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+            continue
+        if payload.get("status") != "success":
+            continue
+        if payload.get("data", {}).get("result"):
+            return True
+    return False
+
+
+def _detect_triggering_class() -> str:
+    """Best-effort detection of the class that triggered the drift.
+
+    Queries the PatchCore regime counter by source_class label to find which
+    class has the highest out-of-domain count. Falls back to the default if
+    Prometheus is unreachable or the metric has no class label.
+    """
+    promql = 'iqa_domain_drift_total{regime="out_of_domain"}'
     url = f"{_prometheus_base_url()}/api/v1/query?{urllib.parse.urlencode({'query': promql})}"
     try:
         payload = _http_get_json(url)
     except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-        # Prometheus unreachable / malformed: stay quiet, retry next poke.
-        return False
+        return DEFAULT_TRIGGERING_CLASS
     if payload.get("status") != "success":
-        return False
-    return bool(payload.get("data", {}).get("result"))
+        return DEFAULT_TRIGGERING_CLASS
+    results = payload.get("data", {}).get("result", [])
+    best_class = DEFAULT_TRIGGERING_CLASS
+    best_count = -1.0
+    for series in results:
+        source_class = series.get("metric", {}).get("source_class", "")
+        if not source_class:
+            continue
+        try:
+            count = float(series["value"][1])
+        except (KeyError, IndexError, ValueError, TypeError):
+            continue
+        if count > best_count:
+            best_count = count
+            best_class = source_class
+    return best_class
 
 
 def _airflow_api_headers() -> dict[str, str]:
@@ -146,10 +183,11 @@ def _in_cooldown(cooldown_seconds: int) -> bool:
 def _drift_alert_should_trigger(**context) -> bool:
     """Poke callable: succeed only when a retrain is warranted.
 
-    Returns True iff (a) ``IqaDriftProxy`` is firing, (b) no ``iqa_lifecycle``
+    Returns True iff (a) a drift alert is firing, (b) no ``iqa_lifecycle``
     run is already in flight (anti-rejeu, decision 13) and (c) we are past the
-    post-promotion cooldown (decision 17). The guards run before/after the alert
-    read so a firing alert never queues a second run.
+    post-promotion cooldown (decision 17). On success, pushes the triggering
+    class to XCom so the downstream ``TriggerDagRunOperator`` can pass it in
+    the lifecycle conf (Issue 9).
     """
     params = (context.get("params") or {})
     cooldown_seconds = int(params.get("cooldown_seconds", 900))
@@ -160,6 +198,9 @@ def _drift_alert_should_trigger(**context) -> bool:
         return False
     if _in_cooldown(cooldown_seconds):
         return False
+    ti = context.get("ti")
+    if ti is not None:
+        ti.xcom_push(key="triggering_class", value=_detect_triggering_class())
     return True
 
 
@@ -180,18 +221,15 @@ def _define() -> None:
     op_trigger_lifecycle = TriggerDagRunOperator(
         task_id="trigger_lifecycle",
         trigger_dag_id=LIFECYCLE_DAG_ID,
-        # Never overwrite a live run -- the anti-rejeu guard already gated us
-        # (decision 13).
         reset_dag_run=False,
         conf={
             "scenario_id": DRIFT_SCENARIO_ID,
             "drift_confirmed": "True",
-            # Demo-friendly retrain: fast train-on-trigger on GPU so the chain is
-            # watchable end-to-end (the reference flow uses progressive-train).
             "mode": "train-on-trigger",
             "max_events": 8,
             "epochs": 1,
             "max_cycles": 1,
+            "triggering_class": "{{ ti.xcom_pull(task_ids='wait_for_drift_alert', key='triggering_class') or '" + DEFAULT_TRIGGERING_CLASS + "' }}",
         },
     )
 
