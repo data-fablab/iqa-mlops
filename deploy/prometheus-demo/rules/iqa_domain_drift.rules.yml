@@ -1,0 +1,20 @@
+groups:
+  - name: iqa_domain_drift
+    # Demo-fast variant of deploy/prometheus/rules/iqa_domain_drift.rules.yml.
+    # SAME 0.5 threshold; only the timing is shortened for a live demo:
+    #   rate window 2m -> 30s  (ratio crosses ~4x sooner after the phase switch)
+    #   for 30s -> 0s          (pending -> firing immediately)
+    rules:
+      - alert: IqaDomainDriftPatchCore
+        expr: |
+          sum(rate(iqa_domain_drift_total{regime="out_of_domain"}[30s]))
+          /
+          clamp_min(sum(rate(iqa_domain_drift_total[30s])), 1e-9)
+          > 0.5
+        for: 0s
+        labels:
+          severity: critical
+          signal: domain_drift
+        annotations:
+          summary: "Drift de domaine confirme (PatchCore distance-au-nominal)"
+          description: "La part de pieces out-of-domain (PatchCore) depasse 0.5 — nouveau domaine produit (Casting_class2/class3) detecte la ou le proxy AE reste silencieux. Routing critical existant (email Mailpit + Slack). [DEMO timing]"

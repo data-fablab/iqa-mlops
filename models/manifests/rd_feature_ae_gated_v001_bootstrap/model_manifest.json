@@ -94,8 +94,8 @@
   "selected_metric_value": 0.9190951612731334,
   "selected_val_loss": 1.153761516014735,
   "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss stability only",
-  "sha256": "9e4e3cc84fb359408ec5c58020e799816942d6c46ae024b29acb82c1c8ebe146",
-  "source_checkpoint": "checkpoint_best_image_ap.pt",
+  "sha256": "a1152d7656db8c77c5b3604048aace4e40fdaec22286de0ccccf630549606db2",
+  "source_checkpoint": "rd_feature_ae_class1_baseline/checkpoint.pt",
   "status": "bootstrap",
   "validation_set_id": "validation_set_v001"
 }

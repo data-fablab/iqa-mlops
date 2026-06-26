@@ -1,0 +1,34 @@
+groups:
+  - name: iqa_drift_proxy
+    # Demo-fast variant of deploy/prometheus/rules/iqa_drift_proxy.rules.yml.
+    # SAME 0.5 thresholds; only the timing is shortened (rate 2m -> 30s, for 0s).
+    # Kept in the demo so the AE-proxy contrast is GENUINE (rule present, simply
+    # stays below 0.5 on a domain shift) rather than absent.
+    rules:
+      - alert: IqaDriftProxyWarning
+        expr: |
+          sum(rate(iqa_prediction_total{scenario_id=~"drift.*",decision="Orange"}[30s]))
+          /
+          clamp_min(sum(rate(iqa_prediction_total{scenario_id=~"drift.*"}[30s])), 1e-9)
+          > 0.5
+        for: 0s
+        labels:
+          severity: warning
+          signal: drift_proxy
+        annotations:
+          summary: "Drift de domaine naissant (proxy taux Orange)"
+          description: "Le taux d'anomalies Orange du regime drift depasse 0.5 — nouveau domaine OOD detecte. [DEMO timing]"
+
+      - alert: IqaDriftProxy
+        expr: |
+          sum(rate(iqa_prediction_total{scenario_id=~"drift.*",decision="Rouge"}[30s]))
+          /
+          clamp_min(sum(rate(iqa_prediction_total{scenario_id=~"drift.*"}[30s])), 1e-9)
+          > 0.5
+        for: 0s
+        labels:
+          severity: critical
+          signal: drift_proxy
+        annotations:
+          summary: "Drift de domaine confirme (proxy taux Rouge)"
+          description: "Le taux d'anomalies Rouge du regime drift depasse le seuil calibre (0.5) — domaine OOD (Casting_class2/class3). [DEMO timing]"

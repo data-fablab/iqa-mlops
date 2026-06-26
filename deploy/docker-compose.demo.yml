@@ -1,0 +1,21 @@
+# Demo-fast override (live drift demo in < 5 min).
+#
+# Remounts Prometheus with the demo config (evaluation_interval 5s) and the
+# demo rules (rate window 30s, for 0s). The 0.5 drift threshold is UNCHANGED;
+# only timing is shortened so the alert tracks the live ratio in near real time.
+# Volumes merge by container-path key, so these replace the base mounts cleanly.
+#
+# Use:
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up -d prometheus
+#   .venv/Scripts/python.exe -m scripts.run_dual_drift_demo \
+#       --baseline-settle 20 --max-per-phase 20 --rate 6 \
+#       --phases baseline_domain_class1 domain_extension_class2
+#
+# Revert to reference timing after the demo:
+#   docker compose -f deploy/docker-compose.yml up -d prometheus
+
+services:
+  prometheus:
+    volumes:
+      - ./prometheus-demo/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus-demo/rules:/etc/prometheus/rules:ro

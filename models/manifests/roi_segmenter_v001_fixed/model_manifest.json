@@ -3,10 +3,10 @@
   "model_type": "functional_unet_resnet18_det1_context2b",
   "status": "fixed",
   "artifact_uri": "s3://iqa-models/roi_segmenter_v001_fixed/checkpoint.pt",
-  "sha256": "37d1b8d62370f16ecdb5f4bbab66f39bafc39de99f22d6ab286860af57463cf4",
+  "sha256": "9c18bd675991f06d939d00f21a522612a103d0f6ea879b81a7fe48b1ce82063e",
   "source_run": "Casting_multiclass_v49b_from_v48b_e007_lowcov5_weight12_ft",
-  "source_checkpoint": "checkpoint_epoch_004.pt",
-  "usage_note": "Validated ROI checkpoint V49b epoch 004: val_loss=0.04544, mfg_iou=0.9771, landmark_dice=0.9851.",
+  "source_checkpoint": "checkpoint_epoch_007.pt",
+  "usage_note": "ROI checkpoint V49b epoch 007 (checkpoint_epoch_007.pt). Re-pinned from epoch_004 to the epoch_007 artifact in use for the drift demo.",
   "runtime": {
     "package": "iqa.models.segmentation",
     "loader": "build_segmentation_model"

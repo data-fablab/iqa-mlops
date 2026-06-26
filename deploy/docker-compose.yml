@@ -293,6 +293,16 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init-databases.sql:/docker-entrypoint-initdb.d/10-init-databases.sql:ro
 
+  # Lightweight web SQL client to browse the Postgres databases (iqa_metadata,
+  # mlflow, airflow). Dev-only convenience: connect with server "postgres",
+  # user/password from IQA_POSTGRES_USER/PASSWORD. UI on http://localhost:8090.
+  adminer:
+    image: adminer:4.8.1
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports: ["8090:8080"]
+    depends_on: [postgres]
+
   prometheus:
     image: prom/prometheus:v3.1.0
     ports: ["9090:9090"]

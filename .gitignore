@@ -51,3 +51,6 @@ issue_to_do/
 
 # Alertmanager Slack webhook secret (local, never commit)
 deploy/alertmanager/secrets/slack_webhook_url
+
+deploy/drift-state/
+*.real.bak
