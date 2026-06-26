@@ -1,0 +1,234 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "tags": ["iqa", "demo", "drift", "autonomy"],
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "browser",
+  "title": "IQA - Demo autonome class1 -> class2 -> class3",
+  "uid": "iqa-demo",
+  "version": 1,
+  "description": "Dashboard de narration pour la demo autonome (runsheet 20 min). Ordre top->bas = ordre du discours : etat systeme -> contraste AE vs PatchCore -> orchestration GPU -> recuperation. Metriques : iqa_prediction_total (proxy AE), iqa_domain_drift_total (PatchCore), airflow_pool_*_iqa_gpu (orchestration), iqa_active_model_info (modele actif).",
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "1. Etat systeme",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Modele actif (Feature-AE / ROI)",
+      "description": "Version du modele Feature-AE actuellement servie. Change a chaque promotion : class1_baseline -> ...class2... -> ...class3.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 10, "x": 0, "y": 1 },
+      "options": { "showHeader": true },
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "instance": true, "job": true }, "renameByName": { "feature_ae_version": "Feature-AE", "roi_model_version": "ROI segmenter" } } }
+      ],
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_active_model_info", "format": "table", "instant": true }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "API",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 10, "y": 1 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ], "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_api_up", "instant": true } ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Inference",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 13, "y": 1 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ], "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_inference_up", "instant": true } ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Pool GPU Airflow (running)",
+      "description": "Nombre de slots du pool iqa_gpu occupes. >0 => un cycle lifecycle (retrain) tourne sur le GPU.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "blue", "value": 1 } ] }, "mappings": [ { "type": "value", "options": { "0": { "text": "idle", "color": "green" } } } ] } },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "airflow_pool_running_slots_iqa_gpu or vector(0)", "instant": true } ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Latence predict (5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "rate(iqa_predict_latency_seconds_sum[5m]) / clamp_min(rate(iqa_predict_latency_seconds_count[5m]), 1)", "instant": true } ]
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "2. Le contraste : AE proxy (aveugle au domaine) vs PatchCore (voit le domaine)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Contraste AE vs PatchCore — ratios vs seuil 0.5",
+      "description": "LE panneau de la demo. Bleu = ratio out-of-domain PatchCore (signal de drift de domaine). Rouge = ratio Rouge du proxy AE (reconstruction). Sur un changement de domaine (class2/class3), PatchCore monte vers 1 alors que l'AE reste bas : l'AE mesure la reconstruction, pas le domaine.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 6 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 12, "thresholdsStyle": { "mode": "line" } }, "thresholds": { "mode": "absolute", "steps": [ { "color": "transparent", "value": null }, { "color": "red", "value": 0.5 } ] } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "PatchCore out-of-domain" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "AE proxy Rouge" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(iqa_domain_drift_total{regime=\"out_of_domain\"}[2m])) / clamp_min(sum(rate(iqa_domain_drift_total[2m])), 1e-9)", "legendFormat": "PatchCore out-of-domain" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\",decision=\"Rouge\"}[2m])) / clamp_min(sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\"}[2m])), 1e-9)", "legendFormat": "AE proxy Rouge" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "PatchCore out-of-domain (now)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2, "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.5 } ] } } },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(iqa_domain_drift_total{regime=\"out_of_domain\"}[2m])) / clamp_min(sum(rate(iqa_domain_drift_total[2m])), 1e-9)", "instant": true } ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "AE proxy Rouge (now)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2, "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.5 } ] } } },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\",decision=\"Rouge\"}[2m])) / clamp_min(sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\"}[2m])), 1e-9)", "instant": true } ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Alerte IqaDomainDriftPatchCore",
+      "description": "Etat firing de l'alerte de drift de domaine : l'unique signal qui declenche le reentrainement.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "inactif", "color": "green" }, "1": { "text": "FIRING", "color": "red" } } } ], "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(ALERTS{alertname=\"IqaDomainDriftPatchCore\",alertstate=\"firing\"}) or vector(0)", "instant": true } ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Score drift derniere piece",
+      "description": "Score distance-au-nominal de la derniere piece. > seuil p90 calibre (~3.64) => out-of-domain.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 16 },
+      "fieldConfig": { "defaults": { "decimals": 2, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 3.64 } ] } } },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_domain_drift_score", "instant": true } ]
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "3. Orchestration autonome (Airflow) & recuperation",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Pool GPU iqa_gpu — running / queued",
+      "description": "Occupation du pool GPU Airflow. Un pic running=1 = le cycle lifecycle (warm-start retrain) s'execute, declenche par le sensor sans intervention humaine.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "fieldConfig": { "defaults": { "decimals": 0, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "stacking": { "mode": "none" } } } },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "airflow_pool_running_slots_iqa_gpu or vector(0)", "legendFormat": "running" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "airflow_pool_queued_slots_iqa_gpu or vector(0)", "legendFormat": "queued" }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Decisions servies (taux 2m, par couleur)",
+      "description": "Flux des decisions V/O/R. La recuperation post-retrain se voit au retour du Vert apres reload du modele.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 15 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Vert" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "Orange" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "Rouge" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"] }, "tooltip": { "mode": "multi" } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (decision) (rate(iqa_prediction_total[2m]))", "legendFormat": "{{decision}}" } ]
+    },
+    {
+      "id": 22,
+      "type": "state-timeline",
+      "title": "Historique alertes (proxy AE + PatchCore)",
+      "description": "Periodes firing de chaque alerte. Permet de relire le scenario : drift detecte -> retrain -> retour au calme.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 30 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "1": { "text": "firing", "color": "red" } } } ], "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+      "options": { "mergeValues": true, "showValue": "never", "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "ALERTS{alertname=~\"Iqa(DriftProxy|DomainDriftPatchCore).*\",alertstate=\"firing\"}", "legendFormat": "{{alertname}} ({{severity}})" } ]
+    },
+    {
+      "id": 103,
+      "type": "row",
+      "title": "4. Etat cumule de couverture PatchCore (conclusion)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Classes couvertes (PatchCore)",
+      "description": "Nombre de classes dans la banque memoire PatchCore active. Croit 1 -> 2 -> 3 a chaque cycle autonome reussi. Source : iqa_domain_drift_covered_classes (manifest actif lu par l'inference).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 38 },
+      "fieldConfig": { "defaults": { "decimals": 0, "min": 0, "max": 3, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 2 }, { "color": "green", "value": 3 } ] } } },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(iqa_domain_drift_covered_classes)", "instant": true } ]
+    },
+    {
+      "id": 31,
+      "type": "table",
+      "title": "Liste des classes couvertes",
+      "description": "Label classes de iqa_domain_drift_covered_classes_info : la liste cumulee servie par le PatchCore actif. Etat final attendu : Casting_class1, Casting_class2, Casting_class3.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 38 },
+      "options": { "showHeader": true },
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "instance": true, "job": true }, "renameByName": { "classes": "Classes couvertes (cumul)" } } }
+      ],
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_domain_drift_covered_classes_info", "format": "table", "instant": true } ]
+    }
+  ]
+}

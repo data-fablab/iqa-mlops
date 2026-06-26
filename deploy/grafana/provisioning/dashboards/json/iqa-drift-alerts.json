@@ -282,6 +282,37 @@
           "legendFormat": "ratio out-of-domain (PatchCore)"
         }
       ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Contraste AE proxy vs PatchCore (le meme graphe)",
+      "description": "Superposition des deux signaux : bleu = ratio out-of-domain PatchCore (drift de domaine), rouge = ratio Rouge du proxy AE (reconstruction). Sur un changement de domaine, PatchCore monte vers 1 alors que l'AE reste bas : l'AE ne voit pas le domaine.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 37 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "thresholdsStyle": { "mode": "line" } }, "thresholds": { "mode": "absolute", "steps": [ { "color": "transparent", "value": null }, { "color": "red", "value": 0.5 } ] } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "PatchCore out-of-domain" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] },
+          { "matcher": { "id": "byName", "options": "AE proxy Rouge" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(iqa_domain_drift_total{regime=\"out_of_domain\"}[2m])) / clamp_min(sum(rate(iqa_domain_drift_total[2m])), 1e-9)", "legendFormat": "PatchCore out-of-domain" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\",decision=\"Rouge\"}[2m])) / clamp_min(sum(rate(iqa_prediction_total{scenario_id=~\"drift.*\"}[2m])), 1e-9)", "legendFormat": "AE proxy Rouge" }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Classes couvertes (PatchCore)",
+      "description": "Nombre de classes dans la banque memoire PatchCore active (iqa_domain_drift_covered_classes). Croit a chaque cycle autonome reussi.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 46 },
+      "fieldConfig": { "defaults": { "decimals": 0, "min": 0, "max": 3, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 2 }, { "color": "green", "value": 3 } ] } } },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(iqa_domain_drift_covered_classes)", "instant": true } ]
     }
   ]
 }

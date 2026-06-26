@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
@@ -14,6 +16,27 @@ from iqa.inference.contracts import InferenceRequest, placeholder_inference
 from iqa.inference.prediction_journal import append_journal
 from iqa.inference.real_inference import get_scorer, real_inference_enabled
 from iqa.runtime import gpu_lock
+
+
+def _active_covered_classes() -> list[str]:
+    """Read covered_classes from the active PatchCore manifest (cheap, scrape-time).
+
+    Reads the JSON manifest directly instead of forcing the detector (bank +
+    backbone) to load on every scrape. Degrades to an empty list on any error so
+    /metrics never fails.
+    """
+
+    if not real_inference_enabled():
+        return []
+    try:
+        manifest_path = Path(get_scorer().domain_drift_dir) / "model_manifest.json"
+        if not manifest_path.exists():
+            return []
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        classes = payload.get("covered_classes") or []
+        return [str(c) for c in classes]
+    except Exception:  # noqa: BLE001 - /metrics must never 500
+        return []
 
 
 def _demo_hold_enabled() -> bool:
@@ -60,6 +83,7 @@ def health() -> dict[str, str]:
 @app.get("/metrics", response_class=PlainTextResponse)
 def metrics() -> str:
     gpu_lock_held = 1 if getattr(app.state, "gpu_lock_held", False) else 0
+    covered = _active_covered_classes()
     lines = [
         "# HELP iqa_inference_up IQA inference availability",
         "# TYPE iqa_inference_up gauge",
@@ -67,7 +91,19 @@ def metrics() -> str:
         "# HELP iqa_inference_gpu_lock_held IQA inference demo holds the single-GPU lock",
         "# TYPE iqa_inference_gpu_lock_held gauge",
         f"iqa_inference_gpu_lock_held {gpu_lock_held}",
+        "# HELP iqa_domain_drift_covered_classes Number of classes covered by the active PatchCore bank",
+        "# TYPE iqa_domain_drift_covered_classes gauge",
+        f"iqa_domain_drift_covered_classes {len(covered)}",
     ]
+    if covered:
+        # Info-style metric: the class list rides on a label so the demo can show
+        # the cumulative coverage [class1, class2, class3] in Grafana.
+        classes_label = ",".join(covered).replace("\\", "").replace('"', "")
+        lines += [
+            "# HELP iqa_domain_drift_covered_classes_info Classes covered by the active PatchCore bank (label)",
+            "# TYPE iqa_domain_drift_covered_classes_info gauge",
+            f'iqa_domain_drift_covered_classes_info{{classes="{classes_label}"}} 1',
+        ]
     return "\n".join(lines) + "\n"
 
 

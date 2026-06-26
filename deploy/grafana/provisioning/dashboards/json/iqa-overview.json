@@ -205,6 +205,17 @@
           "legendFormat": "{{stage}} - {{model_version}}"
         }
       ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Classes couvertes (PatchCore)",
+      "description": "Nombre de classes dans la banque memoire PatchCore active (iqa_domain_drift_covered_classes). 1 au baseline, croit vers 3 apres les cycles autonomes.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 29 },
+      "fieldConfig": { "defaults": { "decimals": 0, "min": 0, "max": 3, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 2 }, { "color": "green", "value": 3 } ] } } },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "value_and_name" },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(iqa_domain_drift_covered_classes)", "instant": true } ]
     }
   ]
 }
