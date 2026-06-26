@@ -39,6 +39,9 @@ def _define() -> None:
             "--progressive-min-defects-for-decision {{ params.progressive_min_defects_for_decision }} "
             "--max-good-red-regression {{ params.max_good_red_regression }} "
             "--candidate-init-policy {{ params.candidate_init_policy }} "
+            "{% if params.candidate_init_checkpoint %}"
+            "--candidate-init-checkpoint {{ params.candidate_init_checkpoint }} "
+            "{% endif %}"
             "--publish-minio "
             "--wait-for-gpu"
             "{% if params.require_mlflow_registry %} --require-mlflow-registry{% endif %}"
@@ -84,6 +87,7 @@ dag = build_container_dag(
         "progressive_min_defects_for_decision": 5,
         "max_good_red_regression": 1,
         "candidate_init_policy": "stable_base",
+        "candidate_init_checkpoint": "",
         "require_mlflow_registry": False,
         "mlflow_tracking_uri": "http://mlflow:5000",
         "ml_image": ml_image(),

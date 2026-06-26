@@ -1,0 +1,5 @@
+# Demo-only: warm-start checkpoints per triggering class (Issue 25).
+# File absent → no override → prod behaviour (stable_base).
+warmstart_checkpoints:
+  Casting_class2: .cache/iqa/models/rd_feature_ae_class2_precuit/checkpoint.pt
+  Casting_class3: .cache/iqa/models/rd_feature_ae_class3_precuit/checkpoint.pt

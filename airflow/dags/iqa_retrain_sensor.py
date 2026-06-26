@@ -203,11 +203,24 @@ def _evaluate_and_trigger(**context) -> bool:
         state["last_attempt_ts"] = datetime.now(timezone.utc).isoformat()
         _save_state(state)
 
+        resolved_class = triggering_class or "Casting_class1"
+        warmstart_checkpoint = _resolve_warmstart(resolved_class)
+
         if ti is not None:
-            ti.xcom_push(key="triggering_class", value=triggering_class or "Casting_class1")
+            ti.xcom_push(key="triggering_class", value=resolved_class)
             ti.xcom_push(key="retrain_scope", value=decision.retrain_scope)
             ti.xcom_push(key="trigger_reason", value=decision.primary_reason)
+            if warmstart_checkpoint:
+                ti.xcom_push(key="candidate_init_checkpoint", value=warmstart_checkpoint)
     return decision.trigger
+
+
+def _resolve_warmstart(triggering_class: str) -> str | None:
+    try:
+        from iqa.monitoring.warmstart_resolver import resolve_warmstart_checkpoint
+        return resolve_warmstart_checkpoint(triggering_class)
+    except Exception:
+        return None
 
 
 def _define() -> None:
@@ -229,6 +242,7 @@ def _define() -> None:
             "triggering_class": "{{ ti.xcom_pull(task_ids='evaluate_retrain_policy', key='triggering_class') or 'Casting_class1' }}",
             "retrain_scope": "{{ ti.xcom_pull(task_ids='evaluate_retrain_policy', key='retrain_scope') or 'bootstrap' }}",
             "drift_confirmed": "{{ ti.xcom_pull(task_ids='evaluate_retrain_policy', key='trigger_reason') == 'drift' }}",
+            "candidate_init_checkpoint": "{{ ti.xcom_pull(task_ids='evaluate_retrain_policy', key='candidate_init_checkpoint') or '' }}",
             "mode": "train-on-trigger",
             "max_events": 8,
             "epochs": 1,

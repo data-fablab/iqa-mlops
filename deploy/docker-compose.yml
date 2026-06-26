@@ -40,9 +40,10 @@ services:
       # reconstruct poorly -> high anomaly score -> Orange/Rouge.
       IQA_REAL_INFERENCE: ${IQA_REAL_INFERENCE:-1}
       IQA_INFERENCE_DEVICE: ${IQA_INFERENCE_DEVICE:-cuda}
-      # Deploy the Casting_class1-only baseline (ADR 0010 §4): class2/class3 are then
-      # genuinely out-of-distribution so the drift demo is real.
-      IQA_FEATURE_AE_CHECKPOINT: ${IQA_FEATURE_AE_CHECKPOINT:-/opt/iqa/models/rd_feature_ae_class1_baseline/checkpoint.pt}
+      # Active checkpoint: refreshed in place by the lifecycle (Issue 23/24);
+      # defaults to the class1-only baseline so a fresh stack boots cleanly.
+      IQA_FEATURE_AE_CHECKPOINT: ${IQA_FEATURE_AE_CHECKPOINT:-/opt/iqa/models/rd_feature_ae_active/checkpoint.pt}
+      IQA_DOMAIN_DRIFT_DIR: ${IQA_DOMAIN_DRIFT_DIR:-/opt/iqa/models/patchcore_domain_drift_active}
       # Calibrated reconstruction thresholds (ADR 0010 §3) are the source of truth;
       # the env thresholds below are only a fallback when the file is absent.
       IQA_FEATURE_AE_CALIBRATION: ${IQA_FEATURE_AE_CALIBRATION:-/opt/iqa/iqa-mlops/configs/feature_ae_reconstruction_calibration.yaml}
