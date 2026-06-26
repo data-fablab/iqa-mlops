@@ -44,15 +44,30 @@ on n'y touche pas. Le chemin reel a son **propre driver** qui rejoue
 et observe alertes Prometheus + runs Airflow. La recuperation au Vert vient
 exclusivement du checkpoint reentraine, pas d'une ecriture d'etat.
 
-### 2. Detection en ligne = anomaly score agrege
+### 2. Detection en ligne : deux signaux complementaires
 
-Le signal de detection est la decision `{Vert, Orange, Rouge}` issue du score de
-reconstruction, exposee via le **meme proxy Prometheus** (part Orange+Rouge dans le
-regime drift, seuil 0.5 ; cf. `configs/drift_proxy_calibration.yaml`). Seul le
-*producteur* du score change (synthetique -> reel) ; regles d'alerte et sensor sont
-inchanges. `reconstruction_p95` est exporte comme **gauge d'observabilite**, pas
-comme declencheur. AUPIMO / pixel_ap ne detectent pas en ligne : ils servent les
-gates de promotion.
+> **Revise le 2026-06-26.** La version initiale presentait le score de reconstruction comme
+> signal unique de detection. L'investigation empirique (probe sur le plan drift) a montre
+> que le score de **reconstruction AE ne separe pas les domaines** : class2 ~45 %, class3
+> ~5 % au-dessus du p90 class1. Le ratio proxy AE ne franchit pas 0.5 de facon fiable.
+> En revanche un detecteur **distance-au-nominal (PatchCore)** separe les domaines a 100 %
+> (class2 et class3 au-dessus du p90 class1), mais est ~aleatoire sur le defaut.
+
+**Signal defaut** : decision `{Vert, Orange, Rouge}` issue du score de reconstruction AE,
+exposee via le proxy Prometheus (part Orange+Rouge, seuil 0.5 ; cf.
+`configs/drift_proxy_calibration.yaml`). `reconstruction_p95` est exporte comme gauge
+d'observabilite. AUPIMO / pixel_ap ne detectent pas en ligne : ils servent les gates de
+promotion.
+
+**Signal drift de domaine** : score PatchCore (distance kNN max-patch au nominal),
+emis en in-process a cote de l'AE. Counter `iqa_domain_drift_total{regime}` + gauge
+`iqa_domain_drift_score`. Regle `IqaDomainDriftPatchCore` (ratio out-of-domain > 0.5).
+
+**Contrat des deux seuils (decision 7 de l'amendement) :**
+- Seuil **par-piece** : vit dans la calibration du detecteur concerne (p90 class1 pour
+  PatchCore, Orange/Rouge calibres pour l'AE). Responsabilite du detecteur.
+- Seuil de **population** (ratio 0.5) : vit une seule fois dans la regle Prometheus
+  correspondante. Pas de duplication entre detecteur et regle.
 
 ### 3. Deux etages de seuils, independants
 
@@ -135,3 +150,74 @@ couverture incrementale.
 - Le partage GPU par requete borne le ralentissement d'inference a la duree d'un
   retrain demo (epochs abaisses) ; en cible Kubernetes, le lock GPU devient une
   ressource de noeud (TODO deja note dans [ADR 0008](0008-taches-airflow-comme-conteneurs.md)).
+
+## Amendement 2026-06-26 - Detecteur de drift de domaine (PatchCore) + politique de reentrainement
+
+### A. Deux detecteurs, deux roles distincts (corrige la decision 2)
+
+Investigation empirique (probe sur le plan drift, meme images, meme metriques) :
+
+- Le score de **reconstruction** de l'AE detecte des **defauts** mais **ne separe pas les
+  domaines** produits : sur le p90 class1, class2 ~45 % et class3 ~5 % d'images au-dessus
+  du seuil -> le ratio proxy ne franchit pas 0.5 de facon fiable (cause du blocage de
+  l'Issue 7).
+- Un detecteur **distance-au-nominal (PatchCore)** -- backbone ImageNet WRN50, banque de
+  patches nominaux class1, score = distance kNN max-patch -- **separe les domaines a 100 %**
+  (class2 et class3 au-dessus du p90 class1), mais est ~aleatoire sur le **defaut** (image
+  AUROC ~0.5, pixel AP au niveau du hasard).
+
+Decision : **deux detecteurs complementaires, jamais l'un pour l'autre.**
+
+- **Feature-AE (reconstruction)** = detecteur de **defaut** (decision Vert/Orange/Rouge,
+  4 metriques metier). Inchange.
+- **PatchCore (distance-au-nominal)** = detecteur de **drift de domaine**. Emis en
+  in-process dans `iqa-inference` a cote de l'AE : counter `iqa_domain_drift_total{regime}`
+  (alerte par ratio) + gauge `iqa_domain_drift_score` (courbe). Regle `IqaDomainDriftPatchCore`
+  (ratio out-of-domain > 0.5). Detecteur enregistre (banque + calibration + manifest) sur
+  disque hote + run MLflow `iqa-domain-drift` (artifact MinIO).
+
+Deux seuils, comme l'AE : seuil **par-piece** (p90 class1) dans la calibration du detecteur ;
+seuil de **population** (ratio 0.5) dans la regle Prometheus. Le proxy AE (decision 2) reste
+un signal *defaut* ; il n'est plus presente comme detecteur de *drift de domaine*.
+
+### B. Politique de reentrainement multi-signal (etend les decisions 5-7)
+
+But : faire monter les 4 metriques de l'AE en declenchant un retrain **au bon moment**. Le
+gate relatif vs prod (decision 6) reste le filet de securite : on ne promeut que du mieux.
+
+**Triggers (l'un suffit) :**
+1. **Drift de domaine** -- alerte PatchCore (nouveau domaine non couvert).
+2. **Plancher metrique** -- prod `pixel_aupimo_1e-5_1e-3 < 0.15` **ou** `pixel_ap < 0.20`
+   (cibles absolues seedees sur l'atteignable demontre : retrain 420 img = 0.172 / 0.268).
+   **TRIGGER uniquement, jamais critere de gate** -- ne contamine pas la non-regression
+   relative de la decision 6 (un plancher absolu casserait la couverture incrementale).
+3. **Accumulation** -- N conformes validees accumulees (le `>= 50` existant).
+
+**Quel retrain (scope, via `resolve_retrain_samples`) :** drift -> couverture incrementale
+(class1 + classes vues) ; plancher -> tout le bon dispo du/des domaine(s) couvert(s) +
+selection `checkpoint_best_*` (la cause racine du sous-entrainement etait le **volume** de
+donnees, pas les epochs) ; accumulation -> conformes accumules. **Plusieurs triggers** ->
+un seul retrain, **union** des scopes, priorite d'etiquetage drift > plancher > accumulation.
+
+**Mecanisme :** un **evaluateur periodique unique en pull** (sensor-DAG) lit Prometheus
+(drift), MLflow (metriques prod vs cibles), store de donnees (accumulation), appelle une
+**fonction de decision pure** (`evaluate_retrain_policy`, extension de
+`evaluate_lifecycle_signal`), et declenche `iqa_lifecycle` avec la conf. Le webhook-catcher
+reste passif (observabilite) ; pas de push Alertmanager -> Airflow.
+
+**Anti-boucle (etend la decision 7) :** re-trigger **seulement si une entree a change**
+(donnees / classe derivante / checkpoint prod) ; apres K echecs de gate sur la meme
+condition -> arret de l'auto-retrain, candidat `rejected`, alerte/breach **persistant comme
+signal HITL** ; cooldown temporel minimal en garde-fou secondaire.
+
+### Consequences de l'amendement
+
+- Le blocage de l'Issue 7 (alerte qui ne tirait pas sur class2/3) est leve par un detecteur
+  adapte, pas par un meilleur checkpoint AE.
+- Les Issues 9/10 sont re-ancrees sur le signal de drift PatchCore. Nouvelles Issues 11-14
+  (detecteur + serving + demo duale + durcissement) et 15-18 (politique de reentrainement).
+- Le plancher metrique adresse le sous-entrainement du baseline deploye (AUPIMO 0.074 ->
+  ~0.17 atteignable) **sans** dependre d'un drift -- independant de PatchCore.
+- Nouvelle dependance operationnelle : detecteur PatchCore resident (~1.9 Go VRAM, mesure :
+  les deux modeles tiennent sur un seul GPU, ~178 ms/piece sequentiel) et son enregistrement
+  MLflow/MinIO ; section `retrain_policy` (cibles plancher) en config.

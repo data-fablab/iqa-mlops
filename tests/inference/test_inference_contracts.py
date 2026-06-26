@@ -144,3 +144,41 @@ class TestModelContractOutputValidation:
         assert result_dict["decision"] == "Orange"
         assert result_dict["heatmap_uri"] == "s3://bucket/heatmap.png"
         assert result_dict["roi_status"] == "ok"
+
+    def test_inference_result_domain_drift_fields_default_none(self) -> None:
+        result = InferenceResult(
+            piece_event_id="piece_001",
+            scenario_id="production_replay_natural",
+            score=0.0,
+            decision="Vert",
+            heatmap_uri=None,
+            roi_status=None,
+            roi_model_version="roi_v001",
+            feature_ae_version="ae_v001",
+        )
+        assert result.domain_drift_score is None
+        assert result.domain_regime is None
+        d = result.to_dict()
+        assert "domain_drift_score" in d
+        assert "domain_regime" in d
+        assert d["domain_drift_score"] is None
+        assert d["domain_regime"] is None
+
+    def test_inference_result_domain_drift_fields_round_trip(self) -> None:
+        result = InferenceResult(
+            piece_event_id="piece_001",
+            scenario_id="production_replay_natural",
+            score=0.025,
+            decision="Orange",
+            heatmap_uri=None,
+            roi_status=None,
+            roi_model_version="roi_v001",
+            feature_ae_version="ae_v001",
+            domain_drift_score=4.22,
+            domain_regime="out_of_domain",
+        )
+        assert result.domain_drift_score == 4.22
+        assert result.domain_regime == "out_of_domain"
+        d = result.to_dict()
+        assert d["domain_drift_score"] == 4.22
+        assert d["domain_regime"] == "out_of_domain"
