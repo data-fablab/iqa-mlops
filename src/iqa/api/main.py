@@ -677,6 +677,7 @@ def predict(request: PredictRequest) -> dict[str, Any]:
         "decision": prediction["decision"],
         "model_version": prediction["feature_ae_version"],
         "roi_model_version": prediction["roi_model_version"],
+        "roi_status": prediction.get("roi_status"),
         "created_at": created_at,
         "feedback_closed": False,
     }
