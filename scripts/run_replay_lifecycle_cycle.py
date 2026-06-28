@@ -6,6 +6,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -23,7 +24,9 @@ from iqa.models.artifacts import (
     resolve_feature_ae_checkpoint,
     resolve_roi_segmenter_checkpoint,
 )
+from iqa.dags.refresh_active_artifacts import refresh_active_artifacts
 from iqa.monitoring import LifecycleDecision, LifecycleSignal, evaluate_lifecycle_signal
+from iqa.monitoring.warmstart_resolver import resolve_warmstart_checkpoint
 from iqa.runtime import gpu_lock
 from iqa.storage.object_store import ObjectStore
 from iqa.storage.artifacts import sha256_file
@@ -159,6 +162,8 @@ class CycleState:
     candidate_checkpoint: str | None = None
     mlflow_run_id: str | None = None
     status: str = "validated"
+    promotion_status: str = ""
+    triggering_class: str | None = None
     active_model_initial: str = DEFAULT_FEATURE_AE_MODEL_VERSION
     active_model_final: str = DEFAULT_FEATURE_AE_MODEL_VERSION
     cycles_requested: int = 0
@@ -181,6 +186,8 @@ class CycleState:
             "candidate_checkpoint": self.candidate_checkpoint,
             "mlflow_run_id": self.mlflow_run_id,
             "status": self.status,
+            "promotion_status": self.promotion_status,
+            "triggering_class": self.triggering_class,
             "output_dir": str(self.output_dir),
         }
         if self.mode in PROGRESSIVE_MODES:
@@ -319,6 +326,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-good-red-regression", type=int, default=1)
     parser.add_argument("--candidate-init-policy", choices=["stable_base", "active", "fresh"], default="stable_base")
     parser.add_argument("--candidate-init-checkpoint", type=Path, default=None, help="explicit checkpoint path for warm-start (overrides --candidate-init-policy)")
+    parser.add_argument("--triggering-class", default=None, help="class that triggered the drift (e.g. Casting_class2); selects the demo warm-start checkpoint and the new PatchCore coverage")
     return parser.parse_args()
 
 
@@ -517,11 +525,13 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
         state.candidate_checkpoint = str(train_result.get("checkpoint") or "")
         state.mlflow_run_id = str(train_result.get("run_id") or "")
         state.status = "trained"
+        state.triggering_class = getattr(args, "triggering_class", None)
         if args.publish_minio and state.candidate_checkpoint:
             upload_checkpoint_to_s3(
                 state.candidate_checkpoint,
                 f"s3://iqa-models/{state.trigger_decision.candidate_dataset_version}/checkpoint.pt",
             )
+        promote_refresh_reload_on_trigger(args, state, train_result)
 
     summary = summary_with_runtime(state, active_runtime, artifacts)
     write_json(artifacts.summary_path, summary)
@@ -2393,6 +2403,33 @@ def _reset_generated_progressive_candidate_run_dir(run_dir: Path) -> None:
     shutil.rmtree(run_dir)
 
 
+def resolve_trigger_warmstart_checkpoint(args: argparse.Namespace) -> Path | None:
+    """Pick the warm-start checkpoint for a drift-triggered retrain.
+
+    Order: explicit ``--candidate-init-checkpoint`` wins; otherwise the demo
+    warm-start resolver maps ``--triggering-class`` to a pre-baked checkpoint
+    (``configs/demo_warmstart_checkpoints.yaml``). ``None`` → train from scratch.
+    """
+    explicit = getattr(args, "candidate_init_checkpoint", None)
+    if explicit:
+        path = Path(explicit)
+        if not path.is_file():
+            raise FileNotFoundError(f"--candidate-init-checkpoint path does not exist: {path}")
+        return path
+    triggering_class = getattr(args, "triggering_class", None)
+    if triggering_class:
+        resolved = resolve_warmstart_checkpoint(triggering_class)
+        if resolved:
+            path = Path(resolved)
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"warm-start checkpoint for {triggering_class} not found: {path} "
+                    "(run scripts.bake_warmstart_checkpoints first)"
+                )
+            return path
+    return None
+
+
 def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDecision) -> dict[str, Any]:
     candidate_version = decision.candidate_dataset_version
     if not candidate_version:
@@ -2400,6 +2437,8 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
     manifest_path = Path("data/model_datasets") / f"{candidate_version}.csv"
     run_dir = Path(".cache/iqa/models") / candidate_version
     run_dir.mkdir(parents=True, exist_ok=True)
+    init_checkpoint = resolve_trigger_warmstart_checkpoint(args)
+    print(f"train-on-trigger warm-start init: {init_checkpoint or 'fresh (no warm-start)'}")
     config = FeatureAETrainingConfig(
         manifest_path=manifest_path,
         image_root=args.image_root,
@@ -2415,6 +2454,8 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         batch_size=args.batch_size,
         epochs=args.epochs,
         max_steps=args.max_steps,
+        initial_checkpoint_path=init_checkpoint,
+        initial_checkpoint_policy="fresh" if init_checkpoint is None else "explicit",
         metric_eval_manifest_path=VALIDATION_MANIFEST,
         gt_masks_manifest=VALIDATION_GT_MASKS_MANIFEST,
         metric_eval_device=args.device,
@@ -2425,7 +2466,99 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         metric_eval_apply_score_region_to_map=True,
         require_business_metric_for_early_stopping=True,
     )
-    return train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
+    result = train_feature_ae_with_mlflow_logging(config, git_commit=_git_commit())
+    result["run_dir"] = str(run_dir)
+    result["warm_started"] = init_checkpoint is not None
+    return result
+
+
+# Minimum candidate image-AP to promote a warm-started drift retrain. The pre-baked
+# warm-start checkpoint scores ~0.87, so this is a floor that rejects a collapsed
+# candidate, not a fair active-vs-candidate gate (that lives in progressive-train).
+TRIGGER_PROMOTION_MIN_IMAGE_AP = 0.40
+
+
+def _candidate_business_metrics(run_dir: Path) -> dict[str, float]:
+    """Read the candidate's best metric-eval values (image_ap, auroc, aupimo)."""
+    best_path = run_dir / "metric_eval_best.json"
+    if not best_path.is_file():
+        return {}
+    try:
+        payload = json.loads(best_path.read_text(encoding="utf-8-sig"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    metrics: dict[str, float] = {}
+    for key, entry in payload.items():
+        if isinstance(entry, dict) and isinstance(entry.get("value"), (int, float)):
+            metrics[key] = float(entry["value"])
+    return metrics
+
+
+def _reload_inference_model() -> dict[str, Any]:
+    """POST /reload-model so the inference drops its cached AE + PatchCore bank.
+
+    Reaches the inference over the demo network (``IQA_INFERENCE_URL``); the
+    rebuilt bank with the new coverage then loads on the next prediction, so the
+    newly-covered class recovers to in-domain without restarting the container.
+    """
+    import urllib.error
+    import urllib.request
+
+    base = os.environ.get("IQA_INFERENCE_URL", "http://iqa-inference:8100").rstrip("/")
+    req = urllib.request.Request(f"{base}/reload-model", data=b"", method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - internal host
+            return {"ok": True, "response": json.loads(resp.read().decode("utf-8"))}
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        return {"ok": False, "reason": str(exc)}
+
+
+def promote_refresh_reload_on_trigger(
+    args: argparse.Namespace,
+    state: CycleState,
+    train_result: dict[str, Any],
+) -> None:
+    """Gate, then promote → refresh active artifacts → reload inference.
+
+    Closes the autonomous drift-recovery loop for ``train-on-trigger``: a
+    warm-started candidate that clears the floor is promoted, the active
+    Feature-AE + PatchCore bank are rebuilt for the extended coverage, and the
+    inference is told to reload so the newly-covered class recovers to Vert.
+    """
+    run_dir = Path(str(train_result.get("run_dir") or ""))
+    metrics = _candidate_business_metrics(run_dir) if run_dir.parts else {}
+    image_ap = metrics.get("image_ap")
+    warm_started = bool(train_result.get("warm_started"))
+
+    gate_ok = warm_started and (image_ap is None or image_ap >= TRIGGER_PROMOTION_MIN_IMAGE_AP)
+    if not gate_ok:
+        state.promotion_status = "rejected_below_floor" if warm_started else "rejected_not_warm_started"
+        print(
+            f"train-on-trigger NOT promoted ({state.promotion_status}): "
+            f"warm_started={warm_started} image_ap={image_ap}"
+        )
+        return
+
+    state.promotion_status = "promoted"
+    state.status = "promoted"
+    print(f"train-on-trigger PROMOTED: image_ap={image_ap} triggering_class={state.triggering_class}")
+
+    summary_for_refresh = {
+        "promotion_status": "promoted",
+        "candidate_checkpoint": state.candidate_checkpoint,
+        "triggering_class": state.triggering_class,
+        "trigger_reason": state.trigger_decision.trigger_reason if state.trigger_decision else "drift",
+    }
+    refresh = refresh_active_artifacts(summary_for_refresh, Path(".cache/iqa/models"))
+    print(f"refresh_active_artifacts: status={refresh.status} covered={refresh.covered_classes} reason={refresh.reason}")
+    if refresh.status != "refreshed":
+        state.promotion_status = f"promoted_refresh_{refresh.status}"
+        return
+
+    reload_result = _reload_inference_model()
+    print(f"inference reload: {reload_result}")
+    if not reload_result.get("ok"):
+        state.promotion_status = "promoted_reload_failed"
 
 
 def _git_commit() -> str:

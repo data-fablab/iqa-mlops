@@ -97,7 +97,8 @@ def resolve_new_covered_classes(
     """Derive the new covered set from the active detector manifest + triggering class."""
     manifest_path = Path(detector_dir) / "model_manifest.json"
     if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # utf-8-sig tolerates a BOM left by a Windows/PowerShell edit of the manifest.
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
         current = manifest.get("covered_classes", ["Casting_class1"])
     else:
         current = ["Casting_class1"]

@@ -32,7 +32,9 @@ def _active_covered_classes() -> list[str]:
         manifest_path = Path(get_scorer().domain_drift_dir) / "model_manifest.json"
         if not manifest_path.exists():
             return []
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # utf-8-sig tolerates a UTF-8 BOM (e.g. when the manifest was edited on
+        # Windows/PowerShell) which plain utf-8 would choke on.
+        payload = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
         classes = payload.get("covered_classes") or []
         return [str(c) for c in classes]
     except Exception:  # noqa: BLE001 - /metrics must never 500

@@ -146,13 +146,21 @@ class RealFeatureAEScorer:
         self._teacher.eval()
 
     def reload(self, checkpoint_path: str | None = None) -> None:
-        """Drop the cached model so the next score loads a fresh checkpoint."""
+        """Drop the cached model so the next score loads a fresh checkpoint.
+
+        Also drops the cached PatchCore domain-drift detector so a rebuilt bank
+        (new ``covered_classes`` after a drift retrain) is reloaded from disk on
+        the next prediction. Without this the inference keeps the stale bank and a
+        newly-covered class stays out-of-domain despite the refresh.
+        """
         with self._lock:
             if checkpoint_path:
                 self.checkpoint_path = checkpoint_path
                 self.feature_ae_version = Path(checkpoint_path).parent.name or "rd_feature_ae"
             self._model = None
             self._teacher = None
+            self._domain_drift = None
+            self._domain_drift_unavailable = False
 
     def score(self, image_path: str | Path) -> float:
         with self._lock:

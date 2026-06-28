@@ -42,6 +42,9 @@ def _define() -> None:
             "{% if params.candidate_init_checkpoint %}"
             "--candidate-init-checkpoint {{ params.candidate_init_checkpoint }} "
             "{% endif %}"
+            "{% if params.triggering_class %}"
+            "--triggering-class {{ params.triggering_class }} "
+            "{% endif %}"
             "--publish-minio "
             "--wait-for-gpu"
             "{% if params.require_mlflow_registry %} --require-mlflow-registry{% endif %}"
@@ -88,6 +91,9 @@ dag = build_container_dag(
         "max_good_red_regression": 1,
         "candidate_init_policy": "stable_base",
         "candidate_init_checkpoint": "",
+        # Drift-triggering class (set by the drift sensor conf). Selects the demo
+        # warm-start checkpoint and the new PatchCore coverage in train-on-trigger.
+        "triggering_class": "",
         "require_mlflow_registry": False,
         "mlflow_tracking_uri": "http://mlflow:5000",
         "ml_image": ml_image(),
