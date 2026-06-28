@@ -1,4 +1,4 @@
-.PHONY: sync lint test contracts dags replay simulate validate api demo demo-scratch smoke
+.PHONY: sync lint test contracts dags replay simulate validate api demo demo-scratch demo-reset smoke
 
 sync:
 	uv sync --extra cpu
@@ -20,6 +20,11 @@ demo:
 
 demo-scratch:
 	bash deploy/demo-from-scratch.sh
+
+# Idempotent reset to the clean class1-only start (runsheet Phase 0). Restores the
+# active artifacts from the immutable baselines and restarts iqa-api/iqa-inference.
+demo-reset:
+	uv run --extra cpu python -m scripts.demo_reset
 
 smoke:
 	bash deploy/smoke-test.sh

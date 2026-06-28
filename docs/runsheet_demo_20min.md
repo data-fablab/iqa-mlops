@@ -32,9 +32,18 @@
 
 ### Phase 0 — Baseline class1 calme (T+0, ~2 min)
 
+- **Reset propre (idempotent)** — restaure le depart class1-only quel que soit
+  l'etat laisse par une rep precedente, puis redemarre iqa-api/iqa-inference :
+  ```bash
+  make demo-reset
+  # ou : .venv/Scripts/python.exe -m scripts.demo_reset
+  ```
+  Verifier : `covered_classes=[Casting_class1]` dans
+  `.cache/iqa/models/patchcore_domain_drift_active/model_manifest.json`.
 - La stack sert le modele class1-only baseline
 - PatchCore couvre `[Casting_class1]`
-- Envoyer quelques images class1 : tout est **Vert**
+- Pre-chauffer : un `/predict` class1 (1er appel a froid ~60-90 s) -> **Vert**,
+  `regime=in_domain`
 - **Point de narration** : "Le modele baseline ne connait que class1. PatchCore
   confirme que class1 est in-domain."
 
