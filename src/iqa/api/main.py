@@ -431,6 +431,7 @@ def _delegate_inference(request: PredictRequest) -> InferenceResult | None:
             "piece_event_id": request.piece_event_id,
             "scenario_id": request.scenario_id,
             "image_uri": request.image_uri,
+            "lot_id": request.lot_id,
         }
     ).encode("utf-8")
     http_request = urllib.request.Request(

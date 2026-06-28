@@ -14,12 +14,50 @@ is picked up after a retrain. Enabled by ``IQA_REAL_INFERENCE`` in the GPU
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
+import tempfile
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 import torch
+
+logger = logging.getLogger(__name__)
+
+# Predict-time heatmaps are emitted only for non-Vert pieces (the ones worth
+# reviewing) and throttled, so a 6/s drift burst does not flood iqa-heatmaps or
+# slow /predict. Both knobs are env-overridable; set the interval to 0 to disable
+# throttling, or IQA_EMIT_PREDICT_HEATMAPS=0 to turn the feature off entirely.
+_HEATMAP_THROTTLE_LOCK = threading.Lock()
+_LAST_HEATMAP_TS = 0.0
+
+
+def emit_predict_heatmaps_enabled() -> bool:
+    return os.environ.get("IQA_EMIT_PREDICT_HEATMAPS", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _heatmap_min_interval_seconds() -> float:
+    try:
+        return float(os.environ.get("IQA_PREDICT_HEATMAP_MIN_INTERVAL_S", "2.0"))
+    except ValueError:
+        return 2.0
+
+
+def _heatmap_throttle_ready() -> bool:
+    """True at most once per ``min_interval`` seconds (process-wide)."""
+    interval = _heatmap_min_interval_seconds()
+    if interval <= 0:
+        return True
+    global _LAST_HEATMAP_TS
+    now = time.monotonic()
+    with _HEATMAP_THROTTLE_LOCK:
+        if now - _LAST_HEATMAP_TS < interval:
+            return False
+        _LAST_HEATMAP_TS = now
+        return True
 
 from iqa.inference.contracts import Decision, InferenceRequest, InferenceResult
 from iqa.inference.domain_drift import (
@@ -162,11 +200,12 @@ class RealFeatureAEScorer:
             self._domain_drift = None
             self._domain_drift_unavailable = False
 
-    def score(self, image_path: str | Path) -> float:
+    def _compute_maps(self, image_path: str | Path):
+        """Run the scorer once and return the full score maps (scalar + spatial map)."""
         with self._lock:
             self._ensure_loaded()
             with torch.no_grad():
-                maps = compute_feature_ae_score_maps(
+                return compute_feature_ae_score_maps(
                     image_path,
                     self.checkpoint_path,
                     device=self.device,
@@ -174,7 +213,9 @@ class RealFeatureAEScorer:
                     model=self._model,
                     teacher=self._teacher,
                 )
-        return float(maps.score)
+
+    def score(self, image_path: str | Path) -> float:
+        return float(self._compute_maps(image_path).score)
 
     def _ensure_domain_drift(self) -> PatchCoreDomainDriftDetector | None:
         """Lazily load the registered PatchCore detector; tolerate a missing dir."""
@@ -206,21 +247,57 @@ class RealFeatureAEScorer:
 
     def predict(self, request: InferenceRequest) -> InferenceResult:
         image_path = resolve_image_path(request.image_uri)
-        score = self.score(image_path)
+        maps = self._compute_maps(image_path)
+        score = float(maps.score)
         decision = self._decision(score)
         drift_score, drift_regime = self.domain_drift(image_path)
+        heatmap_uri = self._maybe_emit_heatmap(image_path, maps.score_map, decision, request)
         return InferenceResult(
             piece_event_id=request.piece_event_id,
             scenario_id=request.scenario_id,
             score=score,
             decision=decision,
-            heatmap_uri=None,
+            heatmap_uri=heatmap_uri,
             roi_status=None,
             roi_model_version=ROI_MODEL_VERSION,
             feature_ae_version=self.feature_ae_version,
             domain_drift_score=drift_score,
             domain_regime=drift_regime,
         )
+
+    def _maybe_emit_heatmap(self, image_path, score_map, decision: str, request: InferenceRequest) -> str | None:
+        """Render + publish the anomaly heatmap for a reviewable (non-Vert) piece.
+
+        Gated to Orange/Rouge and throttled so a drift burst neither floods
+        iqa-heatmaps nor slows /predict. Best-effort: any failure returns None and
+        never breaks the prediction.
+        """
+        if decision == "Vert" or not emit_predict_heatmaps_enabled() or not _heatmap_throttle_ready():
+            return None
+        try:
+            from iqa.inference.feature_ae import save_feature_ae_heatmap_overlay
+            from iqa.storage.visual_artifacts import VisualArtifactContext, publish_heatmap
+
+            with tempfile.TemporaryDirectory(prefix="iqa_heatmap_") as tmp:
+                out = Path(tmp) / "heatmap.png"
+                save_feature_ae_heatmap_overlay(
+                    image_path,
+                    torch.from_numpy(score_map),
+                    out,
+                    threshold_orange=self.threshold_orange,
+                    threshold_red=self.threshold_red,
+                )
+                image_id = Path(str(image_path)).stem or hashlib.sha1(str(image_path).encode()).hexdigest()[:12]
+                context = VisualArtifactContext(
+                    scenario_id=request.scenario_id,
+                    lot_id=getattr(request, "lot_id", None) or "live",
+                    piece_event_id=request.piece_event_id,
+                    image_id=image_id,
+                )
+                return publish_heatmap(out, context)
+        except Exception as exc:  # noqa: BLE001 - never break /predict on a heatmap hiccup
+            logger.warning("predict heatmap emission skipped: %s", exc)
+            return None
 
     def _decision(self, score: float) -> Decision:
         if score >= self.threshold_red:

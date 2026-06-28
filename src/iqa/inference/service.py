@@ -75,6 +75,9 @@ class InferenceServiceRequest(BaseModel):
     piece_event_id: str
     scenario_id: str = "production_replay_natural"
     image_uri: str
+    # Forwarded by the API gateway so predict-time heatmaps are grouped under the
+    # real lot in iqa-heatmaps (lots/{scenario}/{lot}/...) instead of "live".
+    lot_id: str | None = None
 
 
 @app.get("/health")
@@ -115,6 +118,7 @@ def predict(request: InferenceServiceRequest) -> dict[str, str | float | None]:
         piece_event_id=request.piece_event_id,
         scenario_id=request.scenario_id,
         image_uri=request.image_uri,
+        lot_id=request.lot_id,
     )
     if real_inference_enabled():
         try:
