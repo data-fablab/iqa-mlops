@@ -97,7 +97,10 @@ def bake_checkpoint(
         gt_masks_manifest=VALIDATION_GT_MASKS,
         metric_eval_device=device,
         metric_eval_every_epochs=1,
-        metric_eval_start_epoch=1,
+        # Run the (expensive) AUPIMO validation pass only on the final epoch
+        # instead of every epoch: a warm-start precuit is just an init checkpoint,
+        # so one end-of-training metric is enough and keeps the demo bake short.
+        metric_eval_start_epoch=epochs,
         metric_eval_calibrate_normal=False,
         metric_eval_layer_weights={"layer2": 0.65, "layer3": 0.35},
         metric_eval_apply_score_region_to_map=True,
