@@ -162,6 +162,81 @@ class TestMLflowRunLoggerBasic:
         assert run_id is not None
 
 
+class TestMLflowBusinessMetrics:
+    """The 4 business metrics from metric_eval_best.json must be logged as metrics."""
+
+    def test_log_business_metrics_from_eval_best(self, tmp_path: Path, mlflow_tracking_uri: str) -> None:
+        import mlflow
+
+        eval_best = tmp_path / "metric_eval_best.json"
+        eval_best.write_text(
+            json.dumps(
+                {
+                    "image_ap": {"value": 0.87, "epoch": 3},
+                    "image_auroc": {"value": 0.72, "epoch": 3},
+                    "pixel_ap": {"value": 0.16, "epoch": 3},
+                    "pixel_aupimo_1e-5_1e-3": {"value": 0.058, "epoch": 3},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        logger = MLflowRunLogger(
+            run_name="business_metrics_test",
+            scenario_id="test_scenario",
+            tracking_uri=mlflow_tracking_uri,
+        )
+        logged = logger.log_business_metrics(eval_best)
+        run_id = logger.end_run()
+
+        assert set(logged) == {"image_ap", "image_auroc", "pixel_ap", "pixel_aupimo_1e-5_1e-3"}
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        metrics = mlflow.get_run(run_id).data.metrics
+        assert metrics["image_ap"] == 0.87
+        assert metrics["image_auroc"] == 0.72
+        assert metrics["pixel_ap"] == 0.16
+        assert metrics["pixel_aupimo_1e-5_1e-3"] == 0.058
+        assert metrics["aupimo"] == 0.058  # friendly alias
+
+
+class TestMLflowRunLoggerExperiment:
+    """Runs must land in a named experiment, not MLflow's "Default" (id 0)."""
+
+    def test_default_experiment_is_model_quality(self, mlflow_tracking_uri: str) -> None:
+        import mlflow
+
+        from iqa.training.mlflow_logging import DEFAULT_EXPERIMENT_NAME
+
+        logger = MLflowRunLogger(
+            run_name="exp_default_test",
+            scenario_id="test_scenario",
+            tracking_uri=mlflow_tracking_uri,
+        )
+        run_id = logger.end_run()
+
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        run = mlflow.get_run(run_id)
+        experiment = mlflow.get_experiment(run.info.experiment_id)
+        assert experiment.name == DEFAULT_EXPERIMENT_NAME
+        assert run.info.experiment_id != "0"  # not the Default experiment
+
+    def test_experiment_name_override(self, mlflow_tracking_uri: str, monkeypatch) -> None:
+        import mlflow
+
+        monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "iqa-lifecycle-custom")
+        logger = MLflowRunLogger(
+            run_name="exp_override_test",
+            scenario_id="test_scenario",
+            tracking_uri=mlflow_tracking_uri,
+        )
+        run_id = logger.end_run()
+
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        run = mlflow.get_run(run_id)
+        experiment = mlflow.get_experiment(run.info.experiment_id)
+        assert experiment.name == "iqa-lifecycle-custom"
+
+
 class TestMLflowRunLoggerIntegration:
     """Integration test: full training logging workflow."""
 

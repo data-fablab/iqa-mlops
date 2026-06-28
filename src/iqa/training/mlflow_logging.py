@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -24,6 +25,13 @@ from iqa.training.feature_ae_contracts import (
 )
 from iqa.training.feature_ae_evaluation import EvaluationReport
 
+# Training runs (params + datasets + checkpoint) land here so they are visible
+# next to the model-quality eval runs, instead of MLflow's "Default" experiment.
+# Matches monitoring.model_metrics.MODEL_QUALITY_EXPERIMENT; override per deploy
+# with MLFLOW_EXPERIMENT_NAME. Routing here is safe for the candidate-vs-prod gate:
+# it filters on the ``stage`` tag, which training runs do not set.
+DEFAULT_EXPERIMENT_NAME = "iqa-model-quality"
+
 
 class FeatureAEReferencePyfuncModel(mlflow.pyfunc.PythonModel if HAS_MLFLOW else object):
     """Traceability wrapper for Feature-AE model versions in MLflow."""
@@ -43,6 +51,7 @@ class MLflowRunLogger:
         run_name: str,
         scenario_id: str,
         tracking_uri: str | None = None,
+        experiment_name: str | None = None,
     ) -> None:
         """Initialize MLflow run logger.
 
@@ -50,6 +59,9 @@ class MLflowRunLogger:
             run_name: Name for the MLflow run
             scenario_id: Scenario identifier for tags
             tracking_uri: MLflow tracking URI (local file:// or remote http://)
+            experiment_name: Experiment to log into. Defaults to
+                ``MLFLOW_EXPERIMENT_NAME`` env or ``iqa-model-quality`` so runs are
+                discoverable instead of falling into MLflow's "Default" experiment.
         """
         if not HAS_MLFLOW:
             raise ImportError("MLflow is required for MLflowRunLogger")
@@ -57,12 +69,19 @@ class MLflowRunLogger:
         self.run_name = run_name
         self.scenario_id = scenario_id
         self.tracking_uri = tracking_uri
+        self.experiment_name = experiment_name or os.environ.get(
+            "MLFLOW_EXPERIMENT_NAME", DEFAULT_EXPERIMENT_NAME
+        )
         self.run: Any = None
         self._run_id: str | None = None
 
         # Configure MLflow backend
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
+
+        # Pin the experiment so training runs (with their dataset lineage) are not
+        # scattered into "Default".
+        mlflow.set_experiment(self.experiment_name)
 
         # Start the run
         self.run = mlflow.start_run(run_name=run_name)
@@ -132,6 +151,31 @@ class MLflowRunLogger:
         """
         for name, value in metrics.items():
             mlflow.log_metric(name, value, step=step)
+
+    def log_business_metrics(self, eval_best_path: Path) -> dict[str, float]:
+        """Log the business metrics from ``metric_eval_best.json`` as MLflow metrics.
+
+        The evaluator already computes image_ap, image_auroc, pixel_ap and the
+        low-FPR AUPIMO (``pixel_aupimo_1e-5_1e-3``) per epoch and records the best
+        in ``metric_eval_best.json``, but the wrapper only attached it as an
+        artifact -- so the run showed loss curves and no business metrics. This
+        promotes each ``{value: ...}`` entry to a first-class MLflow metric (plus a
+        friendly ``aupimo`` alias) so they are charted next to train/val loss.
+        """
+        try:
+            payload = json.loads(eval_best_path.read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        logged: dict[str, float] = {}
+        for key, entry in payload.items():
+            if isinstance(entry, dict) and isinstance(entry.get("value"), (int, float)):
+                value = float(entry["value"])
+                mlflow.log_metric(key, value)
+                logged[key] = value
+        aupimo = logged.get("pixel_aupimo_1e-5_1e-3")
+        if aupimo is not None:
+            mlflow.log_metric("aupimo", aupimo)
+        return logged
 
     def log_evaluation_metrics(self, eval_report: EvaluationReport) -> None:
         """Log evaluation metrics from EvaluationReport.
@@ -250,6 +294,7 @@ def train_feature_ae_with_mlflow_logging(
     config: FeatureAETrainingConfig,
     git_commit: str,
     tracking_uri: str | None = None,
+    experiment_name: str | None = None,
 ) -> dict[str, Any]:
     """Train Feature-AE with complete MLflow logging.
 
@@ -272,6 +317,7 @@ def train_feature_ae_with_mlflow_logging(
         run_name=config.run_name or f"feature_ae_{config.scenario_id}",
         scenario_id=config.scenario_id,
         tracking_uri=tracking_uri,
+        experiment_name=experiment_name,
     )
 
     try:
@@ -318,15 +364,20 @@ def train_feature_ae_with_mlflow_logging(
             logger.log_artifacts(checkpoint_path=checkpoint_path)
             model_logged = logger.log_feature_ae_model(config, checkpoint_path)
 
-        # Log evaluation report if it exists
+        # Log evaluation report if it exists -- as an artifact AND as first-class
+        # MLflow metrics (image_ap, image_auroc, pixel_ap, AUPIMO), so the run shows
+        # the business metrics next to the loss curves.
         eval_best_path = run_dir / "metric_eval_best.json"
+        business_metrics: dict[str, float] = {}
         if eval_best_path.exists():
             logger.log_artifacts(eval_report_path=eval_best_path)
+            business_metrics = logger.log_business_metrics(eval_best_path)
         eval_history_path = run_dir / "metric_eval_history.json"
         if eval_history_path.exists():
             logger.log_artifacts(eval_report_path=eval_history_path)
 
         result["run_id"] = logger._run_id or ""
+        result["mlflow_business_metrics_logged"] = sorted(business_metrics)
         result["mlflow_dataset_logged"] = any(dataset_logging.values())
         result["mlflow_training_dataset_logged"] = dataset_logging["training"]
         result["mlflow_metric_eval_dataset_logged"] = dataset_logging["metric_eval"]
