@@ -199,6 +199,41 @@ class TestMLflowBusinessMetrics:
         assert metrics["aupimo"] == 0.058  # friendly alias
 
 
+class TestMLflowEvaluationTable:
+    """Per-class evaluation metrics are logged as an MLflow table artifact."""
+
+    def test_log_evaluation_table_from_history(self, tmp_path: Path, mlflow_tracking_uri: str) -> None:
+        import mlflow
+
+        (tmp_path / "metric_eval_history.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "epoch": 1,
+                        "per_class_metrics": {
+                            "Casting_class1": {"image_ap": 0.90, "image_auroc": 0.80, "pixel_ap": 0.20, "pixel_aupimo_1e-5_1e-3": 0.07, "pixel_auroc": 0.95},
+                            "Casting_class2": {"image_ap": 0.95, "image_auroc": 0.85, "pixel_ap": 0.30, "pixel_aupimo_1e-5_1e-3": 0.10, "pixel_auroc": 0.96},
+                        },
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        logger = MLflowRunLogger(run_name="eval_table_test", scenario_id="s", tracking_uri=mlflow_tracking_uri)
+        assert logger.log_evaluation_table(tmp_path) is True
+        run_id = logger.end_run()
+
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        client = mlflow.tracking.MlflowClient(tracking_uri=mlflow_tracking_uri)
+        files = {a.path for a in client.list_artifacts(run_id, "evaluations")}
+        assert "evaluations/per_class_metrics.json" in files
+
+    def test_log_evaluation_table_absent_history_is_false(self, tmp_path: Path, mlflow_tracking_uri: str) -> None:
+        logger = MLflowRunLogger(run_name="eval_table_none", scenario_id="s", tracking_uri=mlflow_tracking_uri)
+        assert logger.log_evaluation_table(tmp_path) is False
+        logger.end_run()
+
+
 class TestMLflowRunLoggerExperiment:
     """Runs must land in a named experiment, not MLflow's "Default" (id 0)."""
 

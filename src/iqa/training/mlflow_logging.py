@@ -177,6 +177,53 @@ class MLflowRunLogger:
             mlflow.log_metric("aupimo", aupimo)
         return logged
 
+    # Columns of the per-class evaluation table (one row per casting class).
+    _EVAL_TABLE_METRICS = (
+        "image_ap",
+        "image_auroc",
+        "pixel_ap",
+        "pixel_aupimo_1e-5_1e-3",
+        "pixel_auroc",
+    )
+
+    def log_evaluation_table(self, run_dir: Path) -> bool:
+        """Log the per-class evaluation metrics as an MLflow table (Evaluations view).
+
+        The evaluator records ``per_class_metrics`` (image_ap, auroc, pixel_ap,
+        AUPIMO ... for each casting class) in ``metric_eval_history.json`` but only
+        as a JSON artifact, so MLflow's table/Evaluations view stayed empty. Promote
+        the last epoch's per-class metrics to a real ``mlflow.log_table`` artifact so
+        the run shows *how the model scores on class1 vs class2 vs class3*, not just
+        the aggregate. Best-effort: returns False when the history is absent.
+        """
+        history_path = run_dir / "metric_eval_history.json"
+        if not history_path.exists():
+            return False
+        try:
+            history = json.loads(history_path.read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError):
+            return False
+        if not isinstance(history, list) or not history:
+            return False
+        per_class = history[-1].get("per_class_metrics") if isinstance(history[-1], dict) else None
+        if not isinstance(per_class, dict) or not per_class:
+            return False
+        table: dict[str, list[Any]] = {"source_class": []}
+        for key in self._EVAL_TABLE_METRICS:
+            table[key] = []
+        for source_class in sorted(per_class):
+            row = per_class[source_class]
+            if not isinstance(row, dict):
+                continue
+            table["source_class"].append(source_class)
+            for key in self._EVAL_TABLE_METRICS:
+                value = row.get(key)
+                table[key].append(float(value) if isinstance(value, (int, float)) else None)
+        if not table["source_class"]:
+            return False
+        mlflow.log_table(data=table, artifact_file="evaluations/per_class_metrics.json")
+        return True
+
     def log_evaluation_metrics(self, eval_report: EvaluationReport) -> None:
         """Log evaluation metrics from EvaluationReport.
 
@@ -372,12 +419,15 @@ def train_feature_ae_with_mlflow_logging(
         if eval_best_path.exists():
             logger.log_artifacts(eval_report_path=eval_best_path)
             business_metrics = logger.log_business_metrics(eval_best_path)
+        # Per-class evaluation table (Evaluations / table view).
+        evaluation_table_logged = logger.log_evaluation_table(run_dir)
         eval_history_path = run_dir / "metric_eval_history.json"
         if eval_history_path.exists():
             logger.log_artifacts(eval_report_path=eval_history_path)
 
         result["run_id"] = logger._run_id or ""
         result["mlflow_business_metrics_logged"] = sorted(business_metrics)
+        result["mlflow_evaluation_table_logged"] = evaluation_table_logged
         result["mlflow_dataset_logged"] = any(dataset_logging.values())
         result["mlflow_training_dataset_logged"] = dataset_logging["training"]
         result["mlflow_metric_eval_dataset_logged"] = dataset_logging["metric_eval"]
