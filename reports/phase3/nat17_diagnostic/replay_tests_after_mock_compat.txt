@@ -1,0 +1,8 @@
+.....................                                                    [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/mlflow/types/type_hints.py:385
+  /opt/iqa/worktrees/iqa_nat17_mlflow_runtime_reload/.venv/lib/python3.12/site-packages/mlflow/types/type_hints.py:385: UserWarning: [1;33mAny type hint is inferred as AnyType, and MLflow doesn't validate the data for this type. Please use a more specific type hint to enable data validation.[0m
+    col_spec_type = _infer_colspec_type_from_type_hint(type_hint)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+21 passed, 1 warning in 7.14s

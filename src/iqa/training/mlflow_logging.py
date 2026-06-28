@@ -12,6 +12,7 @@ try:
     import mlflow
     import mlflow.pyfunc
     import mlflow.pytorch
+
     HAS_MLFLOW = True
 except ImportError:
     HAS_MLFLOW = False
@@ -25,10 +26,14 @@ from iqa.training.feature_ae_contracts import (
 from iqa.training.feature_ae_evaluation import EvaluationReport
 
 
-class FeatureAEReferencePyfuncModel(mlflow.pyfunc.PythonModel if HAS_MLFLOW else object):
+class FeatureAEReferencePyfuncModel(
+    mlflow.pyfunc.PythonModel if HAS_MLFLOW else object
+):
     """Traceability wrapper for Feature-AE model versions in MLflow."""
 
-    def predict(self, context: Any, model_input: list[Any], params: dict[str, Any] | None = None) -> list[Any]:
+    def predict(
+        self, context: Any, model_input: list[Any], params: dict[str, Any] | None = None
+    ) -> list[Any]:
         raise NotImplementedError(
             "Feature-AE MLflow model artifacts are for lineage and registry traceability; "
             "use the IQA runtime loader for GPU inference."
@@ -89,7 +94,9 @@ class MLflowRunLogger:
             "early_stopping_patience": config.early_stopping_patience,
             "metric_early_stopping_patience": config.metric_early_stopping_patience,
             "metric_eval_every_epochs": config.metric_eval_every_epochs,
-            "checkpoint_selection_policy": "business_metric_only" if config.metric_eval_manifest_path else "loss_only_no_metric_eval",
+            "checkpoint_selection_policy": "business_metric_only"
+            if config.metric_eval_manifest_path
+            else "loss_only_no_metric_eval",
             "layer_score_mode": "sqrt_l2_plus_cosine",
             "layer_normalization": "good_p99",
             "preprocessing_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
@@ -166,7 +173,9 @@ class MLflowRunLogger:
         if eval_report_path and eval_report_path.exists():
             mlflow.log_artifact(str(eval_report_path), artifact_path="reports")
 
-    def log_feature_ae_model(self, config: FeatureAETrainingConfig, checkpoint_path: Path) -> bool:
+    def log_feature_ae_model(
+        self, config: FeatureAETrainingConfig, checkpoint_path: Path
+    ) -> bool:
         """Log a real MLflow Model wrapper for the Feature-AE checkpoint."""
         if not checkpoint_path.exists():
             return False
@@ -174,7 +183,10 @@ class MLflowRunLogger:
             tmp_path = Path(tmp)
             contract_path = tmp_path / "score_contract.json"
             contract_path.write_text(
-                json.dumps(canonical_feature_ae_preprocessing_dict(), indent=2, sort_keys=True) + "\n",
+                json.dumps(
+                    canonical_feature_ae_preprocessing_dict(), indent=2, sort_keys=True
+                )
+                + "\n",
                 encoding="utf-8",
             )
             artifacts = {
@@ -301,9 +313,7 @@ def train_feature_ae_with_mlflow_logging(
                 reader = csv.DictReader(f)
                 for row in reader:
                     metrics = {
-                        k: float(v)
-                        for k, v in row.items()
-                        if k != "epoch" and v
+                        k: float(v) for k, v in row.items() if k != "epoch" and v
                     }
                     step = int(row["epoch"]) if row.get("epoch") else 0
                     if metrics:
@@ -353,4 +363,123 @@ def _log_manifest_dataset(*, manifest_path: Path, name: str, context: str) -> bo
     return True
 
 
-__all__ = ["FeatureAEReferencePyfuncModel", "MLflowRunLogger", "train_feature_ae_with_mlflow_logging"]
+def log_promoted_feature_ae_bundle(
+    *,
+    run_id: str,
+    checkpoint_path: Path,
+    manifest_path: Path,
+    scenario_id: str,
+    candidate_version: str,
+) -> dict[str, str]:
+    """Log the complete serving bundle after the promotion gate."""
+    import hashlib
+
+    from iqa.models.artifacts import validate_feature_ae_reference_manifest
+
+    checkpoint = Path(checkpoint_path)
+    manifest_file = Path(manifest_path)
+
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"missing_feature_ae_checkpoint: {checkpoint}")
+    if not manifest_file.is_file():
+        raise FileNotFoundError(f"missing_feature_ae_manifest: {manifest_file}")
+
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    validate_feature_ae_reference_manifest(
+        manifest,
+        model_version=candidate_version,
+    )
+
+    manifest_version = str(manifest.get("model_version") or "")
+    if manifest_version != candidate_version:
+        raise ValueError(
+            "feature_ae_manifest_version_mismatch: "
+            f"expected {candidate_version!r}, got {manifest_version!r}"
+        )
+
+    digest = hashlib.sha256()
+    with checkpoint.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+
+    actual_sha256 = digest.hexdigest()
+    expected_sha256 = str(manifest.get("sha256") or "")
+
+    if not expected_sha256:
+        raise ValueError("feature_ae_manifest_missing_sha256")
+    if actual_sha256 != expected_sha256:
+        raise ValueError(
+            "feature_ae_checkpoint_checksum_mismatch: "
+            f"expected {expected_sha256}, got {actual_sha256}"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="iqa_feature_ae_serving_bundle_") as tmp:
+        tmp_path = Path(tmp)
+        contract_path = tmp_path / "score_contract.json"
+        manifest_artifact = tmp_path / "model_manifest.json"
+
+        contract_path.write_text(
+            json.dumps(
+                canonical_feature_ae_preprocessing_dict(),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        shutil.copy2(manifest_file, manifest_artifact)
+
+        def log_bundle():
+            return mlflow.pyfunc.log_model(
+                name="serving_bundle",
+                python_model=FeatureAEReferencePyfuncModel(),
+                artifacts={
+                    "checkpoint": str(checkpoint),
+                    "score_contract": str(contract_path),
+                    "model_manifest": str(manifest_artifact),
+                },
+                metadata={
+                    "model_type": "feature_ae_reference",
+                    "scenario_id": scenario_id,
+                    "candidate_version": candidate_version,
+                    "model_version": candidate_version,
+                    "score_contract_version": (
+                        FEATURE_AE_PREPROCESSING_CONTRACT_VERSION
+                    ),
+                    "checkpoint_filename": checkpoint.name,
+                    "checkpoint_sha256": actual_sha256,
+                },
+            )
+
+        active_run = mlflow.active_run()
+        if active_run is None:
+            with mlflow.start_run(run_id=run_id):
+                model_info = log_bundle()
+        elif active_run.info.run_id == run_id:
+            model_info = log_bundle()
+        else:
+            raise RuntimeError(
+                f"different_mlflow_run_already_active: {active_run.info.run_id}"
+            )
+
+    model_id = str(getattr(model_info, "model_id", "") or "")
+    if not model_id:
+        raise RuntimeError("mlflow_logged_model_missing_model_id")
+
+    model_uri = str(getattr(model_info, "model_uri", "") or f"models:/{model_id}")
+
+    return {
+        "model_id": model_id,
+        "model_uri": model_uri,
+        "run_id": run_id,
+        "candidate_version": candidate_version,
+        "checkpoint_sha256": actual_sha256,
+    }
+
+
+__all__ = [
+    "FeatureAEReferencePyfuncModel",
+    "MLflowRunLogger",
+    "train_feature_ae_with_mlflow_logging",
+    "log_promoted_feature_ae_bundle",
+]

@@ -36,6 +36,27 @@ def test_model_version_is_scoped_by_scenario_id() -> None:
 
 def test_reload_model_response_is_scoped_by_scenario_id(monkeypatch) -> None:
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
+    monkeypatch.setattr(
+        "iqa.api.main._call_inference_reload",
+        lambda request, admin_token: {
+            "accepted": True,
+            "reload_status": "reloaded",
+            "source_of_truth": "mlflow_registry",
+            "previous": {
+                "feature_ae_version": (
+                    "rd_feature_ae_gated_v001_bootstrap"
+                ),
+            },
+            "active": {
+                "scenario_id": request.scenario_id,
+                "feature_ae_version": "candidate_test_v001",
+                "roi_model_version": "roi_segmenter_v001_fixed",
+                "registry_version": "12",
+                "model_uri": "models:/m-test",
+                "model_id": "m-test",
+            },
+        },
+    )
 
     response = reload_model(
         ReloadModelRequest(scenario_id="scenario_nat03"),

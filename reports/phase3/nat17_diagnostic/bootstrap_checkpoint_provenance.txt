@@ -1,0 +1,60 @@
+=== CURRENT REPOSITORY ===
+reports/phase3/nat17_validation/prediction_before_reload.json:1:{"detail":"Inference unavailable: Checksum mismatch for /var/cache/iqa/models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt: expected 9e4e3cc84fb359408ec5c58020e799816942d6c46ae024b29acb82c1c8ebe146, got 147194a8c110db1859e28c1e17ab21c9dddc2febdad08c89526f31bc4a81ca43."}
+reports/phase3/nat17_diagnostic/bootstrap_remote_checkpoint_integrity.txt:3:remote_sha256=147194a8c110db1859e28c1e17ab21c9dddc2febdad08c89526f31bc4a81ca43
+reports/phase3/nat17_diagnostic/bootstrap_remote_checkpoint_integrity.txt:4:cache_sha256=147194a8c110db1859e28c1e17ab21c9dddc2febdad08c89526f31bc4a81ca43
+reports/phase3/nat17_diagnostic/bootstrap_checkpoint_metadata.txt:13:preprocessing_contract_version=feature_ae_champion_v001
+reports/phase3/nat17_diagnostic/bootstrap_checkpoint_integrity.txt:106:sha256=147194a8c110db1859e28c1e17ab21c9dddc2febdad08c89526f31bc4a81ca43
+
+=== GIT HISTORY: SHA256 ===
+
+=== GIT HISTORY: CONTRACT ===
+fdf6528 Finalize Feature-AE reference evaluation pipeline
+63268ba Rebuild Feature-AE champion pipeline parity
+
+=== CHECKPOINT METADATA DETAILS ===
+metadata.best_epoch=0
+metadata.candidate_version=rd_feature_ae_gated_v001_bootstrap
+metadata.category=
+metadata.checkpoint_every_epochs=1
+metadata.dataset_version=feature_ae_good_v001_bootstrap
+metadata.epoch=1
+metadata.epochs=2
+metadata.feature_ae_version=rd_feature_ae_gated_v001_bootstrap
+metadata.gt_masks_manifest=data/validation/validation_gt_masks_v001.csv
+metadata.manifest_path=data/metadata/feature_ae_bootstrap_events.csv
+metadata.manifest_version=feature_ae_bootstrap_events_v001
+metadata.metric_early_stopping_patience=4
+metadata.metric_eval_apply_score_region_to_map=False
+metadata.metric_eval_batch_size=8
+metadata.metric_eval_calibrate_normal=False
+metadata.metric_eval_calibration_max_images=120
+metadata.metric_eval_calibration_mode=per_layer
+metadata.metric_eval_calibration_stat=median_mad
+metadata.metric_eval_device=None
+metadata.metric_eval_every_epochs=1
+metadata.metric_eval_layer_weights=None
+metadata.metric_eval_manifest_path=data/validation/validation_set_v001.csv
+metadata.metric_eval_max_previews=31
+metadata.metric_eval_roi_predictions_dirs: type=list
+metadata.metric_eval_save_previews=False
+metadata.metric_eval_save_score_maps=False
+metadata.metric_eval_score_image=topk_mean
+metadata.metric_eval_score_region=functional_surface_prediction
+metadata.metric_eval_score_smoothing=median3
+metadata.metric_eval_start_epoch=1
+metadata.metric_eval_tile_stride=None
+metadata.metric_eval_topk_fraction=0.005
+metadata.model_type=reverse_distill_resnet18_dual_context_gated
+metadata.output_checkpoint=.cache/iqa/models/rd_feature_ae_gated_v001_bootstrap/bootstrap_run/checkpoint.pt
+metadata.preprocessing_contract: type=dict
+metadata.preprocessing_contract_version=feature_ae_champion_v001
+metadata.require_business_metric_for_early_stopping=True
+metadata.roi_model_version=roi_segmenter_v001_fixed
+metadata.validation_set_id=validation_set_v001
+payload.preprocessing_contract_version=feature_ae_champion_v001
+payload.train_manifest=data/metadata/feature_ae_bootstrap_events.csv
+payload.model_type=reverse_distill_resnet18_dual_context_gated
+payload.image_size=384
+payload.context_size=768
+payload.preprocessing_mode=tiled_context
+payload.steps=20

@@ -1,0 +1,9 @@
+{
+  "dataset_version": "Casting_class1_dvc",
+  "image_uri": "/tmp/nat17_real_input.jpg",
+  "lot_id": "IQA-NAT17-LIVE-001",
+  "piece_event_id": "nat17_after_reload",
+  "scenario_id": "production_replay_natural",
+  "sha256": "76094bd3cd29780316cb9276eabff22906552d035086dc93e57abfbff72b3a7c",
+  "source_class": "defective"
+}

@@ -1,0 +1,10 @@
+directory_objects=1
+directory_key=files/md5/69/50aec2a9977551fecd9beffdd2a55d.dir
+directory_entries=2275
+bucket=iqa-dvc
+directory_key=files/md5/69/50aec2a9977551fecd9beffdd2a55d.dir
+relpath=Casting_class1/test/defective/2022-02-23_13_15_19_383-2_1_2.jpg
+md5=cfc88af9210c6c6053785279d3459b47
+blob_key=files/md5/cf/c88af9210c6c6053785279d3459b47
+size=76299
+container_path=/tmp/nat17_real_input

@@ -152,6 +152,185 @@ def _inference_http_error_detail(error: HTTPError) -> str:
     return str(error.reason or f"HTTP {error.code}")
 
 
+
+def _call_inference_reload(
+    request: ReloadModelRequest,
+    admin_token: str,
+) -> dict[str, Any]:
+    base_url = os.environ.get(
+        "IQA_INFERENCE_URL",
+        "http://iqa-inference:8100",
+    ).strip().rstrip("/")
+
+    if not base_url:
+        _raise_api_error(
+            status_code=503,
+            error_code="inference_service_configuration_error",
+            message="Inference service URL is not configured.",
+            reason="IQA_INFERENCE_URL is empty.",
+            details={"path": "/admin/reload-model"},
+        )
+
+    timeout_raw = os.environ.get(
+        "IQA_INFERENCE_RELOAD_TIMEOUT_SECONDS",
+        "300",
+    )
+    try:
+        timeout = float(timeout_raw)
+    except ValueError:
+        _raise_api_error(
+            status_code=503,
+            error_code="inference_service_configuration_error",
+            message="Inference reload timeout is invalid.",
+            reason=(
+                "Invalid IQA_INFERENCE_RELOAD_TIMEOUT_SECONDS: "
+                f"{timeout_raw!r}."
+            ),
+            details={"path": "/admin/reload-model"},
+        )
+        raise AssertionError("unreachable")
+
+    if timeout <= 0:
+        _raise_api_error(
+            status_code=503,
+            error_code="inference_service_configuration_error",
+            message="Inference reload timeout is invalid.",
+            reason=(
+                "IQA_INFERENCE_RELOAD_TIMEOUT_SECONDS "
+                "must be greater than zero."
+            ),
+            details={"path": "/admin/reload-model"},
+        )
+
+    payload = {
+        "scenario_id": request.scenario_id,
+        "stage": getattr(request.stage, "value", request.stage),
+    }
+    http_request = UrlRequest(
+        f"{base_url}/admin/reload-model",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "X-IQA-Admin-Token": admin_token,
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(http_request, timeout=timeout) as response:
+            raw_response = response.read()
+    except HTTPError as error:
+        detail = _inference_http_error_detail(error)
+
+        if error.code in {401, 403}:
+            _raise_api_error(
+                status_code=502,
+                error_code="inference_reload_auth_failed",
+                message="Inference service rejected the internal reload token.",
+                reason=detail,
+                details={
+                    "path": "/admin/reload-model",
+                    "upstream_status": error.code,
+                },
+            )
+        if error.code == 409:
+            _raise_api_error(
+                status_code=409,
+                error_code="inference_reload_scenario_conflict",
+                message="Inference service rejected the requested scenario.",
+                reason=detail,
+                details={
+                    "path": "/admin/reload-model",
+                    "upstream_status": error.code,
+                },
+            )
+        if error.code == 422:
+            _raise_api_error(
+                status_code=422,
+                error_code="inference_reload_invalid_request",
+                message="Inference reload request was rejected.",
+                reason=detail,
+                details={
+                    "path": "/admin/reload-model",
+                    "upstream_status": error.code,
+                },
+            )
+        if error.code == 503:
+            _raise_api_error(
+                status_code=503,
+                error_code="inference_reload_failed",
+                message="Inference service could not reload the model.",
+                reason=detail,
+                details={
+                    "path": "/admin/reload-model",
+                    "upstream_status": error.code,
+                },
+            )
+
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_reload_response",
+            message="Inference service returned an unexpected HTTP response.",
+            reason=detail,
+            details={
+                "path": "/admin/reload-model",
+                "upstream_status": error.code,
+            },
+        )
+    except socket.timeout as error:
+        _raise_api_error(
+            status_code=504,
+            error_code="inference_reload_timeout",
+            message="Inference model reload timed out.",
+            reason=str(error),
+            details={"path": "/admin/reload-model"},
+        )
+    except URLError as error:
+        _raise_api_error(
+            status_code=503,
+            error_code="inference_service_unavailable",
+            message="Inference service is unavailable.",
+            reason=str(error.reason),
+            details={"path": "/admin/reload-model"},
+        )
+
+    try:
+        response_payload = json.loads(
+            raw_response.decode("utf-8")
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_reload_response",
+            message="Inference service returned invalid JSON.",
+            reason=str(error),
+            details={"path": "/admin/reload-model"},
+        )
+        raise AssertionError("unreachable")
+
+    active = (
+        response_payload.get("active")
+        if isinstance(response_payload, dict)
+        else None
+    )
+    if (
+        not isinstance(response_payload, dict)
+        or response_payload.get("accepted") is not True
+        or response_payload.get("reload_status") != "reloaded"
+        or not isinstance(active, dict)
+        or not active.get("feature_ae_version")
+    ):
+        _raise_api_error(
+            status_code=502,
+            error_code="invalid_inference_reload_response",
+            message="Inference service returned an invalid reload contract.",
+            reason="Missing reloaded status or active model version.",
+            details={"path": "/admin/reload-model"},
+        )
+
+    return response_payload
+
+
 def _call_inference_service(request: InferenceRequest) -> InferenceResult:
     base_url = os.environ.get(
         "IQA_INFERENCE_URL",
@@ -1492,22 +1671,58 @@ def reload_model(
         stage=request.stage,
     ).to_dict()
 
+    try:
+        inference_reload = _call_inference_reload(
+            request,
+            expected_token,
+        )
+    except HTTPException as error:
+        detail = error.detail
+        if isinstance(detail, dict):
+            reason = str(
+                detail.get("reason")
+                or detail.get("message")
+                or detail
+            )
+        else:
+            reason = str(detail)
+
+        _append_admin_reload_log(
+            scenario_id=request.scenario_id,
+            stage=request.stage,
+            reload_status="failed",
+            accepted=False,
+            reason=reason,
+            model_name=model_name,
+        )
+        raise
+
+    active = inference_reload["active"]
+    active_version = str(
+        active["feature_ae_version"]
+    )
+
     audit_event = _append_admin_reload_log(
         scenario_id=request.scenario_id,
         stage=request.stage,
-        reload_status="accepted",
+        reload_status="reloaded",
         accepted=True,
-        reason="Admin reload accepted.",
+        reason=(
+            "Inference model reloaded to "
+            f"{active_version}."
+        ),
         model_name=model_name,
     )
 
     return {
         "accepted": True,
-        "reload_status": "accepted",
+        "reload_status": "reloaded",
         "source_of_truth": "mlflow_registry",
         "audit_logged": True,
         "audit": audit_event,
         "target": target,
+        "active": active,
+        "inference_reload": inference_reload,
     }
 
 

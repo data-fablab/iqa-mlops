@@ -113,7 +113,33 @@ def test_postgres_backend_persists_predict_feedback_and_reload(monkeypatch: pyte
     repo = RecordingRepository()
     monkeypatch.setenv("IQA_METADATA_BACKEND", "postgres")
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
-    monkeypatch.setattr(api, "create_metadata_repository", lambda: repo)
+    monkeypatch.setattr(
+        api,
+        "create_metadata_repository",
+        lambda: repo,
+    )
+    monkeypatch.setattr(
+        api,
+        "_call_inference_reload",
+        lambda request, admin_token: {
+            "accepted": True,
+            "reload_status": "reloaded",
+            "source_of_truth": "mlflow_registry",
+            "previous": {
+                "feature_ae_version": (
+                    "rd_feature_ae_gated_v001_bootstrap"
+                ),
+            },
+            "active": {
+                "scenario_id": request.scenario_id,
+                "feature_ae_version": "candidate_test_v001",
+                "roi_model_version": "roi_segmenter_v001_fixed",
+                "registry_version": "12",
+                "model_uri": "models:/m-test",
+                "model_id": "m-test",
+            },
+        },
+    )
 
     prediction_response = api.predict(
         PredictRequest(piece_event_id="piece_pg_001", scenario_id="demo", image_uri="s3://bucket/key.jpg")
@@ -143,7 +169,7 @@ def test_postgres_backend_persists_predict_feedback_and_reload(monkeypatch: pyte
     assert repo.display_feedbacks[prediction_id]["feedback_source"] == "human_sophie"
     assert repo.feedbacks[prediction_id]["feedback_source"] == "oracle_gt"
     assert repo.closed_predictions[0][0] == prediction_id
-    assert repo.admin_reload_events[0]["reload_status"] == "accepted"
+    assert repo.admin_reload_events[0]["reload_status"] == "reloaded"
 
 
 def test_postgres_write_failure_returns_503_without_memory_prediction(monkeypatch: pytest.MonkeyPatch) -> None:

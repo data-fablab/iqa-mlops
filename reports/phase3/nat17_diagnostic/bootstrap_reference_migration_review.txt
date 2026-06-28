@@ -1,0 +1,210 @@
+=== COMMIT FDF6528 ===
+fdf6528 Finalize Feature-AE reference evaluation pipeline
+ deploy/streamlit/marc_lifecycle.py                 |   2 +
+ deploy/streamlit/pages/1_Dashboard_Marc.py         |   2 +
+ docs/modele-feature-ae-iqa.md                      |  36 +--
+ .../model_manifest.json                            |  22 +-
+ pyproject.toml                                     |   4 +-
+ scripts/build_feature_ae_bootstrap.py              |  15 +-
+ ...ampion.py => calibrate_feature_ae_reference.py} |  59 ++---
+ scripts/evaluate_feature_ae_predictions.py         |  35 +++
+ scripts/progressive_lifecycle_report.py            |  71 ++++--
+ scripts/run_replay_lifecycle_cycle.py              | 255 ++++++++++++++++++++-
+ scripts/train_feature_ae.py                        |   5 +-
+ src/iqa/inference/feature_ae.py                    |  43 ++--
+ src/iqa/models/artifacts.py                        |  31 +--
+ src/iqa/models/feature_ae/__init__.py              |  15 +-
+ .../feature_ae/{champion.py => reference.py}       |  43 ++--
+ src/iqa/training/bootstrap.py                      |  27 +--
+ src/iqa/training/feature_ae.py                     |  13 +-
+ src/iqa/training/feature_ae_contracts.py           |  15 +-
+ src/iqa/training/feature_ae_evaluation.py          | 118 +++++++++-
+ src/iqa/training/mlflow_logging.py                 |   1 +
+ tests/contracts/test_phase3_lineage_evidence.py    |   3 +-
+ tests/inference/test_predict_image.py              |  11 +-
+ tests/ml/test_feature_ae_bootstrap_builder.py      |  23 +-
+ ...py => test_feature_ae_reference_calibration.py} |  43 ++--
+ tests/ml/test_feature_ae_training_contract.py      |  32 ++-
+ tests/replay/test_progressive_lifecycle_report.py  |  15 +-
+ tests/replay/test_replay_lifecycle_cycle_runner.py |  56 ++++-
+ 27 files changed, 752 insertions(+), 243 deletions(-)
+
+=== MANIFEST DIFF ===
+commit fdf652867a4967d6845f212fe0d5f3452e234bb9
+Author:     sky-data-lab <a.megret.10@groupe-esigelec.fr>
+AuthorDate: Tue Jun 23 09:46:41 2026 +0200
+Commit:     sky-data-lab <a.megret.10@groupe-esigelec.fr>
+CommitDate: Tue Jun 23 09:46:52 2026 +0200
+
+    Finalize Feature-AE reference evaluation pipeline
+
+diff --git a/models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json b/models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json
+index 25c7843..523fc7b 100644
+--- a/models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json
++++ b/models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json
+@@ -15,7 +15,7 @@
+     },
+     "roi_mode": "soft_map",
+     "roi_threshold": 0.5,
+-    "score_contract_version": "feature_ae_champion_v001",
++    "score_contract_version": "feature_ae_reference_v001",
+     "score_image": "topk_mean",
+     "score_max": 292.6936340332031,
+     "score_median": 2.961828827857971,
+@@ -28,8 +28,16 @@
+   },
+   "model_type": "reverse_distill_resnet18_dual_context_gated",
+   "model_version": "rd_feature_ae_gated_v001_bootstrap",
+-  "feature_ae_champion_contract": {
++  "feature_ae_reference_contract": {
+     "context_size": 768,
++    "checkpoint_selection_policy": "business_metric_only",
++    "cosine_weight": 0.5,
++    "layer_normalization": "good_p99",
++    "layer_normalization_stats": {
++      "layer2": 1.0,
++      "layer3": 1.0
++    },
++    "layer_score_mode": "sqrt_l2_plus_cosine",
+     "layer_weights": {
+       "layer2": 0.65,
+       "layer3": 0.35
+@@ -38,6 +46,7 @@
+       "layer2",
+       "layer3"
+     ],
++    "legacy_scoring_allowed": false,
+     "roi_mode": "soft_map",
+     "roi_threshold": 0.5,
+     "score_image": "topk_mean",
+@@ -46,12 +55,15 @@
+     "tile_size": 384,
+     "tile_stride": 384,
+     "topk_fraction": 0.005,
+-    "version": "feature_ae_champion_v001"
++    "version": "feature_ae_reference_v001"
+   },
+   "preprocessing_contract": {
+     "augmentation_profile": "none",
+     "context_size": 768,
++    "cosine_weight": 0.5,
+     "image_size": 384,
++    "layer_normalization": "good_p99",
++    "layer_score_mode": "sqrt_l2_plus_cosine",
+     "layer_weights": {
+       "layer2": 0.65,
+       "layer3": 0.35
+@@ -68,9 +80,9 @@
+     "tile_stride": 384,
+     "tile_train_sampling": "all",
+     "topk_fraction": 0.005,
+-    "version": "feature_ae_champion_v001"
++    "version": "feature_ae_reference_v001"
+   },
+-  "preprocessing_contract_version": "feature_ae_champion_v001",
++  "preprocessing_contract_version": "feature_ae_reference_v001",
+   "roi_model_version": "roi_segmenter_v001_fixed",
+   "runtime": {
+     "loader": "load_rd_feature_ae_gated",
+
+=== CHECKPOINT CONTRACT VALIDATION ===
+src/iqa/inference/service.py:198:        feature_ae_reference_contract=(
+src/iqa/inference/service.py:407:            "Input image checksum mismatch"
+src/iqa/inference/runtime.py:18:    load_feature_ae_reference_contract,
+src/iqa/inference/runtime.py:85:            f"Input image checksum mismatch for {image_path}: "
+src/iqa/inference/runtime.py:99:    feature_ae_reference_contract: (
+src/iqa/inference/runtime.py:134:            feature_ae_reference_contract
+src/iqa/inference/runtime.py:135:            if feature_ae_reference_contract is not None
+src/iqa/inference/runtime.py:136:            else load_feature_ae_reference_contract(
+src/iqa/inference/model_loader.py:15:    feature_ae_reference_contract_from_manifest,
+src/iqa/inference/model_loader.py:200:                "preprocessing_contract_version"
+src/iqa/inference/model_loader.py:220:            feature_ae_reference_contract_from_manifest(
+src/iqa/models/artifacts.py:19:FEATURE_AE_REFERENCE_CONTRACT_VERSION = "feature_ae_reference_v001"
+src/iqa/models/artifacts.py:62:def feature_ae_reference_contract_from_manifest(
+src/iqa/models/artifacts.py:76:    payload = manifest["feature_ae_reference_contract"]
+src/iqa/models/artifacts.py:135:def load_feature_ae_reference_contract(
+src/iqa/models/artifacts.py:139:    return feature_ae_reference_contract_from_manifest(
+src/iqa/models/artifacts.py:150:    contract = manifest.get("feature_ae_reference_contract")
+src/iqa/models/artifacts.py:152:        raise ValueError(f"Feature-AE model {model_version!r} is missing feature_ae_reference_contract")
+src/iqa/models/artifacts.py:158:    if contract.get("version") != FEATURE_AE_REFERENCE_CONTRACT_VERSION:
+src/iqa/models/artifacts.py:165:    if isinstance(thresholds, dict) and thresholds.get("score_contract_version") != FEATURE_AE_REFERENCE_CONTRACT_VERSION:
+src/iqa/models/artifacts.py:168:            f"expected {FEATURE_AE_REFERENCE_CONTRACT_VERSION!r}"
+src/iqa/models/artifacts.py:221:    "feature_ae_reference_contract_from_manifest",
+src/iqa/models/artifacts.py:222:    "load_feature_ae_reference_contract",
+tests/inference/test_inference_service.py:98:            f"Input image checksum mismatch for {request.image_uri}"
+tests/inference/test_inference_service.py:118:    assert "checksum mismatch" in str(caught.value.detail)
+tests/inference/test_runtime_pipeline.py:52:        "load_feature_ae_reference_contract",
+tests/inference/test_runtime_pipeline.py:189:    with pytest.raises(ValueError, match="Input image checksum mismatch"):
+tests/inference/test_runtime_reload_service.py:211:        feature_ae_reference_contract=(
+tests/ml/test_feature_ae_reference_calibration.py:118:    contract = manifest["feature_ae_reference_contract"]
+tests/ml/test_feature_ae_reference_calibration.py:119:    assert manifest["preprocessing_contract_version"] == "feature_ae_reference_v001"
+tests/ml/test_feature_ae_bootstrap_builder.py:20:from iqa.training.feature_ae_contracts import FEATURE_AE_PREPROCESSING_CONTRACT_VERSION
+tests/ml/test_feature_ae_bootstrap_builder.py:104:    assert payload["preprocessing_contract_version"] == FEATURE_AE_PREPROCESSING_CONTRACT_VERSION
+tests/ml/test_feature_ae_bootstrap_builder.py:141:    assert payload["preprocessing_contract_version"] == FEATURE_AE_PREPROCESSING_CONTRACT_VERSION
+
+=== BOOTSTRAP MANIFEST TESTS ===
+tests/airflow/test_lifecycle_tasks.py:184:            assert config.feature_ae_version == "rd_feature_ae_gated_v001_bootstrap"
+tests/contracts/test_phase3_lineage_evidence.py:99:        model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/contracts/test_phase3_lineage_evidence.py:110:    assert summary["model_artifact_uri"] == "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt"
+tests/contracts/test_phase3_lineage_evidence.py:129:            model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/contracts/test_phase3_lineage_evidence.py:141:        model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/contracts/test_phase3_lineage_evidence.py:173:            model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/inference/test_inference_service.py:23:        feature_ae_version="rd_feature_ae_gated_v001_bootstrap",
+tests/inference/test_runtime_pipeline.py:127:    assert pipeline.result.feature_ae_version == "rd_feature_ae_gated_v001_bootstrap"
+tests/inference/test_runtime_reload_service.py:26:            "rd_feature_ae_gated_v001_bootstrap"
+tests/inference/test_runtime_reload_service.py:98:        == "rd_feature_ae_gated_v001_bootstrap"
+tests/ml/test_mlflow_run_logger.py:206:                "rd_feature_ae_gated_v001_bootstrap/"
+tests/ml/test_feature_ae_bootstrap_builder.py:86:                "model_version": "rd_feature_ae_gated_v001_bootstrap",
+tests/ml/test_feature_ae_bootstrap_builder.py:110:    runtime = tmp_path / ".cache" / "iqa" / "models" / "rd_feature_ae_gated_v001_bootstrap" / "checkpoint.pt"
+tests/ml/test_feature_ae_bootstrap_builder.py:129:    assert calls == [(str(checkpoint), "iqa-models", "rd_feature_ae_gated_v001_bootstrap/checkpoint.pt")]
+tests/ml/test_feature_ae_bootstrap_builder.py:140:    assert payload["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/ml/test_feature_ae_runtime_calibration.py:44:        model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/ml/test_feature_ae_runtime_calibration.py:60:            model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/metadata/test_postgres_metadata_foundation.py:115:        "model_version": "rd_feature_ae_gated_v001_bootstrap",
+tests/data/test_phase1_data_contract.py:103:        assert {row["feature_ae_version"] for row in rows} == {"rd_feature_ae_gated_v001_bootstrap"}
+tests/security/test_api_security_contracts.py:209:                    "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_postgres_write_through.py:130:                    "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_api_contract_hardening.py:176:                    "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_api_contract_hardening.py:227:        model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/api/test_incidents_contract.py:142:        model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/api/test_incidents_contract.py:148:    assert incident["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_filtered_metrics_contract.py:89:        'model_version="rd_feature_ae_gated_v001_bootstrap",'
+tests/api/test_filtered_metrics_contract.py:128:        'model_version="rd_feature_ae_gated_v001_bootstrap",'
+tests/api/test_scenario_id_contract.py:47:                    "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_audit_trail_contract.py:76:    assert row["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_audit_trail_contract.py:85:    assert audit_trail["prediction"]["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_audit_trail_contract.py:105:    assert FEEDBACK_STORE[prediction_id]["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_predict_traceability_contract.py:69:    assert prediction["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_predict_traceability_contract.py:79:    assert audit["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_predict_traceability_contract.py:88:    assert stored["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_predict_traceability_contract.py:142:    assert rows[0]["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_predict_traceability_contract.py:167:        model_version="rd_feature_ae_gated_v001_bootstrap",
+tests/api/test_postgres_read_through.py:78:        "model_version": "rd_feature_ae_gated_v001_bootstrap",
+tests/api/test_api_phase1_contract.py:353:                    "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_postgres_write_through_contract.py:77:                    "rd_feature_ae_gated_v001_bootstrap"
+tests/api/test_inference_http_delegation.py:52:        "feature_ae_version": "rd_feature_ae_gated_v001_bootstrap",
+tests/api/test_inference_http_delegation.py:176:                "rd_feature_ae_gated_v001_bootstrap"
+tests/replay/test_progressive_lifecycle_report.py:119:                "active_model_version": "rd_feature_ae_gated_v001_bootstrap",
+tests/replay/test_progressive_lifecycle_report.py:131:    assert "rd_feature_ae_gated_v001_bootstrap" in report
+tests/conftest.py:92:            feature_ae_version="rd_feature_ae_gated_v001_bootstrap",
+scripts/build_feature_ae_bootstrap.py:35:    parser.add_argument("--run-dir", type=Path, default=Path(".cache/iqa/models/rd_feature_ae_gated_v001_bootstrap/bootstrap_run"))
+scripts/build_feature_ae_bootstrap.py:38:    parser.add_argument("--manifest-output", type=Path, default=Path("models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json"))
+scripts/finalize_data_phase1.py:30:FEATURE_AE_VERSION = "rd_feature_ae_gated_v001_bootstrap"
+docs/lineage-evidence.md:74:  --model-version rd_feature_ae_gated_v001_bootstrap
+docs/lineage-evidence.md:82:  --model-version rd_feature_ae_gated_v001_bootstrap \
+docs/lineage-evidence.md:95:  --model-version rd_feature_ae_gated_v001_bootstrap \
+docs/lineage-evidence.md:114:  --model-version rd_feature_ae_gated_v001_bootstrap \
+docs/lineage-evidence.md:146:  --model-version rd_feature_ae_gated_v001_bootstrap
+docs/nat12-cuda-validation-evidence.md:39:9e4e3cc84fb359408ec5c58020e799816942d6c46ae024b29acb82c1c8ebe146
+docs/nat12-cuda-validation-evidence.md:71:- Feature AE model: `rd_feature_ae_gated_v001_bootstrap`
+docs/phase3-final-lineage-runbook.md:114:  --model-version rd_feature_ae_gated_v001_bootstrap \
+docs/phase3-final-lineage-runbook.md:134:  --model-version rd_feature_ae_gated_v001_bootstrap
+docs/phase3-final-lineage-runbook.md:161:  --model-version rd_feature_ae_gated_v001_bootstrap \
+docs/modele-feature-ae-iqa.md:284:  --model-version rd_feature_ae_gated_v001_bootstrap \
+docs/reproductibilite-ml-iqa.md:81:  --output-checkpoint .cache\iqa\models\rd_feature_ae_gated_v001_bootstrap\checkpoint.pt `
+docs/reproductibilite-ml-iqa.md:92:  --feature-ae-checkpoint .cache\iqa\models\rd_feature_ae_gated_v001_bootstrap\checkpoint.pt
+docs/model-lifecycle.md:92:- `feature_ae_version` (`rd_feature_ae_gated_v001_bootstrap` par defaut)
+models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json:2:  "artifact_uri": "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt",
+models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json:8:    "model_version": "rd_feature_ae_gated_v001_bootstrap",
+models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json:30:  "model_version": "rd_feature_ae_gated_v001_bootstrap",
+models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json:97:  "sha256": "9e4e3cc84fb359408ec5c58020e799816942d6c46ae024b29acb82c1c8ebe146",
