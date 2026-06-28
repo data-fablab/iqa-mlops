@@ -1,0 +1,14 @@
+{
+  "after": {
+    "decision": "Rouge",
+    "feature_ae_version": "rd_feature_ae_gated_natural_cycle_004",
+    "score": 1.187240481376648
+  },
+  "before": {
+    "decision": "Vert",
+    "feature_ae_version": "rd_feature_ae_gated_v001_bootstrap",
+    "score": 0.7933963537216187
+  },
+  "feature_ae_version_changed": true,
+  "same_real_image": true
+}

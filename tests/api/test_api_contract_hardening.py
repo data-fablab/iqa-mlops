@@ -165,6 +165,27 @@ def test_nat15_admin_reload_success_does_not_create_reload_refused_incident(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
+    monkeypatch.setattr(
+        "iqa.api.main._call_inference_reload",
+        lambda request, admin_token: {
+            "accepted": True,
+            "reload_status": "reloaded",
+            "source_of_truth": "mlflow_registry",
+            "previous": {
+                "feature_ae_version": (
+                    "rd_feature_ae_gated_v001_bootstrap"
+                ),
+            },
+            "active": {
+                "scenario_id": request.scenario_id,
+                "feature_ae_version": "candidate_test_v001",
+                "roi_model_version": "roi_segmenter_v001_fixed",
+                "registry_version": "12",
+                "model_uri": "models:/m-test",
+                "model_id": "m-test",
+            },
+        },
+    )
 
     response = reload_model(
         ReloadModelRequest(scenario_id="scenario_nat15", stage="prod"),
@@ -172,9 +193,9 @@ def test_nat15_admin_reload_success_does_not_create_reload_refused_incident(
     )
 
     assert response["accepted"] is True
-    assert response["reload_status"] == "accepted"
+    assert response["reload_status"] == "reloaded"
     assert response["audit_logged"] is True
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "accepted"
+    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "reloaded"
     assert list_incidents(incident_type="reload_refused") == []
 
 

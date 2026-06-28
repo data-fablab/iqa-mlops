@@ -1,0 +1,217 @@
+ Image iqa-ml:local Building
+#1 [internal] load local bake definitions
+#1 reading from stdin 592B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 2.10kB done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/python:3.12-slim
+#3 DONE 0.0s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 832B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 DONE 0.0s
+
+#6 [base 1/7] FROM docker.io/library/python:3.12-slim@sha256:d764629ce0ddd8c71fd371e9901efb324a95789d2315a47db7e4d27e78f1b0e9
+#6 resolve docker.io/library/python:3.12-slim@sha256:d764629ce0ddd8c71fd371e9901efb324a95789d2315a47db7e4d27e78f1b0e9 0.0s done
+#6 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 10.78kB 0.0s done
+#5 DONE 0.0s
+
+#7 [base 2/7] WORKDIR /app
+#7 CACHED
+
+#8 [base 6/7] COPY configs ./configs
+#8 CACHED
+
+#9 [base 3/7] COPY pyproject.toml uv.lock README.md ./
+#9 CACHED
+
+#10 [base 4/7] COPY src ./src
+#10 CACHED
+
+#11 [base 5/7] COPY scripts ./scripts
+#11 CACHED
+
+#12 [base 7/7] RUN pip install --no-cache-dir uv && uv sync --no-dev
+#12 CACHED
+
+#13 [ml 1/2] COPY models/manifests ./models/manifests
+#13 DONE 0.0s
+
+#14 [ml 2/2] RUN uv sync --no-dev --extra serving --extra ml --extra "cpu"
+#14 0.274 Resolved 307 packages in 1ms
+#14 0.505 Downloading sympy (6.0MiB)
+#14 0.531 Downloading setuptools (1.0MiB)
+#14 0.531 Downloading networkx (2.0MiB)
+#14 0.537 Downloading mlflow (10.3MiB)
+#14 0.538 Downloading pandas (11.8MiB)
+#14 0.539 Downloading uvloop (4.2MiB)
+#14 0.539 Downloading sqlalchemy (3.2MiB)
+#14 0.540 Downloading mlflow-tracing (1.6MiB)
+#14 0.540 Downloading botocore (14.3MiB)
+#14 0.541 Downloading pyarrow (46.6MiB)
+#14 0.541 Downloading psycopg-binary (4.9MiB)
+#14 0.541 Downloading mlflow-skinny (3.2MiB)
+#14 0.542 Downloading aiohttp (1.7MiB)
+#14 0.542 Downloading kiwisolver (1.4MiB)
+#14 0.543 Downloading matplotlib (9.6MiB)
+#14 0.543 Downloading scipy (33.6MiB)
+#14 0.544 Downloading fonttools (4.8MiB)
+#14 0.544 Downloading scikit-learn (8.7MiB)
+#14 0.544 Downloading cryptography (4.5MiB)
+#14 0.679 Downloading torch (183.4MiB)
+#14 0.687 Downloading torchvision (1.7MiB)
+#14 0.917  Downloaded torchvision
+#14 2.042  Downloaded kiwisolver
+#14 2.246  Downloaded aiohttp
+#14 2.564  Downloaded setuptools
+#14 2.792  Downloaded mlflow-tracing
+#14 2.853  Downloaded networkx
+#14 2.945  Downloaded sqlalchemy
+#14 3.368  Downloaded uvloop
+#14 3.436  Downloaded fonttools
+#14 3.483  Downloaded psycopg-binary
+#14 3.557  Downloaded cryptography
+#14 4.047  Downloaded mlflow-skinny
+#14 4.228  Downloaded scikit-learn
+#14 4.384  Downloaded matplotlib
+#14 4.549  Downloaded sympy
+#14 4.674  Downloaded mlflow
+#14 5.775  Downloaded scipy
+#14 5.808  Downloaded botocore
+#14 5.859  Downloaded pandas
+#14 5.934  Downloaded pyarrow
+#14 12.06  Downloaded torch
+#14 12.06 Prepared 101 packages in 11.77s
+#14 12.58 Installed 102 packages in 519ms
+#14 12.58  + aiohappyeyeballs==2.6.2
+#14 12.58  + aiohttp==3.14.1
+#14 12.58  + aiosignal==1.4.0
+#14 12.58  + alembic==1.18.4
+#14 12.58  + annotated-doc==0.0.4
+#14 12.58  + anyio==4.13.0
+#14 12.58  + attrs==26.1.0
+#14 12.58  + blinker==1.9.0
+#14 12.58  + boto3==1.43.0
+#14 12.58  + botocore==1.43.0
+#14 12.58  + cachetools==7.1.4
+#14 12.58  + certifi==2026.5.20
+#14 12.58  + cffi==2.0.0
+#14 12.58  + charset-normalizer==3.4.7
+#14 12.58  + click==8.4.1
+#14 12.58  + cloudpickle==3.1.2
+#14 12.58  + contourpy==1.3.3
+#14 12.58  + cryptography==48.0.1
+#14 12.58  + cycler==0.12.1
+#14 12.58  + databricks-sdk==0.117.0
+#14 12.58  + docker==7.1.0
+#14 12.58  + fastapi==0.136.3
+#14 12.58  + filelock==3.29.3
+#14 12.58  + flask==3.1.3
+#14 12.58  + flask-cors==6.0.5
+#14 12.58  + fonttools==4.63.0
+#14 12.58  + frozenlist==1.8.0
+#14 12.58  + fsspec==2026.4.0
+#14 12.58  + gitdb==4.0.12
+#14 12.58  + gitpython==3.1.50
+#14 12.58  + google-auth==2.53.0
+#14 12.58  + graphene==3.4.3
+#14 12.58  + graphql-core==3.2.11
+#14 12.58  + graphql-relay==3.2.0
+#14 12.58  + greenlet==3.5.1
+#14 12.58  + gunicorn==26.0.0
+#14 12.58  + h11==0.16.0
+#14 12.58  + httptools==0.8.0
+#14 12.58  + huey==3.0.3
+#14 12.58  + idna==3.18
+#14 12.58  + importlib-metadata==9.0.0
+#14 12.58  + itsdangerous==2.2.0
+#14 12.58  + jinja2==3.1.6
+#14 12.58  + jmespath==1.1.0
+#14 12.58  + joblib==1.5.3
+#14 12.58  + kiwisolver==1.5.0
+#14 12.58  + mako==1.3.12
+#14 12.58  + markupsafe==3.0.3
+#14 12.58  + matplotlib==3.11.0
+#14 12.58  + mlflow==3.13.0
+#14 12.58  + mlflow-skinny==3.13.0
+#14 12.58  + mlflow-tracing==3.13.0
+#14 12.58  + mpmath==1.3.0
+#14 12.58  + multidict==6.7.1
+#14 12.58  + narwhals==2.22.1
+#14 12.58  + networkx==3.6.1
+#14 12.58  + opentelemetry-api==1.42.1
+#14 12.58  + opentelemetry-proto==1.42.1
+#14 12.58  + opentelemetry-sdk==1.42.1
+#14 12.58  + opentelemetry-semantic-conventions==0.63b1
+#14 12.58  + packaging==26.2
+#14 12.58  + pandas==2.3.3
+#14 12.58  + prettytable==3.17.0
+#14 12.58  + prometheus-client==0.25.0
+#14 12.58  + propcache==0.5.2
+#14 12.58  + protobuf==6.33.6
+#14 12.58  + psycopg==3.3.4
+#14 12.58  + psycopg-binary==3.3.4
+#14 12.58  + pyarrow==24.0.0
+#14 12.58  + pyasn1==0.6.3
+#14 12.58  + pyasn1-modules==0.4.2
+#14 12.58  + pycparser==3.0
+#14 12.58  + pyparsing==3.3.2
+#14 12.58  + python-dateutil==2.9.0.post0
+#14 12.58  + python-dotenv==1.2.2
+#14 12.58  + python-multipart==0.0.32
+#14 12.58  + pytz==2026.2
+#14 12.58  + requests==2.34.2
+#14 12.58  + s3transfer==0.17.1
+#14 12.58  + scikit-learn==1.9.0
+#14 12.58  + scipy==1.17.1
+#14 12.58  + setuptools==81.0.0
+#14 12.58  + six==1.17.0
+#14 12.58  + skops==0.14.0
+#14 12.58  + smmap==5.0.3
+#14 12.58  + sqlalchemy==2.0.50
+#14 12.58  + sqlparse==0.5.5
+#14 12.58  + starlette==1.3.0
+#14 12.58  + sympy==1.14.0
+#14 12.58  + threadpoolctl==3.6.0
+#14 12.58  + torch==2.12.0+cpu
+#14 12.58  + torchvision==0.27.0+cpu
+#14 12.58  + tzdata==2026.2
+#14 12.58  + urllib3==2.7.0
+#14 12.58  + uvicorn==0.49.0
+#14 12.58  + uvloop==0.22.1
+#14 12.58  + watchfiles==1.2.0
+#14 12.58  + wcwidth==0.8.1
+#14 12.58  + websockets==16.0
+#14 12.58  + werkzeug==3.1.8
+#14 12.58  + yarl==1.24.2
+#14 12.58  + zipp==4.1.0
+#14 DONE 14.4s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 137.9s done
+#15 exporting manifest sha256:7574aa6d9e30f5f20f11a3e0400284d6e980cc27c5b16fc511b47c2da5ea84c1 done
+#15 exporting config sha256:8858e6969c7735bf73892ec4596ca647bea6388a6bac97c60ae0d4c7200a8761 done
+#15 exporting attestation manifest sha256:05d4fb88589ab6ff2c2b4fbc74c3b86250ee363c4683cbaecc33ede9f8973e6a done
+#15 exporting manifest list sha256:efa7b7081e375d4146ca0997514fcfa6f2ce14bc33748a3ec5d5964b43c32a4b done
+#15 naming to docker.io/library/iqa-ml:local done
+#15 unpacking to docker.io/library/iqa-ml:local
+#15 unpacking to docker.io/library/iqa-ml:local 56.4s done
+#15 DONE 194.4s
+
+#16 resolving provenance for metadata file
+#16 DONE 0.0s
+ Image iqa-ml:local Built
+ Container deploy-iqa-inference-1 Recreate
+ Container deploy-iqa-inference-1 Recreated
+ Container deploy-iqa-inference-1 Starting
+ Container deploy-iqa-inference-1 Started

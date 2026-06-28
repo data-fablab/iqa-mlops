@@ -342,6 +342,27 @@ def test_admin_reload_fails_when_admin_token_is_not_configured(monkeypatch: pyte
 def test_admin_reload_requires_token_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     ADMIN_RELOAD_LOG.clear()
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
+    monkeypatch.setattr(
+        "iqa.api.main._call_inference_reload",
+        lambda request, admin_token: {
+            "accepted": True,
+            "reload_status": "reloaded",
+            "source_of_truth": "mlflow_registry",
+            "previous": {
+                "feature_ae_version": (
+                    "rd_feature_ae_gated_v001_bootstrap"
+                ),
+            },
+            "active": {
+                "scenario_id": request.scenario_id,
+                "feature_ae_version": "candidate_test_v001",
+                "roi_model_version": "roi_segmenter_v001_fixed",
+                "registry_version": "12",
+                "model_uri": "models:/m-test",
+                "model_id": "m-test",
+            },
+        },
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="bad")
@@ -354,13 +375,13 @@ def test_admin_reload_requires_token_when_configured(monkeypatch: pytest.MonkeyP
     response = reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
 
     assert response["accepted"] is True
-    assert response["reload_status"] == "accepted"
+    assert response["reload_status"] == "reloaded"
     assert response["source_of_truth"] == "mlflow_registry"
     assert response["audit_logged"] is True
-    assert response["audit"]["reload_status"] == "accepted"
+    assert response["audit"]["reload_status"] == "reloaded"
     assert response["audit"]["accepted"] is True
     assert response["audit"]["scenario_id"] == "demo"
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "accepted"
+    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "reloaded"
 
 
 def test_replay_scenarios_endpoint() -> None:

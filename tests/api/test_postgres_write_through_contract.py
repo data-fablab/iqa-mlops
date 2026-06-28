@@ -34,6 +34,7 @@ def postgres_api_repo(
 @pytest.mark.postgres_contract
 def test_api_write_through_persists_prediction_feedback_and_reload(
     postgres_api_repo: PostgresMetadataRepository,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     response = api.predict(
         PredictRequest(
@@ -64,6 +65,29 @@ def test_api_write_through_persists_prediction_feedback_and_reload(
             gt_mask_has_defect=False,
         )
     )
+    monkeypatch.setattr(
+        api,
+        "_call_inference_reload",
+        lambda request, admin_token: {
+            "accepted": True,
+            "reload_status": "reloaded",
+            "source_of_truth": "mlflow_registry",
+            "previous": {
+                "feature_ae_version": (
+                    "rd_feature_ae_gated_v001_bootstrap"
+                ),
+            },
+            "active": {
+                "scenario_id": request.scenario_id,
+                "feature_ae_version": "candidate_test_v001",
+                "roi_model_version": "roi_segmenter_v001_fixed",
+                "registry_version": "12",
+                "model_uri": "models:/m-test",
+                "model_id": "m-test",
+            },
+        },
+    )
+
     reload_response = api.reload_model(
         ReloadModelRequest(scenario_id="scenario_api_pg"),
         x_iqa_admin_token="secret",

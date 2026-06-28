@@ -1,0 +1,10 @@
+{
+  "dvc_relative_path": "Casting_class1/test/defective/2022-02-23_13_15_19_383-2_1_2.jpg",
+  "md5": "cfc88af9210c6c6053785279d3459b47",
+  "raw_image_committed": false,
+  "reason": "The real source image was used for live inference but is not committed to avoid duplicating dataset content.",
+  "sha256": "76094bd3cd29780316cb9276eabff22906552d035086dc93e57abfbff72b3a7c",
+  "size_bytes": 76299,
+  "source_class": "defective",
+  "source_type": "real_dvc_dataset_image"
+}

@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 
 try:
     import mlflow
+
     HAS_MLFLOW = True
 except ImportError:
     HAS_MLFLOW = False
@@ -85,7 +86,9 @@ class MLflowRegistry:
         },
     }
 
-    def get_model(self, registered_model_name: str, *, stage: str = "prod") -> ModelRegistryRef:
+    def get_model(
+        self, registered_model_name: str, *, stage: str = "prod"
+    ) -> ModelRegistryRef:
         """Get a model by registered_model_name and stage."""
         if registered_model_name not in self._REGISTRY:
             raise ValueError(f"Unknown registered model: {registered_model_name}")
@@ -191,3 +194,96 @@ __all__ = [
     "MLflowRegistry",
     "register_run_to_model",
 ]
+
+
+def register_logged_feature_ae_model(
+    *,
+    model_uri: str,
+    run_id: str,
+    scenario_id: str,
+    stage: str,
+    model_name_base: str = "feature_ae",
+    tracking_uri: str | None = None,
+) -> dict[str, str]:
+    """Register a validated MLflow 3 LoggedModel."""
+    if not HAS_MLFLOW:
+        raise ImportError("MLflow is required for register_logged_feature_ae_model")
+
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
+
+    if not model_uri.startswith("models:/"):
+        raise ValueError(f"invalid_mlflow_logged_model_uri: {model_uri!r}")
+
+    model_id = model_uri.removeprefix("models:/").strip("/").split("/", 1)[0]
+    if not model_id.startswith("m-"):
+        raise ValueError(f"invalid_mlflow_logged_model_id: {model_id!r}")
+
+    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    client.get_logged_model(model_id)
+
+    artifact_paths: set[str] = set()
+
+    def collect(path: str | None = None) -> None:
+        for artifact in client.list_logged_model_artifacts(
+            model_id,
+            path,
+        ):
+            if artifact.is_dir:
+                collect(artifact.path)
+            else:
+                artifact_paths.add(artifact.path)
+
+    collect()
+
+    required = {
+        "MLmodel",
+        "artifacts/checkpoint.pt",
+        "artifacts/model_manifest.json",
+        "artifacts/score_contract.json",
+    }
+    missing = sorted(required - artifact_paths)
+
+    if missing:
+        raise FileNotFoundError(
+            "incomplete_mlflow_feature_ae_bundle: " + ", ".join(missing)
+        )
+
+    model_name = registered_model_name(
+        scenario_id,
+        base_name=model_name_base,
+    )
+
+    try:
+        client.create_registered_model(model_name)
+    except mlflow.exceptions.MlflowException as exc:
+        if "already exists" not in str(exc):
+            raise
+
+    model_version = client.create_model_version(
+        name=model_name,
+        source=model_uri,
+        run_id=run_id,
+        model_id=model_id,
+    )
+    if model_version is None:
+        raise RuntimeError(f"failed_to_register_logged_model: {model_id}")
+
+    version = str(model_version.version)
+
+    if stage and stage != "None":
+        client.set_registered_model_alias(
+            name=model_name,
+            alias=stage,
+            version=version,
+        )
+
+    return {
+        "registered_model_name": model_name,
+        "version": version,
+        "stage": stage,
+        "alias": stage,
+        "model_id": model_id,
+        "model_uri": model_uri,
+        "source_of_truth": "mlflow_logged_model",
+    }

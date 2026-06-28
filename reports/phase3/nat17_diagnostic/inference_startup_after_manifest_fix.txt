@@ -1,0 +1,18 @@
+=== CONTAINER STATE ===
+status=running running=true exit_code=0 restart_count=0 error= started_at=2026-06-27T22:37:56.889642781Z
+
+=== CONTAINER LOGS ===
+/app/.venv/lib/python3.12/site-packages/mlflow/types/type_hints.py:385: UserWarning: [1;33mAny type hint is inferred as AnyType, and MLflow doesn't validate the data for this type. Please use a more specific type hint to enable data validation.[0m
+  col_spec_type = _infer_colspec_type_from_type_hint(type_hint)
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8100 (Press CTRL+C to quit)
+
+=== HEALTH ===
+{"status":"ok","service":"iqa-inference"}
+HTTP=200
+
+=== MODEL VERSION ===
+{"scenario_id":"production_replay_natural","feature_ae_version":"rd_feature_ae_gated_v001_bootstrap","roi_model_version":"roi_segmenter_v001_fixed","registry_version":"","model_uri":"","model_id":"","checkpoint_path":null,"loaded_at":null}
+HTTP=200

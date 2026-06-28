@@ -1,0 +1,67 @@
+{
+  "http_status": 200,
+  "request": {
+    "scenario_id": "production_replay_natural",
+    "stage": "prod"
+  },
+  "response": {
+    "accepted": true,
+    "active": {
+      "checkpoint_path": "/var/cache/iqa/models/bundle_4_yv9saz/artifacts/checkpoint.pt",
+      "feature_ae_version": "rd_feature_ae_gated_natural_cycle_004",
+      "loaded_at": "2026-06-28T00:46:40.325175+00:00",
+      "model_id": "m-414e88fca7c34db9ab98ec61645f725d",
+      "model_uri": "models:/m-414e88fca7c34db9ab98ec61645f725d",
+      "registry_version": "10",
+      "roi_model_version": "roi_segmenter_v001_fixed",
+      "scenario_id": "production_replay_natural"
+    },
+    "audit": {
+      "accepted": true,
+      "created_at": "2026-06-28T00:46:40.327229+00:00",
+      "metadata_persisted": true,
+      "prediction_id": null,
+      "reason": "Inference model reloaded to rd_feature_ae_gated_natural_cycle_004.",
+      "registered_model_name": "feature_ae__production_replay_natural",
+      "reload_event_id": "reload_8ed9534f9b0d4229bc7556c7e82e819f",
+      "reload_status": "reloaded",
+      "scenario_id": "production_replay_natural",
+      "source_of_truth": "mlflow_registry",
+      "stage": "prod"
+    },
+    "audit_logged": true,
+    "inference_reload": {
+      "accepted": true,
+      "active": {
+        "checkpoint_path": "/var/cache/iqa/models/bundle_4_yv9saz/artifacts/checkpoint.pt",
+        "feature_ae_version": "rd_feature_ae_gated_natural_cycle_004",
+        "loaded_at": "2026-06-28T00:46:40.325175+00:00",
+        "model_id": "m-414e88fca7c34db9ab98ec61645f725d",
+        "model_uri": "models:/m-414e88fca7c34db9ab98ec61645f725d",
+        "registry_version": "10",
+        "roi_model_version": "roi_segmenter_v001_fixed",
+        "scenario_id": "production_replay_natural"
+      },
+      "previous": {
+        "checkpoint_path": null,
+        "feature_ae_version": "rd_feature_ae_gated_v001_bootstrap",
+        "loaded_at": null,
+        "model_id": "",
+        "model_uri": "",
+        "registry_version": "",
+        "roi_model_version": "roi_segmenter_v001_fixed",
+        "scenario_id": "production_replay_natural"
+      },
+      "reload_status": "reloaded",
+      "source_of_truth": "mlflow_registry"
+    },
+    "reload_status": "reloaded",
+    "source_of_truth": "mlflow_registry",
+    "target": {
+      "registered_model_name": "feature_ae__production_replay_natural",
+      "scenario_id": "production_replay_natural",
+      "source_of_truth": "mlflow_registry",
+      "stage": "prod"
+    }
+  }
+}

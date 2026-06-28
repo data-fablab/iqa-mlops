@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+from typing import Any
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -18,6 +19,7 @@ from iqa.models.artifacts import (
     resolve_feature_ae_checkpoint,
     resolve_roi_segmenter_checkpoint,
 )
+from iqa.models.feature_ae.reference import FeatureAEReferenceContract
 from iqa.roi.artifacts import RoiPredictionArtifact
 from iqa.storage.artifacts import sha256_file
 from iqa.storage.object_store import ObjectStore, create_object_store
@@ -92,6 +94,11 @@ def run_inference_pipeline(
     device: str = "cpu",
     roi_model_version: str = DEFAULT_ROI_MODEL_VERSION,
     feature_ae_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION,
+    feature_checkpoint: str | Path | None = None,
+    decision_thresholds: dict[str, Any] | None = None,
+    feature_ae_reference_contract: (
+        FeatureAEReferenceContract | None
+    ) = None,
 ) -> InferencePipelineResult:
     object_store = store or create_object_store()
 
@@ -108,12 +115,28 @@ def run_inference_pipeline(
             version=roi_model_version,
             strict_checksum=True,
         )
-        feature_checkpoint = resolve_feature_ae_checkpoint(
-            version=feature_ae_version,
-            strict_checksum=True,
+        resolved_feature_checkpoint = (
+            Path(feature_checkpoint)
+            if feature_checkpoint is not None
+            else resolve_feature_ae_checkpoint(
+                version=feature_ae_version,
+                strict_checksum=True,
+            )
         )
-        thresholds = load_feature_ae_decision_thresholds(feature_ae_version)
-        reference_contract = load_feature_ae_reference_contract(feature_ae_version)
+        thresholds = (
+            dict(decision_thresholds)
+            if decision_thresholds is not None
+            else load_feature_ae_decision_thresholds(
+                feature_ae_version
+            )
+        )
+        reference_contract = (
+            feature_ae_reference_contract
+            if feature_ae_reference_contract is not None
+            else load_feature_ae_reference_contract(
+                feature_ae_version
+            )
+        )
 
         threshold_orange = float(thresholds["threshold_orange"])
         threshold_red = float(thresholds["threshold_red"])
@@ -133,7 +156,7 @@ def run_inference_pipeline(
 
         feature = predict_feature_ae_image(
             image_path,
-            feature_checkpoint,
+            resolved_feature_checkpoint,
             image_size=reference_contract.tile_size,
             context_size=reference_contract.context_size,
             threshold_orange=threshold_orange,

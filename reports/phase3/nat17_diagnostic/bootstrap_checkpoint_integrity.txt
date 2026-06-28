@@ -1,20 +1,21 @@
+manifest=/app/models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json exists=True
 {
   "artifact_uri": "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt",
   "dataset_version": "feature_ae_good_v001_bootstrap",
   "decision_thresholds": {
     "calibration_set_id": "calibration_set_v001",
     "created_at": "2026-06-18T12:56:24.127337+00:00",
-    "method": "calibration_good_quantiles",
-    "model_version": "rd_feature_ae_gated_v001_bootstrap",
-    "orange_quantile": 0.95,
-    "red_quantile": 0.99,
-    "sample_count": 102,
     "layer_weights": {
       "layer2": 0.65,
       "layer3": 0.35
     },
+    "method": "calibration_good_quantiles",
+    "model_version": "rd_feature_ae_gated_v001_bootstrap",
+    "orange_quantile": 0.95,
+    "red_quantile": 0.99,
     "roi_mode": "soft_map",
     "roi_threshold": 0.5,
+    "sample_count": 102,
     "score_contract_version": "feature_ae_reference_v001",
     "score_image": "topk_mean",
     "score_max": 292.6936340332031,
@@ -26,11 +27,9 @@
     "threshold_red": 203.27940811157205,
     "topk_fraction": 0.005
   },
-  "model_type": "reverse_distill_resnet18_dual_context_gated",
-  "model_version": "rd_feature_ae_gated_v001_bootstrap",
   "feature_ae_reference_contract": {
-    "context_size": 768,
     "checkpoint_selection_policy": "business_metric_only",
+    "context_size": 768,
     "cosine_weight": 0.5,
     "layer_normalization": "good_p99",
     "layer_normalization_stats": {
@@ -57,6 +56,8 @@
     "topk_fraction": 0.005,
     "version": "feature_ae_reference_v001"
   },
+  "model_type": "reverse_distill_resnet18_dual_context_gated",
+  "model_version": "rd_feature_ae_gated_v001_bootstrap",
   "preprocessing_contract": {
     "augmentation_profile": "none",
     "context_size": 768,
@@ -94,8 +95,14 @@
   "selected_metric_value": 0.9190951612731334,
   "selected_val_loss": 1.153761516014735,
   "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss stability only",
-  "sha256": "147194a8c110db1859e28c1e17ab21c9dddc2febdad08c89526f31bc4a81ca43",
+  "sha256": "9e4e3cc84fb359408ec5c58020e799816942d6c46ae024b29acb82c1c8ebe146",
   "source_checkpoint": "checkpoint_best_image_ap.pt",
   "status": "bootstrap",
   "validation_set_id": "validation_set_v001"
 }
+manifest=/app/models/rd_feature_ae_gated_v001_bootstrap/model_manifest.json exists=False
+checkpoint=/var/cache/iqa/models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt exists=True
+size=71287357
+sha256=147194a8c110db1859e28c1e17ab21c9dddc2febdad08c89526f31bc4a81ca43
+checkpoint=/app/models/checkpoints/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt exists=False
+checkpoint=/app/models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt exists=False

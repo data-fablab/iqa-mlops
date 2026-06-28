@@ -59,7 +59,9 @@ def load_feature_ae_decision_thresholds(
     return thresholds
 
 
-def load_feature_ae_reference_contract(
+def feature_ae_reference_contract_from_manifest(
+    manifest: dict[str, Any],
+    *,
     model_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION,
 ) -> FeatureAEReferenceContract:
     from iqa.models.feature_ae.reference import (
@@ -67,12 +69,16 @@ def load_feature_ae_reference_contract(
         FeatureAEReferenceContract,
     )
 
-    manifest = load_model_manifest(model_version)
-    validate_feature_ae_reference_manifest(manifest, model_version=model_version)
+    validate_feature_ae_reference_manifest(
+        manifest,
+        model_version=model_version,
+    )
     payload = manifest["feature_ae_reference_contract"]
 
     layer_weights = payload.get("layer_weights")
-    normalization_stats = payload.get("layer_normalization_stats")
+    normalization_stats = payload.get(
+        "layer_normalization_stats"
+    )
 
     return FeatureAEReferenceContract(
         version=str(payload["version"]),
@@ -80,9 +86,15 @@ def load_feature_ae_reference_contract(
         tile_size=int(payload["tile_size"]),
         context_size=int(payload["context_size"]),
         tile_stride=int(payload["tile_stride"]),
-        layers=tuple(str(layer) for layer in payload["layers"]),
+        layers=tuple(
+            str(layer)
+            for layer in payload["layers"]
+        ),
         layer_weights=(
-            {str(name): float(value) for name, value in layer_weights.items()}
+            {
+                str(name): float(value)
+                for name, value in layer_weights.items()
+            }
             if isinstance(layer_weights, dict)
             else None
         ),
@@ -92,19 +104,41 @@ def load_feature_ae_reference_contract(
         score_image=str(payload["score_image"]),
         topk_fraction=float(payload["topk_fraction"]),
         layer_score_mode=str(
-            payload.get("layer_score_mode", REFERENCE_FEATURE_AE_CONTRACT.layer_score_mode)
+            payload.get(
+                "layer_score_mode",
+                REFERENCE_FEATURE_AE_CONTRACT.layer_score_mode,
+            )
         ),
         layer_normalization=str(
-            payload.get("layer_normalization", REFERENCE_FEATURE_AE_CONTRACT.layer_normalization)
+            payload.get(
+                "layer_normalization",
+                REFERENCE_FEATURE_AE_CONTRACT.layer_normalization,
+            )
         ),
         layer_normalization_stats=(
-            {str(name): float(value) for name, value in normalization_stats.items()}
+            {
+                str(name): float(value)
+                for name, value in normalization_stats.items()
+            }
             if isinstance(normalization_stats, dict)
             else None
         ),
         cosine_weight=float(
-            payload.get("cosine_weight", REFERENCE_FEATURE_AE_CONTRACT.cosine_weight)
+            payload.get(
+                "cosine_weight",
+                REFERENCE_FEATURE_AE_CONTRACT.cosine_weight,
+            )
         ),
+    )
+
+
+def load_feature_ae_reference_contract(
+    model_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION,
+) -> FeatureAEReferenceContract:
+    manifest = load_model_manifest(model_version)
+    return feature_ae_reference_contract_from_manifest(
+        manifest,
+        model_version=model_version,
     )
 
 
@@ -184,6 +218,7 @@ __all__ = [
     "DEFAULT_FEATURE_AE_MODEL_VERSION",
     "DEFAULT_ROI_MODEL_VERSION",
     "load_feature_ae_decision_thresholds",
+    "feature_ae_reference_contract_from_manifest",
     "load_feature_ae_reference_contract",
     "load_model_manifest",
     "model_manifest_path",

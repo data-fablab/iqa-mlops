@@ -1,0 +1,25 @@
+All checks passed!
+.........................s..........ss.s....s......sss.......sss........ [ 10%]
+........................................................................ [ 20%]
+...........................ss........................................... [ 30%]
+........................................................................ [ 40%]
+........................................................................ [ 50%]
+...................................................sssss................ [ 60%]
+........................................................................ [ 70%]
+........................................................ss.............. [ 80%]
+........................................................................ [ 90%]
+........................................................................ [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/mlflow/types/type_hints.py:385
+tests/ml/test_mlflow_run_logger.py::TestMLflowRunLoggerBasic::test_log_feature_ae_model_writes_mlflow_model
+tests/ml/test_mlflow_run_logger.py::TestMLflowRunLoggerBasic::test_log_promoted_bundle_is_complete
+tests/ml/test_mlflow_run_logger.py::TestAirflowWrapper::test_wrapper_with_mock_training
+  /opt/iqa/worktrees/iqa_nat17_mlflow_runtime_reload/.venv/lib/python3.12/site-packages/mlflow/types/type_hints.py:385: UserWarning: [1;33mAny type hint is inferred as AnyType, and MLflow doesn't validate the data for this type. Please use a more specific type hint to enable data validation.[0m
+    col_spec_type = _infer_colspec_type_from_type_hint(type_hint)
+
+tests/ml/test_mlflow_run_logger.py::TestAirflowWrapper::test_wrapper_with_mock_training
+  /opt/iqa/worktrees/iqa_nat17_mlflow_runtime_reload/.venv/lib/python3.12/site-packages/mlflow/data/dataset_source_registry.py:148: UserWarning: The specified dataset source can be interpreted in multiple ways: LocalArtifactDatasetSource, LocalArtifactDatasetSource. MLflow will assume that this is a LocalArtifactDatasetSource source.
+    return _dataset_source_registry.resolve(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+700 passed, 20 skipped, 5 warnings in 50.87s

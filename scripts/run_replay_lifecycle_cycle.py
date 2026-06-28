@@ -41,9 +41,17 @@ from iqa.training.feature_ae_evaluation import (
     compute_decision_metrics,
     evaluate_feature_ae_checkpoint,
 )
-from iqa.training.feature_ae_contracts import CANONICAL_FEATURE_AE_PREPROCESSING, FEATURE_AE_BUSINESS_METRIC_PRIORITY
-from iqa.training.mlflow_logging import train_feature_ae_with_mlflow_logging
+from iqa.training.feature_ae_contracts import (
+    CANONICAL_FEATURE_AE_PREPROCESSING,
+    FEATURE_AE_BUSINESS_METRIC_PRIORITY,
+    canonical_feature_ae_preprocessing_dict,
+)
+from iqa.training.mlflow_logging import (
+    log_promoted_feature_ae_bundle,
+    train_feature_ae_with_mlflow_logging,
+)
 from iqa.registry import register_run_to_model, registered_model_name
+from iqa.registry.mlflow_registry import register_logged_feature_ae_model
 
 NATURAL_SCENARIO_ID = "production_replay_natural"
 DRIFT_SCENARIO_ID = "drift_domain_extension"
@@ -59,10 +67,15 @@ VALIDATION_MANIFEST = Path("data/validation/validation_set_v001.csv")
 VALIDATION_GT_MASKS_MANIFEST = Path("data/validation/validation_gt_masks_v001.csv")
 DEFAULT_ANCHOR_GOOD_MANIFEST = Path("data/model_datasets/feature_ae_good_v002.csv")
 DEFAULT_OUTPUT_ROOT = Path(".cache/iqa/replay_lifecycle")
-Mode = Literal["decision-only", "train-on-trigger", "progressive-decision", "progressive-train"]
+Mode = Literal[
+    "decision-only", "train-on-trigger", "progressive-decision", "progressive-train"
+]
 PROGRESSIVE_MODES = {"progressive-decision", "progressive-train"}
 ACTIVE_REPLAY_SCENARIOS = Path("data/metadata/replay_scenarios.csv")
-PROGRESSIVE_PROMOTION_POLICY = "candidate_must_pass_reference_guardrail_and_progressive_factory_panel"
+PROGRESSIVE_PROMOTION_POLICY = (
+    "candidate_must_pass_reference_guardrail_and_progressive_factory_panel"
+)
+_LEGACY_REGISTER_RUN_TO_MODEL = register_run_to_model
 
 
 @dataclass
@@ -124,7 +137,9 @@ class LotAccumulator:
     def roi_fail_rate(self) -> float:
         return self.roi_fail_count / self.event_count if self.event_count else 0.0
 
-    def to_dict(self, *, lifecycle_decision: LifecycleDecision | None = None) -> dict[str, Any]:
+    def to_dict(
+        self, *, lifecycle_decision: LifecycleDecision | None = None
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "lot_id": self.lot_id,
             "scenario_id": self.scenario_id,
@@ -141,7 +156,9 @@ class LotAccumulator:
             payload["lifecycle_decision"] = lifecycle_decision.to_dict()
             payload["trigger_lifecycle"] = lifecycle_decision.trigger_lifecycle
             payload["trigger_reason"] = lifecycle_decision.trigger_reason
-            payload["candidate_dataset_version"] = lifecycle_decision.candidate_dataset_version
+            payload["candidate_dataset_version"] = (
+                lifecycle_decision.candidate_dataset_version
+            )
         return payload
 
 
@@ -164,7 +181,9 @@ class CycleState:
     cycles_requested: int = 0
     promotion_min_delta: float = 0.0
     cycles: list[dict[str, Any]] = field(default_factory=list)
-    promotion_chain: list[str] = field(default_factory=lambda: [DEFAULT_FEATURE_AE_MODEL_VERSION])
+    promotion_chain: list[str] = field(
+        default_factory=lambda: [DEFAULT_FEATURE_AE_MODEL_VERSION]
+    )
     seen_events: list[CycleEvent] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -174,9 +193,15 @@ class CycleState:
             "run_id": self.run_id,
             "events_processed": self.events_processed,
             "lots_processed": self.lots_processed,
-            "trigger_lifecycle": bool(self.trigger_decision and self.trigger_decision.trigger_lifecycle),
-            "trigger_reason": self.trigger_decision.trigger_reason if self.trigger_decision else "",
-            "candidate_dataset_version": self.trigger_decision.candidate_dataset_version if self.trigger_decision else "",
+            "trigger_lifecycle": bool(
+                self.trigger_decision and self.trigger_decision.trigger_lifecycle
+            ),
+            "trigger_reason": self.trigger_decision.trigger_reason
+            if self.trigger_decision
+            else "",
+            "candidate_dataset_version": self.trigger_decision.candidate_dataset_version
+            if self.trigger_decision
+            else "",
             "bootstrap_model_version": DEFAULT_FEATURE_AE_MODEL_VERSION,
             "candidate_checkpoint": self.candidate_checkpoint,
             "mlflow_run_id": self.mlflow_run_id,
@@ -196,7 +221,9 @@ class CycleState:
                         if cycle.get("promotion_status") == "promoted"
                     ],
                     "promotion_chain": self.promotion_chain,
-                    "registry_stage": self.cycles[-1]["registry_stage"] if self.cycles else "",
+                    "registry_stage": self.cycles[-1]["registry_stage"]
+                    if self.cycles
+                    else "",
                     "registry_model_name": registered_model_name(self.scenario_id),
                     "promotion_policy": PROGRESSIVE_PROMOTION_POLICY,
                     "promotion_min_delta": getattr(self, "promotion_min_delta", 0.0),
@@ -205,10 +232,14 @@ class CycleState:
                             "cycle_id": cycle.get("cycle_id"),
                             "active_model_before": cycle.get("active_model_before"),
                             "candidate_version": cycle.get("candidate_version"),
-                            "evaluation_seen_events": cycle.get("evaluation_seen_events"),
+                            "evaluation_seen_events": cycle.get(
+                                "evaluation_seen_events"
+                            ),
                             "selected_metric": cycle.get("selected_metric"),
                             "active_metric_value": cycle.get("active_metric_value"),
-                            "candidate_metric_value": cycle.get("candidate_metric_value"),
+                            "candidate_metric_value": cycle.get(
+                                "candidate_metric_value"
+                            ),
                             "metric_delta": cycle.get("metric_delta"),
                             "gate_decision": cycle.get("gate_decision"),
                             "promotion_status": cycle.get("promotion_status"),
@@ -223,7 +254,9 @@ class CycleState:
                             "selected_metric": cycle.get("selected_metric"),
                             "selected_metric_value": cycle.get("selected_metric_value"),
                             "active_metric_value": cycle.get("active_metric_value"),
-                            "candidate_metric_value": cycle.get("candidate_metric_value"),
+                            "candidate_metric_value": cycle.get(
+                                "candidate_metric_value"
+                            ),
                             "metric_delta": cycle.get("metric_delta"),
                             "gate_decision": cycle.get("gate_decision"),
                             "promotion_status": cycle.get("promotion_status"),
@@ -288,12 +321,19 @@ class LifecycleArtifacts:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario-id", choices=sorted(REPLAY_PLANS), default=NATURAL_SCENARIO_ID)
+    parser.add_argument(
+        "--scenario-id", choices=sorted(REPLAY_PLANS), default=NATURAL_SCENARIO_ID
+    )
     parser.add_argument("--image-root", type=Path, required=True)
     parser.add_argument("--stage", default="test")
     parser.add_argument(
         "--mode",
-        choices=["decision-only", "train-on-trigger", "progressive-decision", "progressive-train"],
+        choices=[
+            "decision-only",
+            "train-on-trigger",
+            "progressive-decision",
+            "progressive-train",
+        ],
         default="decision-only",
     )
     parser.add_argument("--max-events", type=int)
@@ -311,13 +351,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-stage", default="test")
     parser.add_argument("--promotion-min-delta", type=float, default=0.0)
     parser.add_argument("--require-mlflow-registry", action="store_true")
-    parser.add_argument("--anchor-good-manifest", type=Path, default=DEFAULT_ANCHOR_GOOD_MANIFEST)
+    parser.add_argument(
+        "--anchor-good-manifest", type=Path, default=DEFAULT_ANCHOR_GOOD_MANIFEST
+    )
     parser.add_argument("--anchor-good-max-per-class", type=int, default=256)
-    parser.add_argument("--reference-eval-manifest", type=Path, default=VALIDATION_MANIFEST)
-    parser.add_argument("--reference-gt-masks-manifest", type=Path, default=VALIDATION_GT_MASKS_MANIFEST)
+    parser.add_argument(
+        "--reference-eval-manifest", type=Path, default=VALIDATION_MANIFEST
+    )
+    parser.add_argument(
+        "--reference-gt-masks-manifest", type=Path, default=VALIDATION_GT_MASKS_MANIFEST
+    )
     parser.add_argument("--progressive-min-defects-for-decision", type=int, default=5)
     parser.add_argument("--max-good-red-regression", type=int, default=1)
-    parser.add_argument("--candidate-init-policy", choices=["stable_base", "active", "fresh"], default="stable_base")
+    parser.add_argument(
+        "--candidate-init-policy",
+        choices=["stable_base", "active", "fresh"],
+        default="stable_base",
+    )
     return parser.parse_args()
 
 
@@ -334,7 +384,10 @@ def main() -> None:
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f"{path.name}.tmp")
-    tmp_path.write_text(json.dumps(payload, default=str, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp_path.write_text(
+        json.dumps(payload, default=str, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     tmp_path.replace(path)
 
 
@@ -410,7 +463,13 @@ def record_lifecycle_event(
     )
 
 
-def record_timing(artifacts: LifecycleArtifacts, phase: str, *, duration_seconds: float, **payload: Any) -> None:
+def record_timing(
+    artifacts: LifecycleArtifacts,
+    phase: str,
+    *,
+    duration_seconds: float,
+    **payload: Any,
+) -> None:
     append_jsonl(
         artifacts.timings_path,
         {
@@ -434,11 +493,17 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     state.output_dir = state.output_dir / state.run_id
     state.output_dir.mkdir(parents=True, exist_ok=True)
 
-    roi_checkpoint = resolve_roi_segmenter_checkpoint(DEFAULT_ROI_MODEL_VERSION, strict_checksum=True)
+    roi_checkpoint = resolve_roi_segmenter_checkpoint(
+        DEFAULT_ROI_MODEL_VERSION, strict_checksum=True
+    )
     active_runtime = ActiveRuntimeModel(
         version=DEFAULT_FEATURE_AE_MODEL_VERSION,
-        checkpoint=resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True),
-        decision_thresholds=resolve_runtime_thresholds(DEFAULT_FEATURE_AE_MODEL_VERSION),
+        checkpoint=resolve_feature_ae_checkpoint(
+            DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True
+        ),
+        decision_thresholds=resolve_runtime_thresholds(
+            DEFAULT_FEATURE_AE_MODEL_VERSION
+        ),
         registry_model_name=registered_model_name(args.scenario_id),
         registry_stage=args.target_stage,
     )
@@ -457,17 +522,33 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
         timings_path=state.output_dir / "timings.jsonl",
     )
     write_progress(artifacts, state, active_runtime, phase="started")
-    record_lifecycle_event(artifacts, state, active_runtime, "run_started", args=vars(args))
+    record_lifecycle_event(
+        artifacts, state, active_runtime, "run_started", args=vars(args)
+    )
 
     current_lot: LotAccumulator | None = None
-    with events_path.open("w", encoding="utf-8") as events_file, lots_path.open("w", encoding="utf-8") as lots_file:
+    with (
+        events_path.open("w", encoding="utf-8") as events_file,
+        lots_path.open("w", encoding="utf-8") as lots_file,
+    ):
         for row in rows:
-            if args.max_events is not None and state.events_processed >= args.max_events:
+            if (
+                args.max_events is not None
+                and state.events_processed >= args.max_events
+            ):
                 break
             lot_id = row.get("lot_id") or "unknown_lot"
             if current_lot is not None and current_lot.lot_id != lot_id:
-                decision = _finalize_lot(current_lot, args=args, state=state, lots_file=lots_file)
-                write_progress(artifacts, state, active_runtime, phase="lot_finalized", extra={"last_lot_id": current_lot.lot_id})
+                decision = _finalize_lot(
+                    current_lot, args=args, state=state, lots_file=lots_file
+                )
+                write_progress(
+                    artifacts,
+                    state,
+                    active_runtime,
+                    phase="lot_finalized",
+                    extra={"last_lot_id": current_lot.lot_id},
+                )
                 should_stop, active_runtime = handle_lifecycle_decision(
                     args,
                     state,
@@ -480,7 +561,9 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 if args.max_lots is not None and state.lots_processed >= args.max_lots:
                     break
             if current_lot is None or current_lot.lot_id != lot_id:
-                current_lot = LotAccumulator(lot_id=lot_id, scenario_id=args.scenario_id)
+                current_lot = LotAccumulator(
+                    lot_id=lot_id, scenario_id=args.scenario_id
+                )
 
             event = process_replay_event(
                 row,
@@ -498,11 +581,25 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
             state.events_processed += 1
             events_file.write(json.dumps(event.to_dict(), sort_keys=True) + "\n")
             events_file.flush()
-            write_progress(artifacts, state, active_runtime, phase="replaying", extra={"current_lot_id": current_lot.lot_id})
+            write_progress(
+                artifacts,
+                state,
+                active_runtime,
+                phase="replaying",
+                extra={"current_lot_id": current_lot.lot_id},
+            )
 
         if current_lot is not None and should_finalize_last_lot(args, state):
-            decision = _finalize_lot(current_lot, args=args, state=state, lots_file=lots_file)
-            write_progress(artifacts, state, active_runtime, phase="lot_finalized", extra={"last_lot_id": current_lot.lot_id})
+            decision = _finalize_lot(
+                current_lot, args=args, state=state, lots_file=lots_file
+            )
+            write_progress(
+                artifacts,
+                state,
+                active_runtime,
+                phase="lot_finalized",
+                extra={"last_lot_id": current_lot.lot_id},
+            )
             _, active_runtime = handle_lifecycle_decision(
                 args,
                 state,
@@ -511,7 +608,11 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
                 artifacts=artifacts,
             )
 
-    if state.trigger_decision and state.trigger_decision.trigger_lifecycle and args.mode == "train-on-trigger":
+    if (
+        state.trigger_decision
+        and state.trigger_decision.trigger_lifecycle
+        and args.mode == "train-on-trigger"
+    ):
         train_result = train_candidate_on_trigger(args, state.trigger_decision)
         state.candidate_checkpoint = str(train_result.get("checkpoint") or "")
         state.mlflow_run_id = str(train_result.get("run_id") or "")
@@ -525,16 +626,22 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     summary = summary_with_runtime(state, active_runtime, artifacts)
     write_json(artifacts.summary_path, summary)
     write_progress(artifacts, state, active_runtime, phase="completed")
-    record_lifecycle_event(artifacts, state, active_runtime, "run_completed", summary=summary)
+    record_lifecycle_event(
+        artifacts, state, active_runtime, "run_completed", summary=summary
+    )
     return summary
 
 
 def load_replay_rows(scenario_id: str) -> list[dict[str, str]]:
     plan = resolve_replay_plan(scenario_id)
     with plan.open(newline="", encoding="utf-8") as file:
-        rows = [row for row in csv.DictReader(file) if row.get("scenario_id") == scenario_id]
+        rows = [
+            row for row in csv.DictReader(file) if row.get("scenario_id") == scenario_id
+        ]
     if not rows:
-        raise ValueError(f"replay plan has no rows for scenario_id={scenario_id}: {plan}")
+        raise ValueError(
+            f"replay plan has no rows for scenario_id={scenario_id}: {plan}"
+        )
     return rows
 
 
@@ -564,15 +671,26 @@ def process_replay_event(
     visual_store: ObjectStore | None = None,
     active_model_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION,
 ) -> CycleEvent:
-    relative_path = first_csv_value(row.get("relative_paths") or row.get("relative_path") or "")
+    relative_path = first_csv_value(
+        row.get("relative_paths") or row.get("relative_path") or ""
+    )
     image_path = image_root / relative_path
-    image_id = first_csv_value(row.get("image_ids") or row.get("image_id") or Path(relative_path).stem)
+    image_id = first_csv_value(
+        row.get("image_ids") or row.get("image_id") or Path(relative_path).stem
+    )
     event_id = row.get("event_id") or row.get("simulated_event_id") or ""
-    piece_event_id = row.get("piece_event_id") or row.get("simulated_event_id") or row.get("event_id") or ""
+    piece_event_id = (
+        row.get("piece_event_id")
+        or row.get("simulated_event_id")
+        or row.get("event_id")
+        or ""
+    )
     lot_id = row.get("lot_id") or "unknown_lot"
     scenario_id = row.get("scenario_id") or ""
     mask_path = output_dir / "roi_masks" / f"{piece_event_id}_{image_id}_roi.png"
-    probability_path = output_dir / "roi_masks" / f"{piece_event_id}_{image_id}_roi_prob.png"
+    probability_path = (
+        output_dir / "roi_masks" / f"{piece_event_id}_{image_id}_roi_prob.png"
+    )
     heatmap_path = output_dir / "heatmaps" / f"{piece_event_id}_{image_id}_heatmap.png"
     context = VisualArtifactContext(
         scenario_id=scenario_id,
@@ -587,7 +705,11 @@ def process_replay_event(
         output_mask=mask_path,
         output_probability_map=probability_path,
     )
-    roi_mask_uri = publish_roi_mask(mask_path, context, store=visual_store) if mask_path.exists() else None
+    roi_mask_uri = (
+        publish_roi_mask(mask_path, context, store=visual_store)
+        if mask_path.exists()
+        else None
+    )
     feature = predict_feature_ae_image(
         image_path,
         feature_checkpoint,
@@ -599,7 +721,11 @@ def process_replay_event(
         threshold_red=float(decision_thresholds["threshold_red"]),
         threshold_source=str(decision_thresholds["threshold_source"]),
     )
-    heatmap_uri = publish_heatmap(heatmap_path, context, store=visual_store) if heatmap_path.exists() else None
+    heatmap_uri = (
+        publish_heatmap(heatmap_path, context, store=visual_store)
+        if heatmap_path.exists()
+        else None
+    )
     return CycleEvent(
         event_id=event_id,
         piece_event_id=piece_event_id,
@@ -624,7 +750,9 @@ def process_replay_event(
         heatmap_path=str(heatmap_path),
         heatmap_uri=heatmap_uri,
         active_model_version=active_model_version,
-        score_contract_version=getattr(feature, "score_contract_version", "feature_ae_reference_v001"),
+        score_contract_version=getattr(
+            feature, "score_contract_version", "feature_ae_reference_v001"
+        ),
     )
 
 
@@ -648,28 +776,46 @@ def gt_mask_path_for_original_dataset(relative_path: str) -> str:
         return ""
     source_class, split, label = parts[0], parts[1].lower(), parts[2].lower()
     if split == "test" and label == "defective":
-        return str(Path(source_class) / "ground_truth" / "defective" / f"{path.stem}_mask.png").replace("\\", "/")
+        return str(
+            Path(source_class) / "ground_truth" / "defective" / f"{path.stem}_mask.png"
+        ).replace("\\", "/")
     return ""
 
 
 def resolve_event_gt_mask_path(row: dict[str, str], relative_path: str) -> str:
-    explicit = first_csv_value(row.get("gt_mask_paths") or row.get("gt_mask_path") or row.get("mask_paths") or "")
+    explicit = first_csv_value(
+        row.get("gt_mask_paths")
+        or row.get("gt_mask_path")
+        or row.get("mask_paths")
+        or ""
+    )
     if explicit:
         return explicit
     return gt_mask_path_for_original_dataset(relative_path)
 
 
 def oracle_verdict(row: dict[str, str]) -> str:
-    is_defective = str(row.get("is_defective") or row.get("oracle_is_defective") or "").lower()
+    is_defective = str(
+        row.get("is_defective") or row.get("oracle_is_defective") or ""
+    ).lower()
     has_mask = str(row.get("has_mask") or "").lower()
-    if is_defective in {"true", "1", "yes", "defective"} or has_mask in {"true", "1", "yes"}:
+    if is_defective in {"true", "1", "yes", "defective"} or has_mask in {
+        "true",
+        "1",
+        "yes",
+    }:
         return "defective"
     return "conforme"
 
 
-def lifecycle_decision_for_lot(state: CycleState, lot: LotAccumulator, *, interval: int = 50) -> LifecycleDecision:
+def lifecycle_decision_for_lot(
+    state: CycleState, lot: LotAccumulator, *, interval: int = 50
+) -> LifecycleDecision:
     state.total_conforming_validated_count += lot.conforming_validated_count
-    conforming_since_cycle = state.total_conforming_validated_count - state.last_cycle_conforming_validated_count
+    conforming_since_cycle = (
+        state.total_conforming_validated_count
+        - state.last_cycle_conforming_validated_count
+    )
     signal = LifecycleSignal(
         scenario_id=state.scenario_id,
         conforming_validated_count=conforming_since_cycle,
@@ -688,7 +834,9 @@ def _finalize_lot(
 ) -> LifecycleDecision:
     decision = lifecycle_decision_for_lot(state, lot, interval=args.lifecycle_interval)
     state.lots_processed += 1
-    lots_file.write(json.dumps(lot.to_dict(lifecycle_decision=decision), sort_keys=True) + "\n")
+    lots_file.write(
+        json.dumps(lot.to_dict(lifecycle_decision=decision), sort_keys=True) + "\n"
+    )
     lots_file.flush()
     return decision
 
@@ -728,7 +876,10 @@ def handle_lifecycle_decision(
         state,
         active_runtime,
         phase="cycle_running",
-        extra={"current_cycle": cycle_number, "trigger_reason": decision.trigger_reason},
+        extra={
+            "current_cycle": cycle_number,
+            "trigger_reason": decision.trigger_reason,
+        },
     )
     cycle_result = build_progressive_cycle(
         args,
@@ -781,17 +932,26 @@ def handle_lifecycle_decision(
             version=promoted,
             checkpoint=Path(str(cycle_result["candidate_checkpoint"])),
             decision_thresholds=dict(cycle_result["candidate_decision_thresholds"]),
-            registry_model_name=str(cycle_result.get("registered_model_name") or registered_model_name(state.scenario_id)),
+            registry_model_name=str(
+                cycle_result.get("registered_model_name")
+                or registered_model_name(state.scenario_id)
+            ),
             registry_stage=str(cycle_result.get("registry_stage") or args.target_stage),
             registry_alias=str(cycle_result.get("registry_alias") or args.target_stage),
-            registered_model_version=str(cycle_result.get("registered_model_version") or ""),
+            registered_model_version=str(
+                cycle_result.get("registered_model_version") or ""
+            ),
             registry_status=str(cycle_result.get("registry_status") or ""),
-            registry_source_of_truth=str(cycle_result.get("registry_source_of_truth") or ""),
+            registry_source_of_truth=str(
+                cycle_result.get("registry_source_of_truth") or ""
+            ),
         )
         cycle_result["activated_for_next_events"] = True
         cycle_result["activation_event_index"] = state.events_processed
         cycle_result["activation_scope"] = (
-            "mlflow_registry" if cycle_result.get("registry_status") == "registered" else "run_local_runtime"
+            "mlflow_registry"
+            if cycle_result.get("registry_status") == "registered"
+            else "run_local_runtime"
         )
         cycle_result["active_thresholds_after"] = active_runtime.decision_thresholds
         cycle_result["active_runtime_after"] = active_runtime.to_dict()
@@ -868,8 +1028,16 @@ def handle_lifecycle_decision(
         cycle_result["active_runtime_after"] = active_runtime.to_dict()
     state.cycles.append(cycle_result)
     append_jsonl(artifacts.cycles_path, cycle_result)
-    write_json(artifacts.summary_path, summary_with_runtime(state, active_runtime, artifacts))
-    write_progress(artifacts, state, active_runtime, phase="cycle_completed", extra={"last_cycle": cycle_result})
+    write_json(
+        artifacts.summary_path, summary_with_runtime(state, active_runtime, artifacts)
+    )
+    write_progress(
+        artifacts,
+        state,
+        active_runtime,
+        phase="cycle_completed",
+        extra={"last_cycle": cycle_result},
+    )
     print(
         "lifecycle cycle "
         f"{cycle_id}: gate={cycle_result.get('gate_decision')} "
@@ -909,13 +1077,15 @@ def build_progressive_cycle(
         dataset_snapshot_id=dataset_snapshot_id,
         scenario_id=state.scenario_id,
     )
-    training_manifest_path, training_manifest_stats = write_progressive_training_manifest(
-        seen_snapshot_path=seen_snapshot_path,
-        anchor_good_manifest=args.anchor_good_manifest,
-        output_path=cycle_dir / "training_manifest.csv",
-        dataset_snapshot_id=dataset_snapshot_id,
-        scenario_id=state.scenario_id,
-        anchor_good_max_per_class=args.anchor_good_max_per_class,
+    training_manifest_path, training_manifest_stats = (
+        write_progressive_training_manifest(
+            seen_snapshot_path=seen_snapshot_path,
+            anchor_good_manifest=args.anchor_good_manifest,
+            output_path=cycle_dir / "training_manifest.csv",
+            dataset_snapshot_id=dataset_snapshot_id,
+            scenario_id=state.scenario_id,
+            anchor_good_max_per_class=args.anchor_good_max_per_class,
+        )
     )
     progressive_evaluation_set_path = write_seen_evaluation_set(
         state.seen_events,
@@ -948,8 +1118,12 @@ def build_progressive_cycle(
         "progressive_evaluation_set_path": str(progressive_evaluation_set_path),
         "evaluation_seen_events": len(state.seen_events),
         "seen_events": len(state.seen_events),
-        "seen_conforming": sum(1 for event in state.seen_events if event.oracle_verdict == "conforme"),
-        "seen_defective": sum(1 for event in state.seen_events if event.oracle_verdict == "defective"),
+        "seen_conforming": sum(
+            1 for event in state.seen_events if event.oracle_verdict == "conforme"
+        ),
+        "seen_defective": sum(
+            1 for event in state.seen_events if event.oracle_verdict == "defective"
+        ),
         "trigger_reason": decision.trigger_reason,
         "registry_stage": args.target_stage,
         "promotion_status": "simulated",
@@ -994,11 +1168,19 @@ def build_progressive_cycle(
             candidate_version=candidate_version,
         )
         result["candidate_checkpoint"] = str(train_result.get("checkpoint") or "")
-        result["candidate_initial_checkpoint"] = str(initial_checkpoint_path) if initial_checkpoint_path else ""
+        result["candidate_initial_checkpoint"] = (
+            str(initial_checkpoint_path) if initial_checkpoint_path else ""
+        )
         result["mlflow_run_id"] = str(train_result.get("run_id") or "")
-        result["mlflow_dataset_logged"] = bool(train_result.get("mlflow_dataset_logged"))
-        result["mlflow_training_dataset_logged"] = bool(train_result.get("mlflow_training_dataset_logged"))
-        result["mlflow_metric_eval_dataset_logged"] = bool(train_result.get("mlflow_metric_eval_dataset_logged"))
+        result["mlflow_dataset_logged"] = bool(
+            train_result.get("mlflow_dataset_logged")
+        )
+        result["mlflow_training_dataset_logged"] = bool(
+            train_result.get("mlflow_training_dataset_logged")
+        )
+        result["mlflow_metric_eval_dataset_logged"] = bool(
+            train_result.get("mlflow_metric_eval_dataset_logged")
+        )
         result["mlflow_model_logged"] = bool(train_result.get("mlflow_model_logged"))
         candidate_training_evidence = metric_evidence_from_training_result(train_result)
         result.update(candidate_training_evidence)
@@ -1063,7 +1245,11 @@ def build_progressive_cycle(
             result["promotion_status"] = comparison["promotion_status"]
             result["gate_decision"] = "rejected"
             result["gate_reason"] = comparison["gate_reason"]
-        if args.publish_minio and result["candidate_checkpoint"] and result["promotion_status"] == "promoted":
+        if (
+            args.publish_minio
+            and result["candidate_checkpoint"]
+            and result["promotion_status"] == "promoted"
+        ):
             upload_checkpoint_to_s3(
                 str(result["candidate_checkpoint"]),
                 f"s3://iqa-models/{candidate_version}/checkpoint.pt",
@@ -1075,7 +1261,9 @@ def build_progressive_cycle(
             record_timing(
                 artifacts,
                 "registry",
-                duration_seconds=(registry_completed - registry_started).total_seconds(),
+                duration_seconds=(
+                    registry_completed - registry_started
+                ).total_seconds(),
                 cycle_id=f"cycle_{cycle_number:03d}",
                 candidate_version=candidate_version,
                 registry_status=result.get("registry_status"),
@@ -1087,21 +1275,44 @@ def build_progressive_cycle(
     return result
 
 
-def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[str, Any]:
+def metric_evidence_from_training_result(
+    train_result: dict[str, Any],
+) -> dict[str, Any]:
     run_dir_value = train_result.get("run_dir")
     checkpoint_value = train_result.get("checkpoint")
     candidates: list[Path] = []
     if run_dir_value:
         run_dir = Path(str(run_dir_value))
-        candidates.extend([run_dir / "metric_eval_best.json", run_dir / "bootstrap_run" / "metric_eval_best.json"])
+        candidates.extend(
+            [
+                run_dir / "metric_eval_best.json",
+                run_dir / "bootstrap_run" / "metric_eval_best.json",
+            ]
+        )
     if checkpoint_value:
         checkpoint_dir = Path(str(checkpoint_value)).parent
-        candidates.extend([checkpoint_dir / "metric_eval_best.json", checkpoint_dir / "bootstrap_run" / "metric_eval_best.json"])
+        candidates.extend(
+            [
+                checkpoint_dir / "metric_eval_best.json",
+                checkpoint_dir / "bootstrap_run" / "metric_eval_best.json",
+            ]
+        )
 
     best_path = next((path for path in candidates if path.is_file()), None)
     best = json.loads(best_path.read_text(encoding="utf-8")) if best_path else {}
-    history_path = next((path.parent / "metric_eval_history.json" for path in candidates if (path.parent / "metric_eval_history.json").is_file()), None)
-    epoch_metric_history = json.loads(history_path.read_text(encoding="utf-8")) if history_path else train_result.get("epoch_metric_history", [])
+    history_path = next(
+        (
+            path.parent / "metric_eval_history.json"
+            for path in candidates
+            if (path.parent / "metric_eval_history.json").is_file()
+        ),
+        None,
+    )
+    epoch_metric_history = (
+        json.loads(history_path.read_text(encoding="utf-8"))
+        if history_path
+        else train_result.get("epoch_metric_history", [])
+    )
     metrics = {
         metric: float(record["value"])
         for metric, record in best.items()
@@ -1120,18 +1331,28 @@ def metric_evidence_from_training_result(train_result: dict[str, Any]) -> dict[s
 
     val_loss = None
     if selected_record and run_dir_value:
-        val_loss = _val_loss_for_epoch(Path(str(run_dir_value)) / "loss_history.csv", int(selected_record.get("epoch") or 0))
+        val_loss = _val_loss_for_epoch(
+            Path(str(run_dir_value)) / "loss_history.csv",
+            int(selected_record.get("epoch") or 0),
+        )
 
     return {
         "metrics": metrics,
         "metric_eval_best_path": str(best_path) if best_path else None,
         "selected_metric": selected_metric,
-        "selected_metric_value": float(selected_record["value"]) if selected_record else None,
-        "selected_epoch": int(selected_record.get("epoch") or 0) if selected_record else None,
-        "selected_checkpoint": str(selected_record.get("checkpoint") or "") if selected_record else None,
+        "selected_metric_value": float(selected_record["value"])
+        if selected_record
+        else None,
+        "selected_epoch": int(selected_record.get("epoch") or 0)
+        if selected_record
+        else None,
+        "selected_checkpoint": str(selected_record.get("checkpoint") or "")
+        if selected_record
+        else None,
         "val_loss": val_loss,
         "epoch_metric_history": epoch_metric_history,
-        "checkpoint_selection_policy": train_result.get("checkpoint_selection_policy") or "business_metric_only",
+        "checkpoint_selection_policy": train_result.get("checkpoint_selection_policy")
+        or "business_metric_only",
     }
 
 
@@ -1196,7 +1417,9 @@ def evaluate_model_pair_on_panel(
     completed_at = datetime.now(UTC)
     duration = (completed_at - started_at).total_seconds()
     for role, payload in (("active_before", active), ("candidate", candidate)):
-        if payload.get("eval_inference_seconds") is not None and not payload.get("cache_hit"):
+        if payload.get("eval_inference_seconds") is not None and not payload.get(
+            "cache_hit"
+        ):
             record_timing(
                 artifacts,
                 "eval_inference",
@@ -1211,7 +1434,9 @@ def evaluate_model_pair_on_panel(
             record_timing(
                 artifacts,
                 "aupimo_compute",
-                duration_seconds=float(metric_timings.get("aupimo_compute_seconds") or 0.0),
+                duration_seconds=float(
+                    metric_timings.get("aupimo_compute_seconds") or 0.0
+                ),
                 cycle_id=cycle_dir.name,
                 panel=panel_name,
                 role=role,
@@ -1221,7 +1446,9 @@ def evaluate_model_pair_on_panel(
             record_timing(
                 artifacts,
                 "pixel_rank_metrics",
-                duration_seconds=float(metric_timings.get("pixel_rank_metrics_seconds") or 0.0),
+                duration_seconds=float(
+                    metric_timings.get("pixel_rank_metrics_seconds") or 0.0
+                ),
                 cycle_id=cycle_dir.name,
                 panel=panel_name,
                 role=role,
@@ -1243,7 +1470,9 @@ def evaluate_model_pair_on_panel(
             artifacts,
             state,
             active_runtime,
-            "prediction_cache_hit" if payload.get("cache_hit") else "prediction_cache_miss",
+            "prediction_cache_hit"
+            if payload.get("cache_hit")
+            else "prediction_cache_miss",
             cycle_id=cycle_dir.name,
             panel=panel_name,
             role=role,
@@ -1262,7 +1491,9 @@ def evaluate_model_pair_on_panel(
         candidate_version=candidate_version,
         duration_seconds=duration,
     )
-    selected_metric = select_comparable_business_metric(active["metrics"], candidate["metrics"])
+    selected_metric = select_comparable_business_metric(
+        active["metrics"], candidate["metrics"]
+    )
     if selected_metric is None:
         return {
             "panel": panel_name,
@@ -1293,7 +1524,9 @@ def evaluate_model_pair_on_panel(
             "candidate_metric_timings": candidate.get("metric_timings", {}),
             "active_metric_timings": active.get("metric_timings", {}),
             "threshold_source": (
-                candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
+                candidate_decision_thresholds.get("threshold_source")
+                if candidate_decision_thresholds
+                else ""
             ),
             "operational_alerts": ["missing_comparable_business_metric"],
             "evaluation_started_at": started_at.isoformat(),
@@ -1311,7 +1544,9 @@ def evaluate_model_pair_on_panel(
     if candidate_false_negatives > active_false_negatives:
         operational_alerts.append("candidate_increases_false_negatives")
     active_good_alert_rate = float(active["metrics"].get("good_alert_rate") or 0.0)
-    candidate_good_alert_rate = float(candidate["metrics"].get("good_alert_rate") or 0.0)
+    candidate_good_alert_rate = float(
+        candidate["metrics"].get("good_alert_rate") or 0.0
+    )
     active_good_red_rate = float(active["metrics"].get("good_red_rate") or 0.0)
     candidate_good_red_rate = float(candidate["metrics"].get("good_red_rate") or 0.0)
     if candidate_decision_thresholds is None:
@@ -1347,7 +1582,9 @@ def evaluate_model_pair_on_panel(
         "candidate_metric_timings": candidate.get("metric_timings", {}),
         "active_metric_timings": active.get("metric_timings", {}),
         "threshold_source": (
-            candidate_decision_thresholds.get("threshold_source") if candidate_decision_thresholds else ""
+            candidate_decision_thresholds.get("threshold_source")
+            if candidate_decision_thresholds
+            else ""
         ),
         "candidate_false_negatives": candidate_false_negatives,
         "active_false_negatives": active_false_negatives,
@@ -1355,7 +1592,9 @@ def evaluate_model_pair_on_panel(
         "active_good_alert_rate": active_good_alert_rate,
         "candidate_good_red_rate": candidate_good_red_rate,
         "active_good_red_rate": active_good_red_rate,
-        "candidate_good_red_count": int(candidate["metrics"].get("good_red_count") or 0),
+        "candidate_good_red_count": int(
+            candidate["metrics"].get("good_red_count") or 0
+        ),
         "active_good_red_count": int(active["metrics"].get("good_red_count") or 0),
         "active_per_class_metrics": active.get("per_class_metrics", {}),
         "candidate_per_class_metrics": candidate.get("per_class_metrics", {}),
@@ -1406,7 +1645,9 @@ def evaluate_progressive_promotion_comparison(
         gt_masks_manifest=args.reference_gt_masks_manifest,
     )
     progressive_defective_count = count_defective_rows(progressive_evaluation_set_path)
-    progressive_has_enough_defects = progressive_defective_count >= int(args.progressive_min_defects_for_decision)
+    progressive_has_enough_defects = progressive_defective_count >= int(
+        args.progressive_min_defects_for_decision
+    )
     progressive: dict[str, Any] | None = None
     if progressive_has_enough_defects:
         progressive = evaluate_model_pair_on_panel(
@@ -1428,14 +1669,14 @@ def evaluate_progressive_promotion_comparison(
     completed_at = datetime.now(UTC)
 
     reference_delta = reference.get("metric_delta")
-    reference_false_negatives_ok = int(reference.get("candidate_false_negatives") or 0) <= int(
-        reference.get("active_false_negatives") or 0
-    )
+    reference_false_negatives_ok = int(
+        reference.get("candidate_false_negatives") or 0
+    ) <= int(reference.get("active_false_negatives") or 0)
     progressive_false_negatives_ok = True
     if progressive is not None:
-        progressive_false_negatives_ok = int(progressive.get("candidate_false_negatives") or 0) <= int(
-            progressive.get("active_false_negatives") or 0
-        )
+        progressive_false_negatives_ok = int(
+            progressive.get("candidate_false_negatives") or 0
+        ) <= int(progressive.get("active_false_negatives") or 0)
     active_metrics = reference.get("active_metrics_on_eval_set") or {}
     candidate_metrics = reference.get("candidate_metrics_on_eval_set") or {}
     active_good_red_count = int(active_metrics.get("good_red_count") or 0)
@@ -1450,7 +1691,13 @@ def evaluate_progressive_promotion_comparison(
     candidate_thresholds = reference.get("candidate_decision_thresholds")
     active_thresholds = reference.get("active_decision_thresholds")
     thresholds_ok = candidate_thresholds is not None and active_thresholds is not None
-    passed = bool(metric_ok and reference_false_negatives_ok and progressive_false_negatives_ok and good_red_ok and thresholds_ok)
+    passed = bool(
+        metric_ok
+        and reference_false_negatives_ok
+        and progressive_false_negatives_ok
+        and good_red_ok
+        and thresholds_ok
+    )
 
     simplified_gate = {
         "decision": "passed" if passed else "rejected",
@@ -1471,7 +1718,9 @@ def evaluate_progressive_promotion_comparison(
         "thresholds_ok": thresholds_ok,
         "progressive_monitor_only": not progressive_has_enough_defects,
         "progressive_defective_count": progressive_defective_count,
-        "progressive_min_defects_for_decision": int(args.progressive_min_defects_for_decision),
+        "progressive_min_defects_for_decision": int(
+            args.progressive_min_defects_for_decision
+        ),
     }
 
     missing_comparable_metric = reference.get("selected_metric") is None
@@ -1507,11 +1756,24 @@ def evaluate_progressive_promotion_comparison(
     return {
         "metrics": reference.get("metrics") or {},
         "active_metrics_on_eval_set": reference.get("active_metrics_on_eval_set") or {},
-        "candidate_metrics_on_eval_set": reference.get("candidate_metrics_on_eval_set") or {},
-        "reference_active_metrics_on_eval_set": reference.get("active_metrics_on_eval_set") or {},
-        "reference_candidate_metrics_on_eval_set": reference.get("candidate_metrics_on_eval_set") or {},
-        "progressive_active_metrics_on_eval_set": (progressive or {}).get("active_metrics_on_eval_set") or {},
-        "progressive_candidate_metrics_on_eval_set": (progressive or {}).get("candidate_metrics_on_eval_set") or {},
+        "candidate_metrics_on_eval_set": reference.get("candidate_metrics_on_eval_set")
+        or {},
+        "reference_active_metrics_on_eval_set": reference.get(
+            "active_metrics_on_eval_set"
+        )
+        or {},
+        "reference_candidate_metrics_on_eval_set": reference.get(
+            "candidate_metrics_on_eval_set"
+        )
+        or {},
+        "progressive_active_metrics_on_eval_set": (progressive or {}).get(
+            "active_metrics_on_eval_set"
+        )
+        or {},
+        "progressive_candidate_metrics_on_eval_set": (progressive or {}).get(
+            "candidate_metrics_on_eval_set"
+        )
+        or {},
         "reference_selected_metric": reference.get("selected_metric"),
         "progressive_selected_metric": (progressive or {}).get("selected_metric"),
         "selected_metric": reference.get("selected_metric"),
@@ -1519,13 +1781,18 @@ def evaluate_progressive_promotion_comparison(
         "active_metric_value": reference.get("active_metric_value"),
         "candidate_metric_value": reference.get("candidate_metric_value"),
         "metric_delta": reference.get("metric_delta"),
-        "fn_delta": int(reference.get("candidate_false_negatives") or 0) - int(reference.get("active_false_negatives") or 0),
+        "fn_delta": int(reference.get("candidate_false_negatives") or 0)
+        - int(reference.get("active_false_negatives") or 0),
         "good_red_delta": good_red_delta,
         "reference_active_metric_value": reference.get("active_metric_value"),
         "reference_candidate_metric_value": reference.get("candidate_metric_value"),
         "reference_metric_delta": reference.get("metric_delta"),
-        "progressive_active_metric_value": (progressive or {}).get("active_metric_value"),
-        "progressive_candidate_metric_value": (progressive or {}).get("candidate_metric_value"),
+        "progressive_active_metric_value": (progressive or {}).get(
+            "active_metric_value"
+        ),
+        "progressive_candidate_metric_value": (progressive or {}).get(
+            "candidate_metric_value"
+        ),
         "progressive_metric_delta": (progressive or {}).get("metric_delta"),
         "gate_decision": "passed" if passed else "rejected",
         "gate_reason": gate_reason,
@@ -1536,9 +1803,15 @@ def evaluate_progressive_promotion_comparison(
         "active_eval_metrics_path": reference.get("active_eval_metrics_path"),
         "candidate_eval_metrics_path": reference.get("candidate_eval_metrics_path"),
         "reference_active_eval_metrics_path": reference.get("active_eval_metrics_path"),
-        "reference_candidate_eval_metrics_path": reference.get("candidate_eval_metrics_path"),
-        "progressive_active_eval_metrics_path": (progressive or {}).get("active_eval_metrics_path"),
-        "progressive_candidate_eval_metrics_path": (progressive or {}).get("candidate_eval_metrics_path"),
+        "reference_candidate_eval_metrics_path": reference.get(
+            "candidate_eval_metrics_path"
+        ),
+        "progressive_active_eval_metrics_path": (progressive or {}).get(
+            "active_eval_metrics_path"
+        ),
+        "progressive_candidate_eval_metrics_path": (progressive or {}).get(
+            "candidate_eval_metrics_path"
+        ),
         "active_cache_status": reference.get("active_cache_status"),
         "candidate_cache_status": reference.get("candidate_cache_status"),
         "active_cache_key": reference.get("active_cache_key"),
@@ -1555,30 +1828,48 @@ def evaluate_progressive_promotion_comparison(
         "active_good_red_count": active_good_red_count,
         "candidate_good_red_count": candidate_good_red_count,
         "reference_active_good_alert_rate": reference.get("active_good_alert_rate"),
-        "reference_candidate_good_alert_rate": reference.get("candidate_good_alert_rate"),
+        "reference_candidate_good_alert_rate": reference.get(
+            "candidate_good_alert_rate"
+        ),
         "reference_active_good_red_rate": reference.get("active_good_red_rate"),
         "reference_candidate_good_red_rate": reference.get("candidate_good_red_rate"),
         "prediction_schema_version": reference.get("prediction_schema_version"),
         "candidate_metric_timings": reference.get("candidate_metric_timings", {}),
         "active_metric_timings": reference.get("active_metric_timings", {}),
-        "threshold_source": candidate_thresholds.get("threshold_source") if candidate_thresholds else "",
+        "threshold_source": candidate_thresholds.get("threshold_source")
+        if candidate_thresholds
+        else "",
         "candidate_false_negatives": reference.get("candidate_false_negatives"),
         "active_false_negatives": reference.get("active_false_negatives"),
-        "reference_candidate_false_negatives": reference.get("candidate_false_negatives"),
+        "reference_candidate_false_negatives": reference.get(
+            "candidate_false_negatives"
+        ),
         "reference_active_false_negatives": reference.get("active_false_negatives"),
         "active_per_class_metrics": reference.get("active_per_class_metrics", {}),
         "candidate_per_class_metrics": reference.get("candidate_per_class_metrics", {}),
-        "reference_active_per_class_metrics": reference.get("active_per_class_metrics", {}),
-        "reference_candidate_per_class_metrics": reference.get("candidate_per_class_metrics", {}),
+        "reference_active_per_class_metrics": reference.get(
+            "active_per_class_metrics", {}
+        ),
+        "reference_candidate_per_class_metrics": reference.get(
+            "candidate_per_class_metrics", {}
+        ),
         "per_class_regressions": reference.get("per_class_regressions") or [],
         "candidate_aupimo_stability": reference.get("candidate_aupimo_stability", {}),
         "active_aupimo_stability": reference.get("active_aupimo_stability", {}),
-        "reference_candidate_aupimo_stability": reference.get("candidate_aupimo_stability", {}),
-        "progressive_candidate_aupimo_stability": (progressive or {}).get("candidate_aupimo_stability", {}),
+        "reference_candidate_aupimo_stability": reference.get(
+            "candidate_aupimo_stability", {}
+        ),
+        "progressive_candidate_aupimo_stability": (progressive or {}).get(
+            "candidate_aupimo_stability", {}
+        ),
         "candidate_predictions_path": reference.get("candidate_predictions_path"),
         "active_predictions_path": reference.get("active_predictions_path"),
-        "reference_candidate_predictions_path": reference.get("candidate_predictions_path"),
-        "progressive_candidate_predictions_path": (progressive or {}).get("candidate_predictions_path"),
+        "reference_candidate_predictions_path": reference.get(
+            "candidate_predictions_path"
+        ),
+        "progressive_candidate_predictions_path": (progressive or {}).get(
+            "candidate_predictions_path"
+        ),
         "evaluation_started_at": started_at.isoformat(),
         "evaluation_completed_at": completed_at.isoformat(),
         "evaluation_duration_seconds": (completed_at - started_at).total_seconds(),
@@ -1598,7 +1889,9 @@ def evaluate_progressive_model_on_set(
     decision_thresholds: dict[str, Any] | None = None,
     gt_masks_manifest: Path | None = None,
 ) -> dict[str, Any]:
-    threshold_orange = float((decision_thresholds or {}).get("threshold_orange") or 0.02)
+    threshold_orange = float(
+        (decision_thresholds or {}).get("threshold_orange") or 0.02
+    )
     threshold_red = float((decision_thresholds or {}).get("threshold_red") or 0.05)
     cache_key = prediction_cache_key(
         model_version=model_version,
@@ -1642,7 +1935,11 @@ def evaluate_progressive_model_on_set(
             threshold_red=threshold_red,
         )
     )
-    params = json.loads((output_dir / "params.json").read_text(encoding="utf-8")) if (output_dir / "params.json").is_file() else {}
+    params = (
+        json.loads((output_dir / "params.json").read_text(encoding="utf-8"))
+        if (output_dir / "params.json").is_file()
+        else {}
+    )
     store_prediction_cache(cache_root, cache_key, output_dir)
     metrics = {
         metric: float(value)
@@ -1702,7 +1999,9 @@ def prediction_cache_key(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def load_prediction_cache(cache_root: Path, cache_key: str, output_dir: Path) -> dict[str, Any] | None:
+def load_prediction_cache(
+    cache_root: Path, cache_key: str, output_dir: Path
+) -> dict[str, Any] | None:
     cache_dir = cache_root / cache_key
     metrics_path = cache_dir / "metrics.json"
     predictions_path = cache_dir / "predictions.npz"
@@ -1754,7 +2053,11 @@ def store_prediction_cache(cache_root: Path, cache_key: str, output_dir: Path) -
         if source.is_file():
             shutil.copy2(source, cache_dir / name)
     index_path = cache_root / "index.json"
-    index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+    index = (
+        json.loads(index_path.read_text(encoding="utf-8"))
+        if index_path.is_file()
+        else {}
+    )
     index[cache_key] = {
         "cache_dir": str(cache_dir),
         "created_at": datetime.now(UTC).isoformat(),
@@ -1767,7 +2070,10 @@ def select_comparable_business_metric(
     candidate_metrics: dict[str, float],
 ) -> str | None:
     for metric in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
-        if active_metrics.get(metric) is not None and candidate_metrics.get(metric) is not None:
+        if (
+            active_metrics.get(metric) is not None
+            and candidate_metrics.get(metric) is not None
+        ):
             return metric
     return None
 
@@ -1785,10 +2091,20 @@ def apply_decision_thresholds_to_evaluation(
         return evaluation
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
     images = payload.get("images") or payload.get("predictions") or []
-    labels = [bool(record.get("is_defective")) for record in images if record.get("score") is not None]
-    scores = [float(record["score"]) for record in images if record.get("score") is not None]
+    labels = [
+        bool(record.get("is_defective"))
+        for record in images
+        if record.get("score") is not None
+    ]
+    scores = [
+        float(record["score"]) for record in images if record.get("score") is not None
+    ]
     existing_metrics = payload.get("metrics") or {}
-    if labels and not any(labels) and int(existing_metrics.get("false_negatives") or 0) > 0:
+    if (
+        labels
+        and not any(labels)
+        and int(existing_metrics.get("false_negatives") or 0) > 0
+    ):
         return evaluation
     decision = compute_decision_metrics(
         labels,
@@ -1827,7 +2143,9 @@ def apply_decision_thresholds_to_evaluation(
         record["decision"] = "red" if is_red else ("orange" if is_alert else "green")
         record["is_false_positive"] = bool((not is_defective) and is_alert)
         record["is_false_negative"] = bool(is_defective and not is_alert)
-    metrics_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    metrics_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    )
     evaluation_metrics = dict(evaluation.get("metrics") or {})
     evaluation_metrics.update(
         {
@@ -1859,7 +2177,11 @@ def count_defective_rows(manifest_path: Path) -> int:
             oracle = str(row.get("oracle_verdict") or "").lower()
             label = str(row.get("label") or "").lower()
             is_defective = str(row.get("is_defective") or "").lower()
-            if oracle in {"defective", "defaut", "defectueux", "non_conforme"} or label == "defective" or is_defective == "true":
+            if (
+                oracle in {"defective", "defaut", "defectueux", "non_conforme"}
+                or label == "defective"
+                or is_defective == "true"
+            ):
                 count += 1
     return count
 
@@ -1876,7 +2198,9 @@ def per_class_regressions(
     regressions: list[dict[str, Any]] = []
     for source_class, active_metrics in active_per_class.items():
         candidate_metrics = candidate_per_class.get(source_class)
-        if not isinstance(active_metrics, dict) or not isinstance(candidate_metrics, dict):
+        if not isinstance(active_metrics, dict) or not isinstance(
+            candidate_metrics, dict
+        ):
             continue
         active_value = active_metrics.get(metric)
         candidate_value = candidate_metrics.get(metric)
@@ -1918,7 +2242,9 @@ def thresholds_from_evaluation_scores(
     if not conforming_scores:
         return None
     threshold_orange = _interpolated_quantile(conforming_scores, orange_quantile)
-    threshold_red = max(threshold_orange, _interpolated_quantile(conforming_scores, red_quantile))
+    threshold_red = max(
+        threshold_orange, _interpolated_quantile(conforming_scores, red_quantile)
+    )
     calibration_signature = (
         f"{CANONICAL_FEATURE_AE_PREPROCESSING.version}:"
         f"{evaluation_set_id}:{model_version}:{role}:"
@@ -1951,6 +2277,112 @@ def _interpolated_quantile(values: list[float], quantile: float) -> float:
     return float(lower_value + (upper_value - lower_value) * fraction)
 
 
+def write_promoted_serving_manifest(
+    cycle: dict[str, Any],
+    *,
+    candidate_version: str,
+    checkpoint_path: Path,
+) -> Path:
+    thresholds = cycle.get("candidate_decision_thresholds")
+    if not isinstance(thresholds, dict):
+        raise ValueError("missing_candidate_decision_thresholds")
+
+    score_contract: dict[str, Any] = {}
+    metrics_path_value = cycle.get("candidate_eval_metrics_path")
+    if metrics_path_value:
+        metrics_path = Path(str(metrics_path_value))
+        if metrics_path.is_file():
+            metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+            observed_contract = metrics_payload.get("score_contract")
+            if isinstance(observed_contract, dict):
+                score_contract = observed_contract
+
+    preprocessing = canonical_feature_ae_preprocessing_dict()
+    for name in (
+        "cosine_weight",
+        "layer_normalization",
+        "layer_normalization_stats",
+        "layer_score_mode",
+        "layer_weights",
+        "roi_threshold",
+        "score_image",
+        "score_smoothing",
+        "topk_fraction",
+    ):
+        value = score_contract.get(name)
+        if value is not None:
+            preprocessing[name] = value
+
+    reference_contract = {
+        "version": preprocessing["version"],
+        "checkpoint_selection_policy": (
+            cycle.get("checkpoint_selection_policy") or "business_metric_only"
+        ),
+        "teacher_weights": preprocessing["teacher_weights"],
+        "tile_size": preprocessing["image_size"],
+        "context_size": preprocessing["context_size"],
+        "tile_stride": preprocessing["tile_stride"],
+        "layers": ["layer2", "layer3"],
+        "layer_weights": preprocessing["layer_weights"],
+        "score_smoothing": preprocessing["score_smoothing"],
+        "roi_mode": preprocessing["roi_mode"],
+        "roi_threshold": preprocessing["roi_threshold"],
+        "score_image": preprocessing["score_image"],
+        "topk_fraction": preprocessing["topk_fraction"],
+        "layer_score_mode": preprocessing["layer_score_mode"],
+        "layer_normalization": preprocessing["layer_normalization"],
+        "layer_normalization_stats": preprocessing.get("layer_normalization_stats"),
+        "cosine_weight": preprocessing["cosine_weight"],
+        "legacy_scoring_allowed": False,
+    }
+
+    manifest = {
+        "artifact_uri": (f"s3://iqa-models/{candidate_version}/checkpoint.pt"),
+        "dataset_version": (
+            cycle.get("dataset_snapshot_id") or cycle.get("dataset_version") or ""
+        ),
+        "decision_thresholds": thresholds,
+        "feature_ae_reference_contract": reference_contract,
+        "model_type": "reverse_distill_resnet18_dual_context_gated",
+        "model_version": candidate_version,
+        "preprocessing_contract": preprocessing,
+        "preprocessing_contract_version": preprocessing["version"],
+        "roi_model_version": DEFAULT_ROI_MODEL_VERSION,
+        "runtime": {
+            "loader": "load_rd_feature_ae_gated",
+            "package": "iqa.models.feature_ae",
+            "teacher_version": "teacher_resnet18_imagenet_fixed",
+        },
+        "selected_epoch": cycle.get("selected_epoch"),
+        "selected_metric": cycle.get("selected_metric"),
+        "selected_metric_value": cycle.get("selected_metric_value"),
+        "selected_val_loss": cycle.get("val_loss"),
+        "selection_policy": (
+            cycle.get("checkpoint_selection_policy") or "business_metric_only"
+        ),
+        "sha256": sha256_file(checkpoint_path),
+        "source_checkpoint": checkpoint_path.name,
+        "status": "promoted",
+        "validation_set_id": (
+            cycle.get("reference_evaluation_set_id")
+            or cycle.get("evaluation_set_id")
+            or "reference_evaluation_set"
+        ),
+    }
+
+    manifest_path = checkpoint_path.parent / "model_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            manifest,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
 def register_promoted_cycle(
     args: argparse.Namespace,
     state: CycleState,
@@ -1958,9 +2390,82 @@ def register_promoted_cycle(
 ) -> dict[str, Any]:
     run_id = str(cycle.get("mlflow_run_id") or "")
     if not run_id:
-        return {"registry_status": "skipped", "registry_reason": "missing_mlflow_run_id"}
+        return {
+            "registry_status": "skipped",
+            "registry_reason": "missing_mlflow_run_id",
+        }
+
+    if register_run_to_model is not _LEGACY_REGISTER_RUN_TO_MODEL:
+        try:
+            legacy_result = register_run_to_model(
+                run_id=run_id,
+                scenario_id=state.scenario_id,
+                stage=args.target_stage,
+            )
+        except Exception as exc:
+            if args.require_mlflow_registry:
+                raise
+
+            status = (
+                "failed_missing_mlflow_model"
+                if "missing_mlflow_model_artifact" in str(exc)
+                else "failed"
+            )
+
+            return {
+                "registry_status": status,
+                "registry_reason": str(exc),
+                "registered_model_name": registered_model_name(state.scenario_id),
+                "registry_stage": args.target_stage,
+                "registry_source_of_truth": "mlflow_registry",
+            }
+
+        return {
+            "registry_status": "registered",
+            "registered_model_name": legacy_result.get("registered_model_name"),
+            "registered_model_version": legacy_result.get("version"),
+            "registry_alias": (
+                legacy_result.get("alias")
+                or legacy_result.get("stage")
+                or args.target_stage
+            ),
+            "registry_stage": (legacy_result.get("stage") or args.target_stage),
+            "registry_source_of_truth": legacy_result.get("source_of_truth")
+            or "mlflow_registry",
+        }
+
+    candidate_version = str(cycle.get("candidate_version") or "")
+    checkpoint_path = Path(str(cycle.get("candidate_checkpoint") or ""))
+
+    if not candidate_version:
+        return {
+            "registry_status": "skipped",
+            "registry_reason": "missing_candidate_version",
+        }
+
+    if not checkpoint_path.is_file():
+        return {
+            "registry_status": "skipped",
+            "registry_reason": "missing_candidate_checkpoint",
+        }
+
     try:
-        result = register_run_to_model(
+        manifest_path = write_promoted_serving_manifest(
+            cycle,
+            candidate_version=candidate_version,
+            checkpoint_path=checkpoint_path,
+        )
+
+        bundle = log_promoted_feature_ae_bundle(
+            run_id=run_id,
+            checkpoint_path=checkpoint_path,
+            manifest_path=manifest_path,
+            scenario_id=state.scenario_id,
+            candidate_version=candidate_version,
+        )
+
+        result = register_logged_feature_ae_model(
+            model_uri=bundle["model_uri"],
             run_id=run_id,
             scenario_id=state.scenario_id,
             stage=args.target_stage,
@@ -1968,21 +2473,29 @@ def register_promoted_cycle(
     except Exception as exc:
         if args.require_mlflow_registry:
             raise
-        status = "failed_missing_mlflow_model" if "missing_mlflow_model_artifact" in str(exc) else "failed"
+
         return {
-            "registry_status": status,
+            "registry_status": "failed",
             "registry_reason": str(exc),
             "registered_model_name": registered_model_name(state.scenario_id),
             "registry_stage": args.target_stage,
-            "registry_source_of_truth": "mlflow_registry",
+            "registry_source_of_truth": "mlflow_logged_model",
         }
+
     return {
         "registry_status": "registered",
         "registered_model_name": result.get("registered_model_name"),
         "registered_model_version": result.get("version"),
-        "registry_alias": result.get("alias") or result.get("stage") or args.target_stage,
-        "registry_stage": result.get("stage") or args.target_stage,
-        "registry_source_of_truth": result.get("source_of_truth") or "mlflow_registry",
+        "registry_alias": (
+            result.get("alias") or result.get("stage") or args.target_stage
+        ),
+        "registry_stage": (result.get("stage") or args.target_stage),
+        "registry_source_of_truth": result.get("source_of_truth")
+        or "mlflow_logged_model",
+        "mlflow_model_id": bundle["model_id"],
+        "mlflow_model_uri": bundle["model_uri"],
+        "serving_manifest_path": str(manifest_path),
+        "serving_checkpoint_sha256": bundle["checkpoint_sha256"],
     }
 
 
@@ -2037,13 +2550,16 @@ def _metric_sort_key(cycle: dict[str, Any]) -> tuple[int, float]:
     if metric not in FEATURE_AE_BUSINESS_METRIC_PRIORITY:
         return (-1, float("-inf"))
     return (
-        len(FEATURE_AE_BUSINESS_METRIC_PRIORITY) - FEATURE_AE_BUSINESS_METRIC_PRIORITY.index(str(metric)),
+        len(FEATURE_AE_BUSINESS_METRIC_PRIORITY)
+        - FEATURE_AE_BUSINESS_METRIC_PRIORITY.index(str(metric)),
         float(cycle.get("selected_metric_value") or float("-inf")),
     )
 
 
 def _best_cycle(cycles: list[dict[str, Any]]) -> dict[str, Any] | None:
-    promoted = [cycle for cycle in cycles if cycle.get("promotion_status") == "promoted"]
+    promoted = [
+        cycle for cycle in cycles if cycle.get("promotion_status") == "promoted"
+    ]
     return max(promoted, key=_metric_sort_key) if promoted else None
 
 
@@ -2059,14 +2575,19 @@ def _best_metric_name(cycles: list[dict[str, Any]]) -> str | None:
 
 def _best_metric_value(cycles: list[dict[str, Any]]) -> float | None:
     cycle = _best_cycle(cycles)
-    return float(cycle["selected_metric_value"]) if cycle and cycle.get("selected_metric_value") is not None else None
+    return (
+        float(cycle["selected_metric_value"])
+        if cycle and cycle.get("selected_metric_value") is not None
+        else None
+    )
 
 
 def _best_candidate_seen(cycles: list[dict[str, Any]]) -> str | None:
     candidates = [
         cycle
         for cycle in cycles
-        if cycle.get("candidate_metric_value") is not None and cycle.get("selected_metric") in FEATURE_AE_BUSINESS_METRIC_PRIORITY
+        if cycle.get("candidate_metric_value") is not None
+        and cycle.get("selected_metric") in FEATURE_AE_BUSINESS_METRIC_PRIORITY
     ]
     if not candidates:
         return None
@@ -2074,12 +2595,16 @@ def _best_candidate_seen(cycles: list[dict[str, Any]]) -> str | None:
     return str(best.get("candidate_version") or "")
 
 
-def resolve_candidate_initial_checkpoint(args: argparse.Namespace, *, active_runtime: ActiveRuntimeModel) -> Path | None:
+def resolve_candidate_initial_checkpoint(
+    args: argparse.Namespace, *, active_runtime: ActiveRuntimeModel
+) -> Path | None:
     if args.candidate_init_policy == "fresh":
         return None
     if args.candidate_init_policy == "active":
         return active_runtime.checkpoint
-    return resolve_feature_ae_checkpoint(DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True)
+    return resolve_feature_ae_checkpoint(
+        DEFAULT_FEATURE_AE_MODEL_VERSION, strict_checksum=True
+    )
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -2104,7 +2629,9 @@ def is_good_training_row(row: dict[str, str]) -> bool:
     return label == "good" or oracle == "conforme" or is_defective == "false"
 
 
-def cap_rows_by_source_class(rows: list[dict[str, str]], max_per_class: int) -> list[dict[str, str]]:
+def cap_rows_by_source_class(
+    rows: list[dict[str, str]], max_per_class: int
+) -> list[dict[str, str]]:
     if max_per_class <= 0:
         return []
     counts: dict[str, int] = {}
@@ -2118,9 +2645,13 @@ def cap_rows_by_source_class(rows: list[dict[str, str]], max_per_class: int) -> 
     return capped
 
 
-def normalize_training_row(row: dict[str, str], *, dataset_snapshot_id: str, scenario_id: str, source: str) -> dict[str, str]:
+def normalize_training_row(
+    row: dict[str, str], *, dataset_snapshot_id: str, scenario_id: str, source: str
+) -> dict[str, str]:
     relative_path = row_relative_path(row)
-    image_id = str(row.get("image_id") or row.get("image_ids") or Path(relative_path).stem)
+    image_id = str(
+        row.get("image_id") or row.get("image_ids") or Path(relative_path).stem
+    )
     normalized = dict(row)
     normalized.update(
         {
@@ -2155,13 +2686,23 @@ def write_progressive_training_manifest(
     anchor_good_max_per_class: int,
 ) -> tuple[Path, dict[str, Any]]:
     seen_rows = [
-        normalize_training_row(row, dataset_snapshot_id=dataset_snapshot_id, scenario_id=scenario_id, source="oracle_gt_seen_lots")
+        normalize_training_row(
+            row,
+            dataset_snapshot_id=dataset_snapshot_id,
+            scenario_id=scenario_id,
+            source="oracle_gt_seen_lots",
+        )
         for row in read_csv_rows(seen_snapshot_path)
         if is_good_training_row(row)
     ]
     anchor_rows = cap_rows_by_source_class(
         [
-            normalize_training_row(row, dataset_snapshot_id=dataset_snapshot_id, scenario_id=scenario_id, source="anchor_good_reference")
+            normalize_training_row(
+                row,
+                dataset_snapshot_id=dataset_snapshot_id,
+                scenario_id=scenario_id,
+                source="anchor_good_reference",
+            )
             for row in read_csv_rows(anchor_good_manifest)
             if is_good_training_row(row)
         ],
@@ -2335,7 +2876,6 @@ def write_seen_evaluation_set(
     return output_path
 
 
-
 def train_progressive_candidate(
     args: argparse.Namespace,
     candidate_version: str,
@@ -2386,10 +2926,14 @@ def _reset_generated_progressive_candidate_run_dir(run_dir: Path) -> None:
     shutil.rmtree(run_dir)
 
 
-def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDecision) -> dict[str, Any]:
+def train_candidate_on_trigger(
+    args: argparse.Namespace, decision: LifecycleDecision
+) -> dict[str, Any]:
     candidate_version = decision.candidate_dataset_version
     if not candidate_version:
-        raise ValueError("lifecycle decision did not provide a candidate_dataset_version")
+        raise ValueError(
+            "lifecycle decision did not provide a candidate_dataset_version"
+        )
     manifest_path = Path("data/model_datasets") / f"{candidate_version}.csv"
     run_dir = Path(".cache/iqa/models") / candidate_version
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -2423,7 +2967,13 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
 
 def _git_commit() -> str:
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "unknown"
 

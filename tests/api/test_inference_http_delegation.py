@@ -165,3 +165,77 @@ def test_call_inference_service_preserves_422_from_inference(
 
     assert caught.value.status_code == 422
     assert caught.value.detail["error_code"] == "inference_input_invalid"
+
+def _valid_reload_payload() -> dict:
+    return {
+        "accepted": True,
+        "reload_status": "reloaded",
+        "source_of_truth": "mlflow_registry",
+        "previous": {
+            "feature_ae_version": (
+                "rd_feature_ae_gated_v001_bootstrap"
+            ),
+        },
+        "active": {
+            "scenario_id": "production_replay_natural",
+            "feature_ae_version": "candidate_v12",
+            "roi_model_version": "roi_segmenter_v001_fixed",
+            "registry_version": "12",
+            "model_uri": "models:/m-serving-test",
+            "model_id": "m-serving-test",
+        },
+    }
+
+
+def test_call_inference_reload_returns_active_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "IQA_INFERENCE_URL",
+        "http://iqa-inference:8100",
+    )
+    monkeypatch.setattr(
+        api,
+        "urlopen",
+        lambda request, timeout: FakeResponse(
+            _valid_reload_payload()
+        ),
+    )
+
+    result = api._call_inference_reload(
+        api.ReloadModelRequest(
+            scenario_id="production_replay_natural",
+            stage="prod",
+        ),
+        "secret",
+    )
+
+    assert result["reload_status"] == "reloaded"
+    assert (
+        result["active"]["feature_ae_version"]
+        == "candidate_v12"
+    )
+
+
+def test_call_inference_reload_maps_connection_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(request, timeout):
+        raise URLError("connection refused")
+
+    monkeypatch.setattr(api, "urlopen", fail)
+
+    with pytest.raises(HTTPException) as caught:
+        api._call_inference_reload(
+            api.ReloadModelRequest(
+                scenario_id="production_replay_natural",
+                stage="prod",
+            ),
+            "secret",
+        )
+
+    assert caught.value.status_code == 503
+    assert (
+        caught.value.detail["error_code"]
+        == "inference_service_unavailable"
+    )

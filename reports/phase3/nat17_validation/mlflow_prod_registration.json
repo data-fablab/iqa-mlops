@@ -1,0 +1,29 @@
+{
+  "bundle": {
+    "candidate_version": "rd_feature_ae_gated_natural_cycle_004",
+    "checkpoint_sha256": "e17b789906dc4b1cc16861afe64c648e4c229e90e0e12a1e1334bcfd80b4df20",
+    "model_id": "m-414e88fca7c34db9ab98ec61645f725d",
+    "model_uri": "models:/m-414e88fca7c34db9ab98ec61645f725d",
+    "run_id": "682db6637d654d08983581ced5702975"
+  },
+  "candidate_version": "rd_feature_ae_gated_natural_cycle_004",
+  "manifest_path": ".cache/iqa/nat17_live_bundle/model_manifest.json",
+  "prod_alias": {
+    "model_id": null,
+    "name": "feature_ae__production_replay_natural",
+    "run_id": "682db6637d654d08983581ced5702975",
+    "source": "models:/m-414e88fca7c34db9ab98ec61645f725d",
+    "version": "10"
+  },
+  "registry": {
+    "alias": "prod",
+    "model_id": "m-414e88fca7c34db9ab98ec61645f725d",
+    "model_uri": "models:/m-414e88fca7c34db9ab98ec61645f725d",
+    "registered_model_name": "feature_ae__production_replay_natural",
+    "source_of_truth": "mlflow_logged_model",
+    "stage": "prod",
+    "version": "10"
+  },
+  "run_id": "682db6637d654d08983581ced5702975",
+  "scenario_id": "production_replay_natural"
+}

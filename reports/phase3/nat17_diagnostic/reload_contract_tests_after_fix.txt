@@ -1,0 +1,301 @@
+...F                                                                     [100%]
+=================================== FAILURES ===================================
+_______ test_admin_reload_security_accepts_valid_token_and_writes_audit ________
+
+self = <urllib.request.HTTPHandler object at 0x7a57be7c02f0>
+http_class = <class 'http.client.HTTPConnection'>
+req = <urllib.request.Request object at 0x7a57be7c0410>, http_conn_args = {}
+host = 'iqa-inference:8100'
+h = <http.client.HTTPConnection object at 0x7a5739b37fb0>
+headers = {'Connection': 'close', 'Content-Length': '40', 'Content-Type': 'application/json', 'Host': 'iqa-inference:8100', ...}
+
+    def do_open(self, http_class, req, **http_conn_args):
+        """Return an HTTPResponse object for the request, using http_class.
+
+        http_class must implement the HTTPConnection API from http.client.
+        """
+        host = req.host
+        if not host:
+            raise URLError('no host given')
+
+        # will parse host:port
+        h = http_class(host, timeout=req.timeout, **http_conn_args)
+        h.set_debuglevel(self._debuglevel)
+
+        headers = dict(req.unredirected_hdrs)
+        headers.update({k: v for k, v in req.headers.items()
+                        if k not in headers})
+
+        # TODO(jhylton): Should this be redesigned to handle
+        # persistent connections?
+
+        # We want to make an HTTP/1.1 request, but the addinfourl
+        # class isn't prepared to deal with a persistent connection.
+        # It will try to read all remaining data from the socket,
+        # which will block while the server waits for the next request.
+        # So make sure the connection gets closed after the (only)
+        # request.
+        headers["Connection"] = "close"
+        headers = {name.title(): val for name, val in headers.items()}
+
+        if req._tunnel_host:
+            tunnel_headers = {}
+            proxy_auth_hdr = "Proxy-Authorization"
+            if proxy_auth_hdr in headers:
+                tunnel_headers[proxy_auth_hdr] = headers[proxy_auth_hdr]
+                # Proxy-Authorization should not be sent to origin
+                # server.
+                del headers[proxy_auth_hdr]
+            h.set_tunnel(req._tunnel_host, headers=tunnel_headers)
+
+        try:
+            try:
+>               h.request(req.get_method(), req.selector, req.data, headers,
+                          encode_chunked=req.has_header('Transfer-encoding'))
+
+/usr/lib/python3.12/urllib/request.py:1344:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/http/client.py:1356: in request
+    self._send_request(method, url, body, headers, encode_chunked)
+/usr/lib/python3.12/http/client.py:1402: in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+/usr/lib/python3.12/http/client.py:1351: in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+/usr/lib/python3.12/http/client.py:1111: in _send_output
+    self.send(msg)
+/usr/lib/python3.12/http/client.py:1055: in send
+    self.connect()
+/usr/lib/python3.12/http/client.py:1021: in connect
+    self.sock = self._create_connection(
+/usr/lib/python3.12/socket.py:828: in create_connection
+    for res in getaddrinfo(host, port, 0, SOCK_STREAM):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+host = 'iqa-inference', port = 8100, family = 0
+type = <SocketKind.SOCK_STREAM: 1>, proto = 0, flags = 0
+
+    def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        """Resolve host and port into list of address info entries.
+
+        Translate the host/port argument into a sequence of 5-tuples that contain
+        all the necessary arguments for creating a socket connected to that service.
+        host is a domain name, a string representation of an IPv4/v6 address or
+        None. port is a string service name such as 'http', a numeric port number or
+        None. By passing None as the value of host and port, you can pass NULL to
+        the underlying C API.
+
+        The family, type and proto arguments can be optionally specified in order to
+        narrow the list of addresses returned. Passing zero as a value for each of
+        these arguments selects the full range of results.
+        """
+        # We override this function since we want to translate the numeric family
+        # and socket type values to enum constants.
+        addrlist = []
+>       for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       socket.gaierror: [Errno -3] Temporary failure in name resolution
+
+/usr/lib/python3.12/socket.py:963: gaierror
+
+During handling of the above exception, another exception occurred:
+
+request = ReloadModelRequest(scenario_id='demo', stage=<ModelStage.prod: 'prod'>, requested_by=None, reason=None)
+admin_token = 'secret'
+
+    def _call_inference_reload(
+        request: ReloadModelRequest,
+        admin_token: str,
+    ) -> dict[str, Any]:
+        base_url = os.environ.get(
+            "IQA_INFERENCE_URL",
+            "http://iqa-inference:8100",
+        ).strip().rstrip("/")
+
+        if not base_url:
+            _raise_api_error(
+                status_code=503,
+                error_code="inference_service_configuration_error",
+                message="Inference service URL is not configured.",
+                reason="IQA_INFERENCE_URL is empty.",
+                details={"path": "/admin/reload-model"},
+            )
+
+        timeout_raw = os.environ.get(
+            "IQA_INFERENCE_RELOAD_TIMEOUT_SECONDS",
+            "300",
+        )
+        try:
+            timeout = float(timeout_raw)
+        except ValueError:
+            _raise_api_error(
+                status_code=503,
+                error_code="inference_service_configuration_error",
+                message="Inference reload timeout is invalid.",
+                reason=(
+                    "Invalid IQA_INFERENCE_RELOAD_TIMEOUT_SECONDS: "
+                    f"{timeout_raw!r}."
+                ),
+                details={"path": "/admin/reload-model"},
+            )
+            raise AssertionError("unreachable")
+
+        if timeout <= 0:
+            _raise_api_error(
+                status_code=503,
+                error_code="inference_service_configuration_error",
+                message="Inference reload timeout is invalid.",
+                reason=(
+                    "IQA_INFERENCE_RELOAD_TIMEOUT_SECONDS "
+                    "must be greater than zero."
+                ),
+                details={"path": "/admin/reload-model"},
+            )
+
+        payload = {
+            "scenario_id": request.scenario_id,
+            "stage": getattr(request.stage, "value", request.stage),
+        }
+        http_request = UrlRequest(
+            f"{base_url}/admin/reload-model",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-IQA-Admin-Token": admin_token,
+            },
+            method="POST",
+        )
+
+        try:
+>           with urlopen(http_request, timeout=timeout) as response:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/iqa/api/main.py:220:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/urllib/request.py:215: in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:515: in open
+    response = self._open(req, data)
+               ^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:532: in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+/usr/lib/python3.12/urllib/request.py:492: in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:1373: in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <urllib.request.HTTPHandler object at 0x7a57be7c02f0>
+http_class = <class 'http.client.HTTPConnection'>
+req = <urllib.request.Request object at 0x7a57be7c0410>, http_conn_args = {}
+host = 'iqa-inference:8100'
+h = <http.client.HTTPConnection object at 0x7a5739b37fb0>
+headers = {'Connection': 'close', 'Content-Length': '40', 'Content-Type': 'application/json', 'Host': 'iqa-inference:8100', ...}
+
+    def do_open(self, http_class, req, **http_conn_args):
+        """Return an HTTPResponse object for the request, using http_class.
+
+        http_class must implement the HTTPConnection API from http.client.
+        """
+        host = req.host
+        if not host:
+            raise URLError('no host given')
+
+        # will parse host:port
+        h = http_class(host, timeout=req.timeout, **http_conn_args)
+        h.set_debuglevel(self._debuglevel)
+
+        headers = dict(req.unredirected_hdrs)
+        headers.update({k: v for k, v in req.headers.items()
+                        if k not in headers})
+
+        # TODO(jhylton): Should this be redesigned to handle
+        # persistent connections?
+
+        # We want to make an HTTP/1.1 request, but the addinfourl
+        # class isn't prepared to deal with a persistent connection.
+        # It will try to read all remaining data from the socket,
+        # which will block while the server waits for the next request.
+        # So make sure the connection gets closed after the (only)
+        # request.
+        headers["Connection"] = "close"
+        headers = {name.title(): val for name, val in headers.items()}
+
+        if req._tunnel_host:
+            tunnel_headers = {}
+            proxy_auth_hdr = "Proxy-Authorization"
+            if proxy_auth_hdr in headers:
+                tunnel_headers[proxy_auth_hdr] = headers[proxy_auth_hdr]
+                # Proxy-Authorization should not be sent to origin
+                # server.
+                del headers[proxy_auth_hdr]
+            h.set_tunnel(req._tunnel_host, headers=tunnel_headers)
+
+        try:
+            try:
+                h.request(req.get_method(), req.selector, req.data, headers,
+                          encode_chunked=req.has_header('Transfer-encoding'))
+            except OSError as err: # timeout error
+>               raise URLError(err)
+E               urllib.error.URLError: <urlopen error [Errno -3] Temporary failure in name resolution>
+
+/usr/lib/python3.12/urllib/request.py:1347: URLError
+
+During handling of the above exception, another exception occurred:
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a57be7c0350>
+
+    def test_admin_reload_security_accepts_valid_token_and_writes_audit(monkeypatch: pytest.MonkeyPatch) -> None:
+        ADMIN_RELOAD_LOG.clear()
+        monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
+
+>       response = reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/security/test_api_security_contracts.py:202:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/iqa/api/main.py:1675: in reload_model
+    inference_reload = _call_inference_reload(
+src/iqa/api/main.py:289: in _call_inference_reload
+    _raise_api_error(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _raise_api_error(
+        *,
+        status_code: int,
+        error_code: str,
+        message: str,
+        reason: str | None = None,
+        incident_type: str | None = None,
+        audit_logged: bool = False,
+        reload_event_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+>       raise HTTPException(
+            status_code=status_code,
+            detail=_api_error_detail(
+                status_code=status_code,
+                error_code=error_code,
+                message=message,
+                reason=reason,
+                incident_type=incident_type,
+                audit_logged=audit_logged,
+                reload_event_id=reload_event_id,
+                details=details,
+            ),
+        )
+E       fastapi.exceptions.HTTPException: 503: {'error_code': 'inference_service_unavailable', 'message': 'Inference service is unavailable.', 'status_code': 503, 'reason': '[Errno -3] Temporary failure in name resolution', 'audit_logged': False, 'details': {'path': '/admin/reload-model'}}
+
+src/iqa/api/main.py:578: HTTPException
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/mlflow/types/type_hints.py:385
+  /opt/iqa/worktrees/iqa_nat17_mlflow_runtime_reload/.venv/lib/python3.12/site-packages/mlflow/types/type_hints.py:385: UserWarning: [1;33mAny type hint is inferred as AnyType, and MLflow doesn't validate the data for this type. Please use a more specific type hint to enable data validation.[0m
+    col_spec_type = _infer_colspec_type_from_type_hint(type_hint)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/security/test_api_security_contracts.py::test_admin_reload_security_accepts_valid_token_and_writes_audit
+1 failed, 3 passed, 1 warning in 6.44s
