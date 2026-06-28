@@ -2449,7 +2449,11 @@ def train_candidate_on_trigger(args: argparse.Namespace, decision: LifecycleDeci
         candidate_version=candidate_version,
         roi_model_version=DEFAULT_ROI_MODEL_VERSION,
         feature_ae_version=DEFAULT_FEATURE_AE_MODEL_VERSION,
-        run_name=f"{candidate_version}_{args.stage}",
+        # Distinguishable per-retrain name: the warm-start candidate_version is a
+        # constant (feature_ae_good_v003), so name by the triggering class + a
+        # timestamp instead -- otherwise every drift retrain shows the same name in
+        # the iqa-model-quality experiment and class2 vs class3 are indistinguishable.
+        run_name=f"feature_ae_{getattr(args, 'triggering_class', None) or 'drift'}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}",
         device=args.device,
         batch_size=args.batch_size,
         epochs=args.epochs,
@@ -2513,6 +2517,46 @@ def _reload_inference_model() -> dict[str, Any]:
         return {"ok": False, "reason": str(exc)}
 
 
+def _tag_trigger_run_promotion(
+    run_id: str,
+    *,
+    promotion_status: str,
+    triggering_class: str | None,
+    image_ap: float | None,
+    warm_started: bool,
+) -> None:
+    """Tag the train-on-trigger MLflow run with the promotion outcome.
+
+    Makes the ``iqa-model-quality`` experiment readable at a glance for an
+    audience: ``triggering_class`` (which class caused the retrain),
+    ``promotion_status`` (promoted vs rejected_*), and ``is_champion`` (the single
+    current serving model -- prior champions are demoted so exactly one is true).
+    Add these as columns in the MLflow runs table.
+    """
+    if not run_id:
+        return
+    try:
+        import mlflow
+
+        client = mlflow.tracking.MlflowClient()
+        is_champion = promotion_status == "promoted"
+        if is_champion:
+            run = client.get_run(run_id)
+            for prev in client.search_runs(
+                [run.info.experiment_id], filter_string="tags.is_champion = 'true'"
+            ):
+                if prev.info.run_id != run_id:
+                    client.set_tag(prev.info.run_id, "is_champion", "false")
+        client.set_tag(run_id, "promotion_status", promotion_status)
+        client.set_tag(run_id, "is_champion", "true" if is_champion else "false")
+        client.set_tag(run_id, "triggering_class", triggering_class or "unknown")
+        client.set_tag(run_id, "warm_started", "true" if warm_started else "false")
+        if image_ap is not None:
+            client.set_tag(run_id, "gate_image_ap", f"{image_ap:.4f}")
+    except Exception as exc:  # noqa: BLE001 - tagging is best-effort observability
+        print(f"mlflow trigger tagging skipped: {exc}")
+
+
 def promote_refresh_reload_on_trigger(
     args: argparse.Namespace,
     state: CycleState,
@@ -2523,42 +2567,53 @@ def promote_refresh_reload_on_trigger(
     Closes the autonomous drift-recovery loop for ``train-on-trigger``: a
     warm-started candidate that clears the floor is promoted, the active
     Feature-AE + PatchCore bank are rebuilt for the extended coverage, and the
-    inference is told to reload so the newly-covered class recovers to Vert.
+    inference is told to reload so the newly-covered class recovers to Vert. The
+    final ``promotion_status`` is always tagged back onto the MLflow run.
     """
+    run_id = str(train_result.get("run_id") or "")
     run_dir = Path(str(train_result.get("run_dir") or ""))
     metrics = _candidate_business_metrics(run_dir) if run_dir.parts else {}
     image_ap = metrics.get("image_ap")
     warm_started = bool(train_result.get("warm_started"))
 
-    gate_ok = warm_started and (image_ap is None or image_ap >= TRIGGER_PROMOTION_MIN_IMAGE_AP)
-    if not gate_ok:
-        state.promotion_status = "rejected_below_floor" if warm_started else "rejected_not_warm_started"
-        print(
-            f"train-on-trigger NOT promoted ({state.promotion_status}): "
-            f"warm_started={warm_started} image_ap={image_ap}"
+    try:
+        gate_ok = warm_started and (image_ap is None or image_ap >= TRIGGER_PROMOTION_MIN_IMAGE_AP)
+        if not gate_ok:
+            state.promotion_status = "rejected_below_floor" if warm_started else "rejected_not_warm_started"
+            print(
+                f"train-on-trigger NOT promoted ({state.promotion_status}): "
+                f"warm_started={warm_started} image_ap={image_ap}"
+            )
+            return
+
+        state.promotion_status = "promoted"
+        state.status = "promoted"
+        print(f"train-on-trigger PROMOTED: image_ap={image_ap} triggering_class={state.triggering_class}")
+
+        summary_for_refresh = {
+            "promotion_status": "promoted",
+            "candidate_checkpoint": state.candidate_checkpoint,
+            "triggering_class": state.triggering_class,
+            "trigger_reason": state.trigger_decision.trigger_reason if state.trigger_decision else "drift",
+        }
+        refresh = refresh_active_artifacts(summary_for_refresh, Path(".cache/iqa/models"))
+        print(f"refresh_active_artifacts: status={refresh.status} covered={refresh.covered_classes} reason={refresh.reason}")
+        if refresh.status != "refreshed":
+            state.promotion_status = f"promoted_refresh_{refresh.status}"
+            return
+
+        reload_result = _reload_inference_model()
+        print(f"inference reload: {reload_result}")
+        if not reload_result.get("ok"):
+            state.promotion_status = "promoted_reload_failed"
+    finally:
+        _tag_trigger_run_promotion(
+            run_id,
+            promotion_status=state.promotion_status,
+            triggering_class=state.triggering_class,
+            image_ap=image_ap,
+            warm_started=warm_started,
         )
-        return
-
-    state.promotion_status = "promoted"
-    state.status = "promoted"
-    print(f"train-on-trigger PROMOTED: image_ap={image_ap} triggering_class={state.triggering_class}")
-
-    summary_for_refresh = {
-        "promotion_status": "promoted",
-        "candidate_checkpoint": state.candidate_checkpoint,
-        "triggering_class": state.triggering_class,
-        "trigger_reason": state.trigger_decision.trigger_reason if state.trigger_decision else "drift",
-    }
-    refresh = refresh_active_artifacts(summary_for_refresh, Path(".cache/iqa/models"))
-    print(f"refresh_active_artifacts: status={refresh.status} covered={refresh.covered_classes} reason={refresh.reason}")
-    if refresh.status != "refreshed":
-        state.promotion_status = f"promoted_refresh_{refresh.status}"
-        return
-
-    reload_result = _reload_inference_model()
-    print(f"inference reload: {reload_result}")
-    if not reload_result.get("ok"):
-        state.promotion_status = "promoted_reload_failed"
 
 
 def _git_commit() -> str:
