@@ -26,6 +26,13 @@ services:
       # first connection (src/iqa/metadata/postgres.py).
       IQA_METADATA_BACKEND: "postgres"
       IQA_METADATA_DB_URL: "postgresql://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/iqa_metadata"
+      # Active PatchCore manifest so /metrics can report live domain coverage.
+      IQA_DOMAIN_DRIFT_DIR: "/opt/iqa/models/patchcore_domain_drift_active"
+    volumes:
+      # Static bootstrap manifests -> fixes iqa_active_model_info showing "missing".
+      - ../models:/app/models:ro
+      # Active artifacts (lifecycle-updated) -> iqa_active_coverage_info covered_classes.
+      - ../.cache/iqa/models:/opt/iqa/models:ro
 
   iqa-inference:
     environment:

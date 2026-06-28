@@ -1160,6 +1160,18 @@ def metrics() -> str:
             f'roi_model_version="{_active_model_version(ROI_MANIFEST)}"'
             "} 1"
         ),
+        # Evolving domain coverage of the live PatchCore detector: the value is the
+        # number of covered casting classes and the label lists them. Grows class1
+        # -> class1,class2 -> class1,class2,class3 as the lifecycle promotes, so the
+        # dashboard can show *which* model/coverage is actually serving.
+        "# HELP iqa_active_coverage_info Casting classes covered by the active PatchCore detector (value = count)",
+        "# TYPE iqa_active_coverage_info gauge",
+        (
+            "iqa_active_coverage_info{"
+            f'covered_classes="{_active_covered_classes_label()}",'
+            f'patchcore_version="{_active_model_version(ACTIVE_PATCHCORE_MANIFEST)}"'
+            f"}} {_active_covered_classes_count()}"
+        ),
     ]
     lines.extend(_filtered_metrics_lines())
     return "\n".join(lines) + "\n"
@@ -1168,6 +1180,27 @@ def metrics() -> str:
 def _active_model_version(manifest_path: Path) -> str:
     manifest = _read_manifest(manifest_path)
     return str(manifest.get("model_version") or manifest.get("version") or "unknown")
+
+
+# Active PatchCore detector manifest (refreshed in place by the lifecycle). Path
+# matches the inference container's IQA_DOMAIN_DRIFT_DIR; override per deploy.
+ACTIVE_PATCHCORE_MANIFEST = Path(
+    os.environ.get("IQA_DOMAIN_DRIFT_DIR", "/opt/iqa/models/patchcore_domain_drift_active")
+) / "model_manifest.json"
+
+
+def _active_covered_classes() -> list[str]:
+    classes = _read_manifest(ACTIVE_PATCHCORE_MANIFEST).get("covered_classes")
+    return [str(c) for c in classes] if isinstance(classes, list) else []
+
+
+def _active_covered_classes_label() -> str:
+    """Comma-separated covered classes for the metric label (``unknown`` if absent)."""
+    return ",".join(_active_covered_classes()) or "unknown"
+
+
+def _active_covered_classes_count() -> int:
+    return len(_active_covered_classes())
 
 
 def _append_admin_reload_log(

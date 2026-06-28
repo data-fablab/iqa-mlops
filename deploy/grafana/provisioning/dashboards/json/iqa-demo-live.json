@@ -1,0 +1,94 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "tags": ["iqa", "demo", "drift", "quality"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "IQA - Demo live (classe & qualite)",
+  "uid": "iqa-demo-live",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Classe casting en cours de drift (out-of-domain par source_class)",
+      "description": "Quelle classe casting est hors-domaine en ce moment. Chaque classe s'allume quand son lot passe et que PatchCore la voit out-of-domain; elle retombe une fois couverte (retrain).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 25, "stacking": { "mode": "none" }, "spanNulls": true },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (source_class) (rate(iqa_domain_drift_total{regime=\"out_of_domain\",source_class!=\"\"}[1m]))",
+          "legendFormat": "{{source_class}} (OOD)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "state-timeline",
+      "title": "Classe casting active dans le flux (bandes par classe)",
+      "description": "Frise temporelle: la bande indique quelle classe casting recoit du trafic. Visuellement, on voit le passage class1 -> class2 -> class3.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 80 }, "mappings": [{ "type": "value", "options": { "0": { "index": 0, "text": "" } } }] }, "overrides": [] },
+      "options": { "showValue": "never", "mergeValues": true, "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (source_class) (rate(iqa_domain_drift_total{source_class!=\"\"}[1m])) > bool 0",
+          "legendFormat": "{{source_class}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Qualite modele a chaque retrain (image_AP / AUROC / pixel_AP / AUPIMO)",
+      "description": "Metriques business loggees dans MLflow (experience iqa-model-quality) a chaque retrain autonome. Les points montent en marche a chaque promotion class2 puis class3.",
+      "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 15 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "pointSize": 8, "showPoints": "always", "spanNulls": true }, "min": 0, "max": 1, "unit": "none" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "mlflow-postgres" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp(m.timestamp/1000) AS time, m.key AS metric, m.value FROM metrics m JOIN runs r ON m.run_uuid = r.run_uuid WHERE r.experiment_id = '1' AND m.key IN ('image_ap','image_auroc','pixel_ap','aupimo','pixel_aupimo_1e-5_1e-3') AND to_timestamp(m.timestamp/1000) BETWEEN $__timeFrom() AND $__timeTo() ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Couverture domaine active (modele PatchCore servi)",
+      "description": "Classes casting couvertes par le detecteur PatchCore actif, lu en direct sur /metrics (iqa_active_coverage_info). Evolue class1 -> class1,class2 -> class1,class2,class3 a chaque promotion.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 25 },
+      "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 2 }, { "color": "green", "value": 3 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" }, "textMode": "value_and_name", "colorMode": "value", "graphMode": "none", "justifyMode": "center" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "iqa_active_coverage_info",
+          "legendFormat": "{{covered_classes}}",
+          "instant": true
+        }
+      ]
+    }
+  ]
+}
