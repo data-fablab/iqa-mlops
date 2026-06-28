@@ -71,9 +71,13 @@ PREDICTION_DECISIONS = ("Vert", "Orange", "Rouge")
 PREDICTION_DECISION_COUNTS: dict[tuple[str, str], int] = {}
 
 # PatchCore domain-drift signal (Issue 12), scored alongside the AE. The counter
-# (by regime) drives the ratio alert; the gauge carries the last score for Grafana.
+# (by regime AND source_class) drives the ratio alert and lets the drift sensor
+# attribute the drift to a class (iqa_drift_sensor._detect_triggering_class); the
+# gauge carries the last score for Grafana. Keyed by (regime, source_class); an
+# empty source_class folds into the label-less baseline series so the demo replay's
+# class2 vs class3 traffic produces distinct, attributable series.
 DOMAIN_REGIMES = ("in_domain", "out_of_domain")
-DOMAIN_DRIFT_REGIME_COUNTS: dict[str, int] = {}
+DOMAIN_DRIFT_REGIME_COUNTS: dict[tuple[str, str], int] = {}
 DOMAIN_DRIFT_METRICS: dict[str, float] = {"last_score": 0.0}
 
 OPTIONAL_METADATA_TRACEABILITY_FIELDS = (
@@ -318,7 +322,10 @@ def _persist_metadata(
 
 
 def _record_prediction_metrics(
-    prediction: dict[str, Any], elapsed_seconds: float, scenario_id: str
+    prediction: dict[str, Any],
+    elapsed_seconds: float,
+    scenario_id: str,
+    source_class: str | None = None,
 ) -> None:
     decision = str(prediction.get("decision", ""))
     if decision in PREDICTION_DECISIONS:
@@ -332,7 +339,8 @@ def _record_prediction_metrics(
     PREDICTION_METRICS["predict_latency_seconds_count"] += 1
     regime = prediction.get("domain_regime")
     if regime in DOMAIN_REGIMES:
-        DOMAIN_DRIFT_REGIME_COUNTS[regime] = DOMAIN_DRIFT_REGIME_COUNTS.get(regime, 0) + 1
+        key = (regime, source_class or "")
+        DOMAIN_DRIFT_REGIME_COUNTS[key] = DOMAIN_DRIFT_REGIME_COUNTS.get(key, 0) + 1
     drift_score = prediction.get("domain_drift_score")
     if drift_score is not None:
         DOMAIN_DRIFT_METRICS["last_score"] = float(drift_score)
@@ -465,7 +473,10 @@ def predict(request: PredictRequest) -> dict[str, Any]:
     if inference_result is None:
         inference_result = placeholder_inference(inference_request)
     _record_prediction_metrics(
-        inference_result.to_dict(), time.perf_counter() - _started, request.scenario_id
+        inference_result.to_dict(),
+        time.perf_counter() - _started,
+        request.scenario_id,
+        request.source_class,
     )
 
     prediction_id = f"pred_{uuid4().hex}"
@@ -1115,11 +1126,21 @@ def metrics() -> str:
             f'iqa_prediction_total{{decision="{decision}",scenario_id="{scenario}"}} {count}'
             for (scenario, decision), count in sorted(PREDICTION_DECISION_COUNTS.items())
         ),
-        "# HELP iqa_domain_drift_total IQA PatchCore domain-drift decisions by regime (in_domain/out_of_domain)",
+        "# HELP iqa_domain_drift_total IQA PatchCore domain-drift decisions by regime (in_domain/out_of_domain) and source_class",
         "# TYPE iqa_domain_drift_total counter",
+        # Baseline series per regime (no source_class) -- always present so the
+        # ratio denominator and Grafana panels have a series even with no traffic.
+        # Counts with an empty source_class fold in here; an empty label equals an
+        # absent one in Prometheus, so this MUST be the only label-less series.
         *(
-            f'iqa_domain_drift_total{{regime="{regime}"}} {DOMAIN_DRIFT_REGIME_COUNTS.get(regime, 0)}'
+            f'iqa_domain_drift_total{{regime="{regime}"}} {DOMAIN_DRIFT_REGIME_COUNTS.get((regime, ""), 0)}'
             for regime in DOMAIN_REGIMES
+        ),
+        # Per-class series (source_class set) -- drives _detect_triggering_class.
+        *(
+            f'iqa_domain_drift_total{{regime="{regime}",source_class="{source_class}"}} {count}'
+            for (regime, source_class), count in sorted(DOMAIN_DRIFT_REGIME_COUNTS.items())
+            if source_class
         ),
         "# HELP iqa_domain_drift_score IQA PatchCore domain-drift score of the last scored piece",
         "# TYPE iqa_domain_drift_score gauge",

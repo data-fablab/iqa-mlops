@@ -124,6 +124,22 @@ def ordered_phases(present: dict[str, list[Sample]]) -> list[str]:
     return known + extra
 
 
+def phase_source_class(phase: str) -> str | None:
+    """Map a replay phase to the dataset ``source_class`` it streams.
+
+    The phase names encode the class (``baseline_domain_class1``,
+    ``domain_extension_class2``, ``domain_extension_class3``); we send that class as
+    ``source_class`` on ``/predict`` so the API can label ``iqa_domain_drift_total``
+    and ``iqa_drift_sensor._detect_triggering_class`` can attribute the drift to the
+    right class (otherwise it falls back to the default and class3 retrains as class2).
+    Returns ``None`` for unrecognised phases (request stays unlabelled).
+    """
+    suffix = phase.rsplit("_", 1)[-1]  # e.g. "class2"
+    if suffix.startswith("class") and suffix[len("class"):].isdigit():
+        return f"Casting_{suffix}"
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Prediction streaming (one phase's real images, cycled at ~rate/s)
 # --------------------------------------------------------------------------- #
@@ -155,14 +171,18 @@ class PhaseStreamer:
             if samples:
                 sample = samples[self._index % len(samples)]
                 self._index += 1
+                payload = {
+                    "piece_event_id": sample.piece_event_id or f"real_{self.sent}",
+                    "scenario_id": SCENARIO_ID,
+                    "image_uri": sample.image_uri,
+                }
+                source_class = phase_source_class(self._phase)
+                if source_class:
+                    payload["source_class"] = source_class
                 try:
                     resp = session.post(
                         f"{API_URL}/predict",
-                        json={
-                            "piece_event_id": sample.piece_event_id or f"real_{self.sent}",
-                            "scenario_id": SCENARIO_ID,
-                            "image_uri": sample.image_uri,
-                        },
+                        json=payload,
                         timeout=30,
                     )
                     self.sent += 1

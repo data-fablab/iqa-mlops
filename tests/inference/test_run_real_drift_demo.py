@@ -14,10 +14,22 @@ from scripts.run_real_drift_demo import (
     Sample,
     load_phase_samples,
     ordered_phases,
+    phase_source_class,
     to_file_uri,
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_phase_source_class_maps_each_phase() -> None:
+    assert phase_source_class("baseline_domain_class1") == "Casting_class1"
+    assert phase_source_class("domain_extension_class2") == "Casting_class2"
+    assert phase_source_class("domain_extension_class3") == "Casting_class3"
+
+
+def test_phase_source_class_none_for_unrecognised_phase() -> None:
+    assert phase_source_class("mystery_phase") is None
+    assert phase_source_class("") is None
 
 
 def test_to_file_uri_builds_container_path() -> None:

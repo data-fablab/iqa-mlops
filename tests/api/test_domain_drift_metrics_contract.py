@@ -3,8 +3,10 @@
 Verifies:
 - ``_record_prediction_metrics`` increments the regime counter and updates the
   drift-score gauge when a prediction carries ``domain_regime`` / ``domain_drift_score``.
-- ``/metrics`` renders ``iqa_domain_drift_total`` (counter by regime) and
-  ``iqa_domain_drift_score`` (gauge) in Prometheus text exposition.
+- ``/metrics`` renders ``iqa_domain_drift_total`` (counter by regime and
+  source_class) and ``iqa_domain_drift_score`` (gauge) in Prometheus text exposition.
+- A non-empty ``source_class`` produces an attributable per-class series so the
+  drift sensor can identify which class triggered the drift (class2 vs class3).
 """
 
 from __future__ import annotations
@@ -45,12 +47,19 @@ def _prediction(*, regime: str | None = None, score: float | None = None) -> dic
 class TestRecordPredictionMetricsDomainDrift:
     def test_increments_in_domain_counter(self) -> None:
         _record_prediction_metrics(_prediction(regime="in_domain", score=2.5), 0.01, "s1")
-        assert DOMAIN_DRIFT_REGIME_COUNTS.get("in_domain") == 1
-        assert DOMAIN_DRIFT_REGIME_COUNTS.get("out_of_domain", 0) == 0
+        assert DOMAIN_DRIFT_REGIME_COUNTS.get(("in_domain", "")) == 1
+        assert DOMAIN_DRIFT_REGIME_COUNTS.get(("out_of_domain", ""), 0) == 0
 
     def test_increments_out_of_domain_counter(self) -> None:
         _record_prediction_metrics(_prediction(regime="out_of_domain", score=4.2), 0.01, "s1")
-        assert DOMAIN_DRIFT_REGIME_COUNTS.get("out_of_domain") == 1
+        assert DOMAIN_DRIFT_REGIME_COUNTS.get(("out_of_domain", "")) == 1
+
+    def test_attributes_source_class(self) -> None:
+        _record_prediction_metrics(
+            _prediction(regime="out_of_domain", score=4.2), 0.01, "s1", "Casting_class3"
+        )
+        assert DOMAIN_DRIFT_REGIME_COUNTS.get(("out_of_domain", "Casting_class3")) == 1
+        assert DOMAIN_DRIFT_REGIME_COUNTS.get(("out_of_domain", ""), 0) == 0
 
     def test_updates_drift_score_gauge(self) -> None:
         _record_prediction_metrics(_prediction(regime="in_domain", score=2.78), 0.01, "s1")
@@ -60,28 +69,37 @@ class TestRecordPredictionMetricsDomainDrift:
 
     def test_ignores_none_regime(self) -> None:
         _record_prediction_metrics(_prediction(regime=None, score=None), 0.01, "s1")
-        assert DOMAIN_DRIFT_REGIME_COUNTS.get("in_domain", 0) == 0
-        assert DOMAIN_DRIFT_REGIME_COUNTS.get("out_of_domain", 0) == 0
+        assert DOMAIN_DRIFT_REGIME_COUNTS.get(("in_domain", ""), 0) == 0
+        assert DOMAIN_DRIFT_REGIME_COUNTS.get(("out_of_domain", ""), 0) == 0
 
     def test_ignores_unknown_regime(self) -> None:
         _record_prediction_metrics(_prediction(regime="unknown", score=1.0), 0.01, "s1")
-        assert "unknown" not in DOMAIN_DRIFT_REGIME_COUNTS
+        assert ("unknown", "") not in DOMAIN_DRIFT_REGIME_COUNTS
 
     def test_cumulates_counts(self) -> None:
         for _ in range(3):
             _record_prediction_metrics(_prediction(regime="in_domain", score=2.0), 0.01, "s1")
         _record_prediction_metrics(_prediction(regime="out_of_domain", score=5.0), 0.01, "s1")
-        assert DOMAIN_DRIFT_REGIME_COUNTS["in_domain"] == 3
-        assert DOMAIN_DRIFT_REGIME_COUNTS["out_of_domain"] == 1
+        assert DOMAIN_DRIFT_REGIME_COUNTS[("in_domain", "")] == 3
+        assert DOMAIN_DRIFT_REGIME_COUNTS[("out_of_domain", "")] == 1
 
 
 class TestMetricsEndpointDomainDrift:
     def test_renders_drift_total_counter_lines(self) -> None:
-        DOMAIN_DRIFT_REGIME_COUNTS["in_domain"] = 7
-        DOMAIN_DRIFT_REGIME_COUNTS["out_of_domain"] = 3
+        DOMAIN_DRIFT_REGIME_COUNTS[("in_domain", "")] = 7
+        DOMAIN_DRIFT_REGIME_COUNTS[("out_of_domain", "")] = 3
         body = api_metrics()
         assert 'iqa_domain_drift_total{regime="in_domain"} 7' in body
         assert 'iqa_domain_drift_total{regime="out_of_domain"} 3' in body
+
+    def test_renders_per_source_class_series(self) -> None:
+        DOMAIN_DRIFT_REGIME_COUNTS[("out_of_domain", "Casting_class2")] = 5
+        DOMAIN_DRIFT_REGIME_COUNTS[("out_of_domain", "Casting_class3")] = 9
+        body = api_metrics()
+        assert 'iqa_domain_drift_total{regime="out_of_domain",source_class="Casting_class2"} 5' in body
+        assert 'iqa_domain_drift_total{regime="out_of_domain",source_class="Casting_class3"} 9' in body
+        # The label-less baseline series stays present and is not duplicated.
+        assert 'iqa_domain_drift_total{regime="out_of_domain"} 0' in body
 
     def test_renders_drift_total_zero_when_no_traffic(self) -> None:
         body = api_metrics()

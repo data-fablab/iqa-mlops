@@ -99,11 +99,15 @@ def _alert_is_firing() -> bool:
 def _detect_triggering_class() -> str:
     """Best-effort detection of the class that triggered the drift.
 
-    Queries the PatchCore regime counter by source_class label to find which
-    class has the highest out-of-domain count. Falls back to the default if
-    Prometheus is unreachable or the metric has no class label.
+    Queries the PatchCore out-of-domain *rate* per ``source_class`` (the same
+    signal the alert fires on) and picks the class currently driving the drift.
+    A rate window -- not the lifetime counter -- is deliberate: in a class1->2->3
+    demo, class2's cumulative out-of-domain total stays high after it is covered,
+    so a raw counter would mis-attribute a fresh class3 drift to class2. The rate
+    reflects which class is OOD *now*. Falls back to the default if Prometheus is
+    unreachable or no class-labelled series is active.
     """
-    promql = 'iqa_domain_drift_total{regime="out_of_domain"}'
+    promql = 'sum by (source_class) (rate(iqa_domain_drift_total{regime="out_of_domain",source_class!=""}[2m]))'
     url = f"{_prometheus_base_url()}/api/v1/query?{urllib.parse.urlencode({'query': promql})}"
     try:
         payload = _http_get_json(url)

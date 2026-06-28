@@ -215,3 +215,57 @@ def test_should_not_trigger_during_cooldown(sensor_module, monkeypatch):
     monkeypatch.setattr(sensor_module, "_lifecycle_run_in_flight", lambda: False)
     monkeypatch.setattr(sensor_module, "_in_cooldown", lambda s: True)
     assert sensor_module._drift_alert_should_trigger(params={"cooldown_seconds": 900}) is False
+
+
+# --------------------------------------------------------------------------- #
+# Triggering-class detection (issue: class3 mis-attributed to the default)
+# --------------------------------------------------------------------------- #
+
+
+def _drift_series(samples: dict[str, float]) -> dict:
+    """Build a Prometheus instant-query payload of per-source_class rate samples."""
+    return {
+        "status": "success",
+        "data": {
+            "result": [
+                {"metric": {"source_class": cls}, "value": [0, str(rate)]}
+                for cls, rate in samples.items()
+            ]
+        },
+    }
+
+
+def test_detect_triggering_class_picks_highest_ood_rate(sensor_module, monkeypatch):
+    """The class with the highest live out-of-domain rate wins (not the default)."""
+    monkeypatch.setattr(
+        sensor_module,
+        "_http_get_json",
+        lambda *a, **k: _drift_series({"Casting_class2": 0.1, "Casting_class3": 0.9}),
+    )
+    assert sensor_module._detect_triggering_class() == "Casting_class3"
+
+
+def test_detect_triggering_class_queries_rate_not_raw_counter(sensor_module):
+    """The PromQL uses a rate window so a covered class's lifetime total cannot win."""
+    source = _read_dag_source()
+    assert "rate(iqa_domain_drift_total" in source
+    assert 'source_class!=""' in source
+
+
+def test_detect_triggering_class_falls_back_when_no_class_series(sensor_module, monkeypatch):
+    monkeypatch.setattr(
+        sensor_module,
+        "_http_get_json",
+        lambda *a, **k: {"status": "success", "data": {"result": []}},
+    )
+    assert sensor_module._detect_triggering_class() == sensor_module.DEFAULT_TRIGGERING_CLASS
+
+
+def test_detect_triggering_class_falls_back_on_http_error(sensor_module, monkeypatch):
+    import urllib.error
+
+    def boom(*a, **k):
+        raise urllib.error.URLError("down")
+
+    monkeypatch.setattr(sensor_module, "_http_get_json", boom)
+    assert sensor_module._detect_triggering_class() == sensor_module.DEFAULT_TRIGGERING_CLASS
