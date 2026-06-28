@@ -1,0 +1,23 @@
+apiVersion: 1
+
+# Read-only Postgres datasource on the IQA metadata DB (predictions, feedback...),
+# companion to "MLflow Postgres". Connects as grafana_ro (SELECT only) so Grafana
+# can browse persisted predictions without ever writing. Grants:
+# deploy/postgres/grafana-readonly-iqa-metadata.sql.
+datasources:
+  - name: IQA Metadata
+    uid: iqa-metadata
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: grafana_ro
+    database: iqa_metadata
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      maxOpenConns: 5
+      maxIdleConns: 2
+    secureJsonData:
+      password: grafana_ro_password
+    isDefault: false
+    editable: false

@@ -225,7 +225,11 @@ def create_metadata_repository() -> MetadataRepository:
         db_url = metadata_db_url()
         if not db_url:
             raise RuntimeError(f"{METADATA_DB_URL_ENV} is required when {METADATA_BACKEND_ENV}=postgres.")
-        from iqa.metadata.postgres import PostgresMetadataRepository
+        from iqa.metadata.postgres import PostgresMetadataRepository, initialize_metadata_db
 
+        # Idempotent schema bootstrap (CREATE TABLE IF NOT EXISTS): without it a
+        # fresh iqa_metadata DB has no `predictions` table and every /predict write
+        # fails with UndefinedTable. Safe to run on every factory call.
+        initialize_metadata_db(db_url)
         return PostgresMetadataRepository(db_url)
     raise RuntimeError(f"Unsupported {METADATA_BACKEND_ENV}: {backend!r}. Expected 'memory' or 'postgres'.")

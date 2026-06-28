@@ -1,0 +1,68 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "tags": ["iqa", "predictions"],
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "IQA - Predictions (Postgres)",
+  "uid": "iqa-predictions",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Decisions dans le temps (par minute)",
+      "datasource": { "type": "postgres", "uid": "iqa-metadata" },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "iqa-metadata" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time, decision AS metric, count(*) AS value FROM predictions WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "piechart",
+      "title": "Repartition par source_class",
+      "datasource": { "type": "postgres", "uid": "iqa-metadata" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "values": ["value"] }, "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "iqa-metadata" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT coalesce(payload->>'source_class', 'unknown') AS source_class, count(*) AS value FROM predictions WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Predictions recentes",
+      "datasource": { "type": "postgres", "uid": "iqa-metadata" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "time", "desc": true }] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "iqa-metadata" },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT created_at AS time, prediction_id, decision, coalesce(payload->>'source_class','unknown') AS source_class, payload->>'domain_regime' AS regime, model_version, scenario_id FROM predictions WHERE $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"
+        }
+      ]
+    }
+  ]
+}

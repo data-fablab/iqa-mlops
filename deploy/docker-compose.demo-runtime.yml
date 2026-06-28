@@ -17,6 +17,16 @@
 #   docker compose -f deploy/docker-compose.yml up -d
 
 services:
+  iqa-api:
+    environment:
+      # Persist predictions/feedback to Postgres (default is in-memory, which is
+      # invisible and lost on restart). The base .env points IQA_METADATA_DB_URL at
+      # localhost, which is wrong inside the container -- Postgres is the `postgres`
+      # service host. The schema (predictions, feedback_events, ...) auto-creates on
+      # first connection (src/iqa/metadata/postgres.py).
+      IQA_METADATA_BACKEND: "postgres"
+      IQA_METADATA_DB_URL: "postgresql://${IQA_POSTGRES_USER:-iqa}:${IQA_POSTGRES_PASSWORD:-iqa_password}@postgres:5432/iqa_metadata"
+
   iqa-inference:
     environment:
       IQA_GPU_DEMO_HOLD: "0"
