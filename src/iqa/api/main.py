@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 # from pydantic import BaseModel, Field
 from iqa.api.schemas import (
     Incident,
@@ -31,6 +31,8 @@ from iqa.inference.contracts import InferenceRequest, InferenceResult, placehold
 from iqa.metadata.repository import MEMORY_BACKEND, MetadataRepository, create_metadata_repository, metadata_backend
 from iqa.registry import ModelRegistryRef, registered_model_name
 from iqa.replay import ReplayRunStore, list_replay_scenarios
+from iqa.storage.uris import IQA_BUCKETS, parse_s3_uri
+from iqa.storage.visual_artifacts import create_visual_object_store
 
 
 BASE_DIR = Path(__file__).resolve().parents[3]
@@ -951,6 +953,34 @@ def list_predictions() -> list[dict[str, Any]]:
     """
 
     return _prediction_rows()
+
+
+# Buckets whose objects may be streamed back for display. Restricting to the
+# visual artifact buckets keeps /heatmap from being a generic read-any-object proxy.
+HEATMAP_PROXY_BUCKETS = {IQA_BUCKETS["heatmaps"], IQA_BUCKETS["roi_masks"]}
+
+
+@app.get("/heatmap")
+def heatmap(uri: str) -> Response:
+    """Stream a heatmap/ROI image stored in MinIO back as ``image/png``.
+
+    The dashboards persist only the logical ``s3://`` URI of each heatmap; neither
+    ``st.image`` (Streamlit) nor a Grafana table cell can read ``s3://`` directly.
+    This read-only proxy resolves the URI through the same object store the
+    inference path writes to, so the review surfaces can render the image without
+    presigned URLs or public-bucket access. Restricted to the visual buckets.
+    """
+    try:
+        ref = parse_s3_uri(uri)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if ref.bucket not in HEATMAP_PROXY_BUCKETS:
+        raise HTTPException(status_code=403, detail=f"bucket {ref.bucket!r} is not a visual-artifact bucket")
+    try:
+        data = create_visual_object_store().get_bytes(ref.bucket, ref.key)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"object not found: {uri}") from error
+    return Response(content=data, media_type="image/png")
 
 
 @app.get("/lots/summary")
