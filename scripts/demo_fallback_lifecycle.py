@@ -46,7 +46,7 @@ def trigger_lifecycle(
 ) -> dict:
     checkpoint = WARMSTART_CHECKPOINTS.get(triggering_class, "")
     conf = {
-        "scenario_id": "retrain_policy",
+        "scenario_id": "drift_domain_extension",
         "trigger_reason": "drift",
         "triggering_class": triggering_class,
         "retrain_scope": "incremental_coverage",
