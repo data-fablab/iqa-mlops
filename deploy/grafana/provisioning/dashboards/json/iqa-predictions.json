@@ -54,13 +54,22 @@
       "datasource": { "type": "postgres", "uid": "iqa-metadata" },
       "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
       "options": { "showHeader": true, "sortBy": [{ "displayName": "time", "desc": true }] },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "heatmap" },
+            "properties": [{ "id": "custom.cellOptions", "value": { "type": "image" } }]
+          }
+        ]
+      },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "postgres", "uid": "iqa-metadata" },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT created_at AS time, prediction_id, decision, coalesce(payload->>'source_class','unknown') AS source_class, payload->>'domain_regime' AS regime, model_version, scenario_id FROM predictions WHERE $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"
+          "rawSql": "SELECT created_at AS time, prediction_id, decision, coalesce(payload->>'source_class','unknown') AS source_class, payload->>'domain_regime' AS regime, model_version, scenario_id, CASE WHEN payload->>'heatmap_uri' LIKE 's3://%' THEN 'http://localhost:8000/heatmap?uri=' || (payload->>'heatmap_uri') ELSE NULL END AS heatmap FROM predictions WHERE $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 200"
         }
       ]
     }

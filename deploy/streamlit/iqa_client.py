@@ -9,6 +9,12 @@ import requests
 
 API_URL = os.environ.get("IQA_API_URL", "http://localhost:8000")
 
+# Browser-facing base URL for assets the user's browser fetches directly (e.g. the
+# /heatmap image proxy embedded via st.image / ImageColumn). API_URL is the in-cluster
+# hostname (``iqa-api:8000``) used for server-side requests; the browser cannot resolve
+# that, so image URLs must use the published host instead.
+API_PUBLIC_URL = os.environ.get("IQA_API_PUBLIC_URL", "http://localhost:8000")
+
 
 def get(path: str, *, timeout: int = 5) -> Any:
     response = requests.get(f"{API_URL}{path}", timeout=timeout)

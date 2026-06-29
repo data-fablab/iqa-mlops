@@ -6,10 +6,24 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import requests
 import streamlit as st
-from iqa_client import API_URL, get, post
+from iqa_client import API_PUBLIC_URL, API_URL, get, post
+
+
+def _heatmap_proxy_url(heatmap_uri: str | None) -> str | None:
+    """Build the iqa-api /heatmap proxy URL so st.image can render a MinIO object.
+
+    ``st.image`` cannot read an ``s3://`` URI; the API proxy streams the bytes back
+    as image/png. Uses the browser-facing base URL because the user's browser (not
+    the Streamlit server) fetches the image. Returns ``None`` for missing or non-s3
+    URIs (local paths handled separately by the caller).
+    """
+    if not heatmap_uri or not str(heatmap_uri).startswith("s3://"):
+        return None
+    return f"{API_PUBLIC_URL}/heatmap?uri={quote(heatmap_uri, safe='')}"
 
 st.set_page_config(page_title="IQA - Poste Sophie", layout="wide")
 st.title("Poste Sophie - controle qualite")
@@ -125,8 +139,12 @@ with tab_replay:
         with heatmap_col:
             st.subheader("Overlay heatmap")
             heatmap_path = _resolve_path(current.get("heatmap_path"))
+            proxy_url = _heatmap_proxy_url(current.get("heatmap_uri"))
             if heatmap_path.exists():
                 st.image(str(heatmap_path), width="stretch")
+            elif proxy_url:
+                st.image(proxy_url, width="stretch")
+                st.caption(current["heatmap_uri"])
             elif current.get("heatmap_uri"):
                 st.code(current["heatmap_uri"])
             else:
@@ -134,6 +152,8 @@ with tab_replay:
 
         with info_col:
             st.subheader("Contexte")
+            st.write(f"**horodatage**: `{current.get('created_at') or '-'}`")
+            st.write(f"**modele actif**: `{current.get('model_version') or '-'}`")
             st.write(f"**piece_event_id**: `{current.get('piece_event_id')}`")
             st.write(f"**lot_id**: `{current.get('lot_id')}`")
             st.write(f"**scenario**: `{current.get('scenario_id')}`")
@@ -200,12 +220,14 @@ with tab_api:
         st.dataframe(
             [
                 {
+                    "horodatage": row.get("created_at") or "-",
                     "prediction_id": row.get("prediction_id"),
                     "lot": row.get("lot_id") or row.get("scenario_id"),
                     "piece": row.get("piece_event_id"),
                     "decision": row.get("decision"),
+                    "modele": row.get("model_version") or "-",
                     "oracle": row.get("oracle_verdict") or "-",
-                    "heatmap_uri": row.get("heatmap_uri") or "-",
+                    "heatmap": _heatmap_proxy_url(row.get("heatmap_uri")) or "-",
                     "feedback_ferme": row.get("feedback_closed"),
                     "sophie": row.get("display_feedback_status") or "-",
                 }
@@ -213,6 +235,9 @@ with tab_api:
             ],
             width="stretch",
             hide_index=True,
+            column_config={
+                "heatmap": st.column_config.ImageColumn("Heatmap"),
+            },
         )
         st.subheader("Envoyer feedback Sophie display-only via API")
         prediction_ids = [row.get("prediction_id") for row in rows if row.get("prediction_id")]
