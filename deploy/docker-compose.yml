@@ -62,6 +62,7 @@ services:
       # GPU trainer uses; the host path is a junction Docker can't follow, so we
       # bind the real external dataset directly).
       - ${IQA_DATASET_HOST_PATH:-../data/raw/hss-iad}:/opt/iqa/iqa-mlops/data/raw/hss-iad:ro
+      - torch_hub_cache:/root/.cache/torch
     deploy:
       resources:
         reservations:
@@ -360,6 +361,7 @@ services:
 volumes:
   minio_data:
   postgres_data:
+  torch_hub_cache:
   # Stable name so sibling task containers launched by the scheduler can mount
   # the single-GPU lock by volume name (factory: IQA_GPU_LOCK_VOLUME).
   gpu_lock:

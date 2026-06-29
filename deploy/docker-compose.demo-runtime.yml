@@ -44,6 +44,7 @@ services:
       - ../configs:/opt/iqa/iqa-mlops/configs:ro
       - ../.cache/iqa/models:/opt/iqa/models:rw
       - ${IQA_DATASET_HOST_PATH:-../data/raw/hss-iad}:/opt/iqa/iqa-mlops/data/raw/hss-iad:ro
+      - torch_hub_cache:/root/.cache/torch
 
   airflow-scheduler:
     environment:
