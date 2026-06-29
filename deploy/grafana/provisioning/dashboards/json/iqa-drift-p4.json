@@ -9,6 +9,36 @@
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
+      },
+      {
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "expr": "iqa_drift_domain_ratio{source_domain=\"piece_a_p4\"}",
+        "iconColor": "rgba(242, 166, 59, 1)",
+        "name": "Arrivee P4",
+        "tagKeys": "source_domain",
+        "textFormat": "Piece A/P4 detectee",
+        "titleFormat": "Arrivee P4"
+      },
+      {
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "expr": "iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}",
+        "iconColor": "rgba(255, 91, 115, 1)",
+        "name": "Drift confirme",
+        "tagKeys": "status",
+        "textFormat": "Drift confirme",
+        "titleFormat": "Drift confirme"
+      },
+      {
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "expr": "iqa_drift_trigger_lifecycle{source_domain=\"piece_a_p4\"}",
+        "iconColor": "rgba(121, 211, 107, 1)",
+        "name": "Correction declenchee",
+        "tagKeys": "source_domain",
+        "textFormat": "Lifecycle correctif declenche",
+        "titleFormat": "Correction"
       }
     ]
   },
@@ -16,8 +46,23 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue Executive MLOps", "type": "link", "url": "/d/iqa-executive-mlops" },
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Lifecycle MLOps", "type": "link", "url": "/d/iqa-lifecycle" },
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue d'ensemble", "type": "link", "url": "/d/iqa-overview" }
+  ],
   "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "content": "## La realite terrain change\n\nEn regime etabli, le systeme observe d'abord sans reentrainer. Quand Piece A/P4 apparait, le drift passe suspected puis confirme. Airflow declenche alors une correction ciblee et la gate decide si les nouveaux modeles peuvent etre promus.",
+        "mode": "markdown"
+      },
+      "title": "Drift P4 - observation puis correction",
+      "type": "text"
+    },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -30,34 +75,13 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
-      "id": 1,
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 4 },
+      "id": 2,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}[$__range])", "instant": true, "legendFormat": "confirmed", "refId": "A" }
       ],
-      "title": "Statut drift",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            { "options": { "0": { "color": "green", "text": "non" }, "1": { "color": "orange", "text": "oui" } }, "type": "value" }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
-      "id": 9,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_trigger_lifecycle{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "trigger", "refId": "A" }
-      ],
-      "title": "Correction attendue",
+      "title": "Etat drift",
       "type": "stat"
     },
     {
@@ -72,25 +96,13 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
-      "id": 2,
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 4 },
+      "id": 3,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_score{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "score", "refId": "A" }
       ],
       "title": "Score drift",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
-      "id": 3,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_window_events{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "events", "refId": "A" }
-      ],
-      "title": "Derniere fenetre",
       "type": "stat"
     },
     {
@@ -105,60 +117,117 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 4 },
       "id": 4,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_domain_ratio{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "ratio P4", "refId": "A" }
       ],
-      "title": "Ratio Piece A/P4",
+      "title": "Domaine Piece A/P4",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "max": 1, "min": 0, "unit": "percentunit" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 4 },
       "id": 5,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_domain_ratio{source_domain=\"piece_a_p4\"}", "legendFormat": "ratio P4", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_window_index{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "window", "refId": "A" }
+      ],
+      "title": "Fenetre observee",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "green", "text": "non" }, "1": { "color": "orange", "text": "triggered" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 4 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_trigger_lifecycle{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "trigger", "refId": "A" }
+      ],
+      "title": "Correction",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 4 },
+      "id": 7,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_first_confirmed_window{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "first confirmed", "refId": "A" }
+      ],
+      "title": "Premiere fenetre confirmee",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 0.8 }] },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "id": 8,
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_domain_ratio{source_domain=\"piece_a_p4\"}", "legendFormat": "ratio Piece A/P4", "refId": "A" },
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_score{source_domain=\"piece_a_p4\"}", "legendFormat": "score drift", "refId": "B" },
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}", "legendFormat": "drift confirme", "refId": "C" }
       ],
-      "title": "Trajectoire drift",
+      "title": "Trajectoire drift avec seuils suspected / confirmed",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "max": 1, "min": 0, "unit": "percentunit" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 11 },
-      "id": 10,
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 16 },
+      "id": 9,
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_alert_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "alert rate", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_red_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "red rate", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_red_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "red rate", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_unexpected_red_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "unexpected red rate", "refId": "C" }
       ],
-      "title": "Alert / red rate",
+      "title": "Signaux terrain - alertes et rouges",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "max": 1, "min": 0, "unit": "percentunit" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 11 },
-      "id": 11,
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 16 },
+      "id": 10,
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_roi_fail_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "ROI fail", "refId": "A" },
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_oracle_fn_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "oracle FN", "refId": "B" }
       ],
-      "title": "ROI fail et FN oracle",
+      "title": "Signaux critiques - ROI et FN oracle",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 18 },
-      "id": 12,
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 23 },
+      "id": 11,
       "options": { "showHeader": true },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_active_model_info{source_domain=\"piece_a_p4\"}[$__range])", "format": "table", "instant": true, "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_active_model_info{source_domain=\"piece_a_p4\"}[$__range])", "format": "table", "instant": true, "legendFormat": "active model", "refId": "A" }
       ],
       "title": "Modeles utilises par l'observation",
       "type": "table"
@@ -166,47 +235,47 @@
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 18 },
-      "id": 7,
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 23 },
+      "id": 12,
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "increase(iqa_lifecycle_promotion_total{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}[$__range])", "legendFormat": "{{role}} {{status}}", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}", "legendFormat": "{{role}} {{kind}} {{metric}}", "refId": "A" }
       ],
-      "title": "Correction lifecycle - promotions",
+      "title": "Correction - gate active/candidate",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
       "id": 13,
+      "options": { "showHeader": true },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_cycle_current{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}", "legendFormat": "cycle", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_current{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}", "legendFormat": "epoch", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_promotion_decision_info{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}[$__range])", "format": "table", "instant": true, "legendFormat": "decision", "refId": "A" }
       ],
-      "title": "Correction lifecycle - progression",
-      "type": "timeseries"
+      "title": "Correction - decisions de promotion",
+      "type": "table"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 24 },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
       "id": 14,
+      "options": { "showHeader": true },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_gate_metric_delta{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}", "legendFormat": "{{role}} metric delta", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_gate_fn_delta{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}", "legendFormat": "{{role}} FN delta", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_final_model_info{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}[$__range])", "format": "table", "instant": true, "legendFormat": "final model", "refId": "A" }
       ],
-      "title": "Correction lifecycle - gate",
-      "type": "timeseries"
+      "title": "Registry correction - modeles promus",
+      "type": "table"
     }
   ],
   "refresh": "15s",
-  "schemaVersion": 39,
-  "tags": ["iqa", "drift", "piece-a-p4"],
+  "schemaVersion": 40,
+  "tags": ["iqa", "drift", "piece-a-p4", "storytelling"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "timezone": "",
+  "timezone": "browser",
   "title": "IQA - Drift P4",
   "uid": "iqa-drift-p4",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }

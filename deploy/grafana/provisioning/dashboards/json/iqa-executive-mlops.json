@@ -1,0 +1,253 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Lifecycle MLOps", "type": "link", "url": "/d/iqa-lifecycle" },
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Drift P4", "type": "link", "url": "/d/iqa-drift-p4" },
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue d'ensemble", "type": "link", "url": "/d/iqa-overview" }
+  ],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "content": "## Fil rouge\n\nOn ne presente pas juste un modele d'anomalie. On presente une chaine MLOps industrielle capable de demarrer avec peu de donnees, d'apprendre en production controlee, puis de detecter et corriger une derive terrain.",
+        "mode": "markdown"
+      },
+      "title": "Fil rouge - chaine MLOps industrielle",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 4 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_api_up", "instant": true, "legendFormat": "api", "refId": "A" }
+      ],
+      "title": "API",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 4 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_inference_up", "instant": true, "legendFormat": "inference", "refId": "A" }
+      ],
+      "title": "Inference",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 4 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_run_cycles_completed[$__range])", "instant": true, "legendFormat": "cycles", "refId": "A" }
+      ],
+      "title": "Cycles scenario 1",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "green", "text": "clear" }, "1": { "color": "red", "text": "confirme" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 4 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}[$__range])", "instant": true, "legendFormat": "confirmed", "refId": "A" }
+      ],
+      "title": "Drift confirme",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "green", "text": "non" }, "1": { "color": "orange", "text": "declenchee" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 4 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_trigger_lifecycle{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "trigger", "refId": "A" }
+      ],
+      "title": "Correction declenchee",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 4 },
+      "id": 7,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(iqa_lifecycle_promotion_total{status=\"promoted\"}[$__range]))", "instant": true, "legendFormat": "promotions", "refId": "A" }
+      ],
+      "title": "Promotions",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 8 },
+      "id": 8,
+      "options": { "content": "### Bootstrap faible\nModele initial sous controle.", "mode": "markdown" },
+      "title": "1. Demarrer petit",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 8 },
+      "id": 9,
+      "options": { "content": "### Apprentissage\n5 cycles representent la premiere semaine.", "mode": "markdown" },
+      "title": "2. Apprendre vite",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 8 },
+      "id": 10,
+      "options": { "content": "### Exploitation stable\nPiece B reste clear, inference uniquement.", "mode": "markdown" },
+      "title": "3. Observer",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 8 },
+      "id": 11,
+      "options": { "content": "### Piece A/P4 arrive\nLe domaine terrain change.", "mode": "markdown" },
+      "title": "4. Detecter P4",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 8 },
+      "id": 12,
+      "options": { "content": "### Drift confirme\nLe systeme confirme avant d'agir.", "mode": "markdown" },
+      "title": "5. Confirmer",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 8 },
+      "id": 13,
+      "options": { "content": "### Correction\nUn lifecycle correctif est lance et trace.", "mode": "markdown" },
+      "title": "6. Corriger",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "id": 14,
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_metric", "legendFormat": "{{metric}} {{role}}", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_pixel_aupimo", "legendFormat": "pixel AUPIMO", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_image_ap", "legendFormat": "image AP", "refId": "C" }
+      ],
+      "title": "Preuve scenario 1 - metriques lifecycle",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "max": 1, "min": 0, "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "id": 15,
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_domain_ratio{source_domain=\"piece_a_p4\"}", "legendFormat": "ratio Piece A/P4", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_score{source_domain=\"piece_a_p4\"}", "legendFormat": "score drift", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}", "legendFormat": "drift confirme", "refId": "C" }
+      ],
+      "title": "Preuve scenario 2 - trajectoire drift",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 21 },
+      "id": 16,
+      "options": { "showHeader": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_promotion_decision_info[$__range])", "format": "table", "instant": true, "legendFormat": "decision", "refId": "A" }
+      ],
+      "title": "Decisions MLOps - promotions et rejets",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 21 },
+      "id": 17,
+      "options": { "showHeader": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_final_model_info[$__range])", "format": "table", "instant": true, "legendFormat": "final model", "refId": "A" }
+      ],
+      "title": "Registry - modeles finaux",
+      "type": "table"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 40,
+  "tags": ["iqa", "executive", "mlops", "storytelling"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "IQA - Vue Executive MLOps",
+  "uid": "iqa-executive-mlops",
+  "version": 1,
+  "weekStart": ""
+}
