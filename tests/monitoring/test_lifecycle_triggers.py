@@ -82,6 +82,20 @@ def test_drift_replay_triggers_feature_ae_v003_on_confirmed_drift() -> None:
     assert should_trigger_lifecycle(signal)
 
 
+def test_piece_a_p4_drift_triggers_lifecycle_on_confirmed_drift() -> None:
+    signal = LifecycleSignal(
+        scenario_id="production_replay_natural_piece_b_to_piece_a_p4_drift",
+        conforming_validated_count=0,
+        drift_confirmed=True,
+    )
+
+    decision = evaluate_lifecycle_signal(signal)
+
+    assert decision.trigger_lifecycle
+    assert decision.trigger_reason == "drift_piece_a_p4_confirmed"
+    assert decision.candidate_dataset_version == FEATURE_AE_V003_DATASET_VERSION
+
+
 def test_unknown_scenario_does_not_trigger_lifecycle() -> None:
     signal = LifecycleSignal(
         scenario_id="manual_experiment",

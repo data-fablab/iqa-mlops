@@ -7,7 +7,7 @@ import math
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -40,6 +40,8 @@ from iqa.training.feature_ae_contracts import (
 REPLAY_SCENARIOS = {
     "production_replay_natural",
     "production_replay_natural_train_v004",
+    "production_replay_natural_piece_b_minimal",
+    "production_replay_natural_piece_b_full",
     "drift_domain_extension",
 }
 
@@ -91,6 +93,12 @@ class FeatureAETrainingConfig:
     run_name: str = ""
     initial_checkpoint_path: Path | None = None
     initial_checkpoint_policy: str = "fresh"
+    candidate_initial_model_version: str = ""
+    candidate_initial_checkpoint: str = ""
+    candidate_initial_checkpoint_sha256: str = ""
+    lifecycle_run_id: str = ""
+    cycle_id: str = ""
+    lifecycle_event_callback: Callable[[dict[str, Any]], None] | None = None
     metric_eval_manifest_path: Path | None = None
     metric_eval_device: str | None = None
     metric_eval_roi_predictions_dirs: tuple[Path, ...] = ()
@@ -285,6 +293,11 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                 }
             )
             _append_jsonl(run_dir / "epoch_metrics.jsonl", epoch_metric_history[-1])
+            if config.lifecycle_event_callback is not None:
+                try:
+                    config.lifecycle_event_callback(epoch_metric_history[-1])
+                except Exception:
+                    pass
             update_metric_best_checkpoints(
                 run_dir=run_dir,
                 candidate_checkpoint=checkpoint,
@@ -492,6 +505,7 @@ def _load_initial_checkpoint(
 
 def _metadata(config: FeatureAETrainingConfig, layers: tuple[str, ...]) -> dict[str, Any]:
     data = asdict(config)
+    data.pop("lifecycle_event_callback", None)
     for key, value in list(data.items()):
         if isinstance(value, Path):
             data[key] = str(value)

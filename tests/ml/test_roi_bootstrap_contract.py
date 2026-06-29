@@ -41,7 +41,7 @@ def test_generate_bootstrap_roi_predictions_writes_processed_index(tmp_path: Pat
     manifest = tmp_path / "feature_ae_bootstrap_events.csv"
     manifest.write_text(
         "event_id,image_ids,relative_paths,label,is_defective,bootstrap_dataset_version,bootstrap_role\n"
-        "piece_event_001,image_001,Casting_class1/train/good/sample.jpg,good,false,feature_ae_good_v001_bootstrap,train_normal\n",
+        "piece_event_001,image_001,Casting_class1/train/good/sample.jpg,good,false,feature_ae_good_v001_bootstrap,train_normal_piece_b_minimal\n",
         encoding="utf-8",
     )
     calls: list[Path] = []

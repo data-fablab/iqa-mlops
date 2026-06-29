@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 
-from iqa.dags import build_container_dag, data_image, make_container_task
+from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
 
 
 NATURAL_DECISION_TASK_ID = "evaluate_decision"
@@ -84,6 +84,9 @@ def _lifecycle_conf(
             "{{ params.anchor_good_max_per_class }}"
         ),
         "reference_eval_manifest": "{{ params.reference_eval_manifest }}",
+        "classification_selection_manifest": (
+            "{{ params.classification_selection_manifest }}"
+        ),
         "reference_gt_masks_manifest": (
             "{{ params.reference_gt_masks_manifest }}"
         ),
@@ -96,6 +99,8 @@ def _lifecycle_conf(
         "candidate_init_policy": "{{ params.candidate_init_policy }}",
         "require_mlflow_registry": "{{ params.require_mlflow_registry }}",
         "mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}",
+        "mlflow_s3_endpoint_url": "{{ params.mlflow_s3_endpoint_url }}",
+        "s3_endpoint_url": "{{ params.s3_endpoint_url }}",
         "ml_image": "{{ params.ml_image }}",
     }
 
@@ -180,12 +185,18 @@ dag = build_container_dag(
         "promotion_min_delta": 0.0,
         "anchor_good_max_per_class": 256,
         "reference_eval_manifest": "data/validation/validation_set_replay_gate_v002.csv",
+        "classification_selection_manifest": "",
         "reference_gt_masks_manifest": (
             "data/validation/validation_gt_masks_v001.csv"
         ),
         "progressive_min_defects_for_decision": 5,
         "max_good_red_regression": 1,
         "candidate_init_policy": "stable_base",
+        "require_mlflow_registry": False,
+        "mlflow_tracking_uri": "http://mlflow:5000",
+        "mlflow_s3_endpoint_url": "http://minio:9000",
+        "s3_endpoint_url": "http://minio:9000",
+        "ml_image": ml_image(),
         "image": data_image(),
     },
 )

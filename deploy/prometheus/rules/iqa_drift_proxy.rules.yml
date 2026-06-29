@@ -1,0 +1,16 @@
+groups:
+  - name: iqa_drift_proxy
+    rules:
+      - alert: IqaDriftProxy
+        expr: |
+          sum(rate(iqa_prediction_total{scenario_id=~"drift.*",decision=~"Orange|Rouge"}[2m]))
+          /
+          clamp_min(sum(rate(iqa_prediction_total{scenario_id=~"drift.*"}[2m])), 1e-9)
+          > 0.5
+        for: 30s
+        labels:
+          severity: critical
+          signal: drift_proxy
+        annotations:
+          summary: "Drift de domaine detecte (proxy taux d'anomalies)"
+          description: "Le taux d'anomalies du regime drift depasse le seuil calibre (0.5) - domaine OOD. Doit declencher le reentrainement iqa_lifecycle."

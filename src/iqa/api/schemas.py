@@ -306,6 +306,60 @@ class ReloadModelResponse(IQABaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class LifecycleEventRequest(IQABaseModel):
+    event_type: str
+    scenario_id: str
+    lifecycle_run_id: str
+    cycle_id: str | None = None
+    epoch: int | None = None
+    candidate_version: str | None = None
+    candidate_init_policy: str | None = None
+    candidate_initial_model_version: str | None = None
+    active_classification_model_version: str | None = None
+    active_localization_model_version: str | None = None
+    active_classification_registered_model_name: str | None = None
+    active_classification_registered_model_version: str | None = None
+    active_localization_registered_model_name: str | None = None
+    active_localization_registered_model_version: str | None = None
+    candidate_initial_checkpoint_sha256: str | None = None
+    localization_checkpoint_sha256: str | None = None
+    classification_checkpoint_sha256: str | None = None
+    localization_promotion_status: str | None = None
+    classification_promotion_status: str | None = None
+    localization_gate_reason: str | None = None
+    classification_gate_reason: str | None = None
+    metrics: dict[str, float | int | bool] = Field(default_factory=dict)
+
+    @field_validator("event_type", "scenario_id", "lifecycle_run_id")
+    @classmethod
+    def lifecycle_field_not_empty(cls, value: str) -> str:
+        if not value:
+            raise ValueError("field must not be empty")
+        return value
+
+
+class DriftEventRequest(IQABaseModel):
+    event_type: str
+    scenario_id: str
+    status: str = "clear"
+    source_domain: str = "piece_a_p4"
+    lifecycle_run_id: str | None = None
+    cycle_id: str | None = None
+    window_index: int | None = None
+    first_confirmed_window_index: int | None = None
+    window_events: int | None = None
+    trigger_lifecycle: bool | None = None
+    active_models: dict[str, dict[str, str | int | bool | None]] = Field(default_factory=dict)
+    metrics: dict[str, float | int | bool] = Field(default_factory=dict)
+
+    @field_validator("event_type", "scenario_id", "status", "source_domain")
+    @classmethod
+    def drift_field_not_empty(cls, value: str) -> str:
+        if not value:
+            raise ValueError("field must not be empty")
+        return value
+
+
 class AuditTrailPredictionContext(IQABaseModel):
     prediction_id: str
     piece_event_id: str
@@ -462,6 +516,7 @@ __all__ = [
     "AirflowGatesTaskOutput",
     "AirflowEvalTaskOutput",
     "AirflowDatasetTaskOutput",
+    "DriftEventRequest",
     "FeedbackRequest",
     "FeedbackResponse",
     "FeedbackSource",
@@ -469,6 +524,7 @@ __all__ = [
     "Incident",
     "IncidentSeverity",
     "IncidentType",
+    "LifecycleEventRequest",
     "ModelStage",
     "ModelVersion",
     "PieceEvent",

@@ -43,6 +43,13 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "gate_reason": "candidate_passed_representative_validation_gate",
             "registry_stage": "test",
             "registered_model_version": "1",
+            "localization_registry_alias": "test",
+            "localization_registered_model_version": "1",
+            "classification_registry_alias": "test",
+            "classification_registered_model_version": "2",
+            "activated_for_next_events": True,
+            "localization_activated_for_next_events": True,
+            "classification_activated_for_next_events": True,
             "mlflow_run_id": "run-001",
             "mlflow_dataset_logged": True,
             "mlflow_model_logged": True,
@@ -58,7 +65,15 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "epoch_metric_history": [
                 {
                     "epoch": 1,
-                    "metrics": {"pixel_aupimo_1e-5_1e-3": 0.91, "pixel_ap": 0.12},
+                    "metrics": {
+                        "pixel_aupimo_1e-5_1e-3": 0.91,
+                        "pixel_ap": 0.12,
+                        "image_ap": 0.93,
+                        "image_auroc": 0.94,
+                        "false_negatives": 0,
+                        "good_red_count": 2,
+                        "image_recall": 1.0,
+                    },
                 }
             ],
         },
@@ -93,6 +108,13 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
             "gate_reason": "candidate_increases_false_negatives",
             "registry_stage": "test",
             "registry_status": "not_registered",
+            "localization_registry_status": "registered",
+            "localization_registry_alias": "test",
+            "localization_registered_model_version": "3",
+            "classification_registry_status": "not_registered",
+            "activated_for_next_events": True,
+            "localization_activated_for_next_events": True,
+            "classification_activated_for_next_events": False,
             "mlflow_run_id": "run-002",
             "mlflow_dataset_logged": False,
             "mlflow_model_logged": False,
@@ -121,13 +143,25 @@ def test_progressive_lifecycle_report_renders_cycle_metrics(tmp_path: Path) -> N
     assert "candidate_good_red" in report
     assert "class_gate" in report
     assert "class_progress" in report
+    assert "loc_registry" in report
+    assert "class_registry" in report
+    assert "loc_active" in report
+    assert "class_active" in report
     assert "improved: FN 1 -> 0" in report
     assert "regressed: FN 0 -> 2" in report
     assert "candidate_passed_representative_validation_gate" in report
+    assert "test:v2" in report
+    assert "test:v3" in report
     assert "run-001" in report
     assert "yes" in report
     assert "no" in report
     assert "epoch metrics" in report
+    epoch_section = report.split("epoch metrics", 1)[1]
+    assert "image_ap=0.93" in epoch_section
+    assert "image_auroc=0.94" in epoch_section
+    assert "false_negatives" not in epoch_section
+    assert "good_red" not in epoch_section
+    assert "image_recall" not in epoch_section
 
 
 def test_progressive_lifecycle_report_fails_without_cycles_jsonl(tmp_path: Path) -> None:

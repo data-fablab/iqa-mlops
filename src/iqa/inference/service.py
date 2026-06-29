@@ -12,6 +12,7 @@ from threading import RLock
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from iqa.inference.contracts import (
@@ -257,7 +258,7 @@ def model_version() -> dict[str, Any]:
     return _runtime_snapshot().to_dict()
 
 
-@app.get("/metrics")
+@app.get("/metrics", response_class=PlainTextResponse)
 def metrics() -> str:
     gpu_lock_held = (
         1

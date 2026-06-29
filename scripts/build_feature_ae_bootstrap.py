@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from iqa.models.artifacts import DEFAULT_ROI_MODEL_VERSION, resolve_roi_segmenter_checkpoint
@@ -37,7 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--roi-output-dir", type=Path, default=Path("data/processed/roi/bootstrap_v001"))
     parser.add_argument("--manifest-output", type=Path, default=Path("models/manifests/rd_feature_ae_gated_v001_bootstrap/model_manifest.json"))
     parser.add_argument("--artifact-uri", default=BOOTSTRAP_ARTIFACT_URI)
+    parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--roi-model-version", default=DEFAULT_ROI_MODEL_VERSION)
+    parser.add_argument("--dataset-version", default="feature_ae_good_v001_bootstrap")
+    parser.add_argument("--scenario-id", default="bootstrap_v001")
+    parser.add_argument("--manifest-version", default="feature_ae_bootstrap_events_v001")
+    parser.add_argument("--validation-set-id", default="validation_set_replay_representative_v001")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--epochs", type=int, default=14)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -64,6 +70,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    _load_env_file(args.env_file)
     if args.dry_run:
         print(json.dumps(_dry_run_plan(args), indent=2, sort_keys=True))
         return
@@ -84,8 +91,8 @@ def main() -> None:
         args.manifest_output,
         reference,
         artifact_uri=args.artifact_uri,
-        dataset_version="feature_ae_good_v001_bootstrap",
-        validation_set_id="validation_set_replay_representative_v001",
+        dataset_version=args.dataset_version,
+        validation_set_id=args.validation_set_id,
         roi_model_version=args.roi_model_version,
     )
     print(
@@ -106,6 +113,21 @@ def main() -> None:
             sort_keys=True,
         )
     )
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+    if os.environ.get("IQA_S3_ACCESS_KEY_ID") == "change-me" and os.environ.get("MINIO_ROOT_USER"):
+        os.environ["IQA_S3_ACCESS_KEY_ID"] = os.environ["MINIO_ROOT_USER"]
+    if os.environ.get("IQA_S3_SECRET_ACCESS_KEY") == "change-me" and os.environ.get("MINIO_ROOT_PASSWORD"):
+        os.environ["IQA_S3_SECRET_ACCESS_KEY"] = os.environ["MINIO_ROOT_PASSWORD"]
 
 
 def _dry_run_plan(args: argparse.Namespace) -> dict[str, object]:
@@ -140,8 +162,8 @@ def _ensure_roi_predictions(args: argparse.Namespace) -> None:
         checkpoint_path=checkpoint,
         output_dir=args.roi_output_dir,
         roi_model_version=args.roi_model_version,
-        dataset_version="feature_ae_good_v001_bootstrap",
-        scenario_id="bootstrap_v001",
+        dataset_version=args.dataset_version,
+        scenario_id=args.scenario_id,
         device=args.device,
     )
 
@@ -164,7 +186,7 @@ def _train_bootstrap(args: argparse.Namespace) -> dict[str, object]:
             metric_eval_manifest_path=args.validation_manifest,
             metric_eval_roi_predictions_dirs=(args.roi_output_dir,),
             gt_masks_manifest=args.gt_masks_manifest,
-            validation_set_id="validation_set_replay_representative_v001",
+            validation_set_id=args.validation_set_id,
             metric_eval_every_epochs=args.metric_eval_every_epochs,
             metric_eval_start_epoch=args.metric_eval_start_epoch,
             metric_eval_batch_size=args.metric_eval_batch_size,
@@ -179,9 +201,9 @@ def _train_bootstrap(args: argparse.Namespace) -> dict[str, object]:
             metric_eval_topk_fraction=CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction,
             roi_model_version=args.roi_model_version,
             feature_ae_version=BOOTSTRAP_MODEL_VERSION,
-            scenario_id="bootstrap_v001",
-            dataset_version="feature_ae_good_v001_bootstrap",
-            manifest_version="feature_ae_bootstrap_events_v001",
+            scenario_id=args.scenario_id,
+            dataset_version=args.dataset_version,
+            manifest_version=args.manifest_version,
             candidate_version=BOOTSTRAP_MODEL_VERSION,
             run_name="feature_ae_bootstrap_v001",
         )

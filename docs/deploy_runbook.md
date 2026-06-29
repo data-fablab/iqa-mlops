@@ -163,11 +163,13 @@ docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow pools list
 docker compose exec airflow-webserver airflow dags unpause iqa_dvc_reproducibility
 docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle_trigger
+docker compose exec airflow-webserver airflow dags unpause iqa_drift_piece_a_p4
 docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle
 docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibility \
   --conf '{"with_network": false,"skip_regeneration": true}'
 docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle_trigger \
   --conf '{"scenario_id":"production_replay_natural","conforming_validated_count":50,"drift_confirmed":false,"roi_fail_rate":0.0}'
+docker compose exec airflow-webserver airflow dags trigger iqa_drift_piece_a_p4
 docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle \
   --conf '{"mode":"progressive-train","max_events":260,"lifecycle_interval":50,"max_cycles":3,"epochs":10,"target_stage":"test","promotion_min_delta":0.0}'
 ```

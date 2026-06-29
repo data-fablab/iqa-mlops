@@ -35,6 +35,7 @@ def test_airflow_container_runtime_static_checks_pass() -> None:
         "iqa_monitoring",
         "iqa_lifecycle",
         "iqa_lifecycle_trigger",
+        "iqa_drift_piece_a_p4",
     }
 
 
@@ -46,6 +47,7 @@ def test_business_airflow_dags_use_container_factory_without_runtime_imports() -
         "iqa_monitoring.py",
         "iqa_lifecycle.py",
         "iqa_lifecycle_trigger.py",
+        "iqa_drift_piece_a_p4.py",
     ]
 
     for dag_name in business_dags:
@@ -110,8 +112,10 @@ def test_airflow_runtime_docs_cover_server_evidence_and_security_boundary() -> N
         "airflow pools list",
         "airflow dags unpause iqa_dvc_reproducibility",
         "airflow dags unpause iqa_lifecycle_trigger",
+        "airflow dags unpause iqa_drift_piece_a_p4",
         "airflow dags trigger iqa_dvc_reproducibility",
         "airflow dags trigger iqa_lifecycle_trigger",
+        "airflow dags trigger iqa_drift_piece_a_p4",
         "airflow dags trigger iqa_lifecycle",
         "iqa-run-replay-lifecycle-cycle",
         "pipeline applicatif Feature-AE",

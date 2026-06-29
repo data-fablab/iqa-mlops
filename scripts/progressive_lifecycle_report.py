@@ -59,7 +59,11 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
         "class_progress",
         "gate",
         "reason",
-        "registry",
+        "loc_registry",
+        "class_registry",
+        "activated",
+        "loc_active",
+        "class_active",
     )
     if show_cache:
         header = header + ("active_cache", "candidate_cache", "aupimo_s", "pixel_s")
@@ -95,11 +99,6 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
     classification_progress = cycle.get("classification_progress") or {}
     active_recall = classification_gate.get("active_image_recall", active_metrics.get("image_recall"))
     candidate_recall = classification_gate.get("candidate_image_recall", candidate_metrics.get("image_recall"))
-    registry = cycle.get("registry_alias") or cycle.get("registry_stage") or ""
-    if cycle.get("registered_model_version"):
-        registry = f"{registry}:v{cycle['registered_model_version']}"
-    elif cycle.get("registry_status") in {"failed", "not_registered", "skipped"}:
-        registry = str(cycle.get("registry_status") or "")
     row = (
         str(cycle.get("cycle_id") or ""),
         str(cycle.get("active_model_before") or ""),
@@ -122,7 +121,11 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
         str(classification_progress.get("summary") or ""),
         str(cycle.get("gate_decision") or ""),
         str(cycle.get("gate_reason") or ""),
-        registry,
+        _role_registry(cycle, "localization"),
+        _role_registry(cycle, "classification"),
+        _bool_status(cycle.get("activated_for_next_events")),
+        _bool_status(cycle.get("localization_activated_for_next_events")),
+        _bool_status(cycle.get("classification_activated_for_next_events")),
     )
     if show_cache:
         timings = cycle.get("candidate_metric_timings") or {}
@@ -146,6 +149,25 @@ def _bool_status(value: Any) -> str:
         return "yes"
     if value is False:
         return "no"
+    return ""
+
+
+def _role_registry(cycle: dict[str, Any], role: str) -> str:
+    status = str(cycle.get(f"{role}_registry_status") or "")
+    version = cycle.get(f"{role}_registered_model_version")
+    alias = str(cycle.get(f"{role}_registry_alias") or cycle.get(f"{role}_registry_stage") or "")
+    if version:
+        return f"{alias}:v{version}" if alias else f"v{version}"
+    if status in {"failed", "not_registered", "skipped"}:
+        return status
+    if role == "classification":
+        legacy_version = cycle.get("registered_model_version")
+        legacy_alias = str(cycle.get("registry_alias") or cycle.get("registry_stage") or "")
+        if legacy_version:
+            return f"{legacy_alias}:v{legacy_version}" if legacy_alias else f"v{legacy_version}"
+        legacy_status = str(cycle.get("registry_status") or "")
+        if legacy_status in {"failed", "not_registered", "skipped"}:
+            return legacy_status
     return ""
 
 
@@ -174,7 +196,9 @@ def _epoch_lines(cycles: list[dict[str, Any]]) -> list[str]:
             lines.append(
                 f"{cycle.get('cycle_id')} epoch={item.get('epoch')} "
                 f"aupimo={metrics.get('pixel_aupimo_1e-5_1e-3')} "
-                f"pixel_ap={metrics.get('pixel_ap')}"
+                f"pixel_ap={metrics.get('pixel_ap')} "
+                f"image_ap={metrics.get('image_ap')} "
+                f"image_auroc={metrics.get('image_auroc')}"
             )
     return lines if found else []
 

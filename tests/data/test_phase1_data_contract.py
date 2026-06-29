@@ -161,6 +161,11 @@ def test_replay_plans_carry_phase1_runtime_metadata() -> None:
             "production_replay_natural_train_v004",
         ),
         (METADATA / "casting_flux_replay_plan_drift.csv", "drift_domain_extension", "drift_domain_extension_v001"),
+        (
+            METADATA / "casting_flux_replay_plan_piece_b_minimal_v001.csv",
+            "production_replay_natural_piece_b_minimal",
+            "production_replay_natural_piece_b_minimal",
+        ),
     ]:
         rows = _read_csv(path)
         assert rows
@@ -171,6 +176,28 @@ def test_replay_plans_carry_phase1_runtime_metadata() -> None:
         assert {row["is_simulated"].lower() for row in rows} == {"true"}
         assert {row["roi_model_version"] for row in rows} == {"roi_segmenter_v001_fixed"}
         assert {row["feature_ae_version"] for row in rows} == {"rd_feature_ae_gated_v001_bootstrap"}
+
+
+def test_piece_b_minimal_scenario_is_tiny_complete_and_disjoint() -> None:
+    view_pairs = {"Casting_class1:1_2|Casting_class1:1_3|Casting_class1:2_3"}
+    bootstrap = _read_csv(METADATA / "feature_ae_bootstrap_piece_b_minimal_v001.csv")
+    validation = _read_csv(VALIDATION / "validation_set_piece_b_minimal_v001.csv")
+    replay = _read_csv(METADATA / "casting_flux_replay_plan_piece_b_minimal_v001.csv")
+
+    bootstrap_ids = _ids(bootstrap)
+    validation_ids = _ids(validation)
+    replay_source_ids = _ids(replay, "source_event_id")
+
+    assert len(bootstrap) == 2
+    assert len(validation) == 4
+    assert len(replay) == 8
+    assert bootstrap_ids.isdisjoint(validation_ids)
+    assert bootstrap_ids.isdisjoint(replay_source_ids)
+    assert validation_ids.isdisjoint(replay_source_ids)
+    assert {row["view_pairs"] for row in bootstrap + validation + replay} == view_pairs
+    assert {row["n_images"] for row in bootstrap + validation + replay} == {"3"}
+    assert sum(row["is_defective"].lower() == "true" for row in validation) == 2
+    assert sum(row["is_defective"].lower() == "true" for row in replay) == 2
 
 
 def test_dvc_remote_is_configured_for_phase1_data() -> None:
