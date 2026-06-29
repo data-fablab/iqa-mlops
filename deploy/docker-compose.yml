@@ -61,7 +61,7 @@ services:
       # Real casting images so the scorer reads actual pixels (same dataset the
       # GPU trainer uses; the host path is a junction Docker can't follow, so we
       # bind the real external dataset directly).
-      - "C:/Users/ftk/Documents/Projet ML/mar26_bds_anomalies_pieces_indus/data/raw/hss-iad:/opt/iqa/iqa-mlops/data/raw/hss-iad:ro"
+      - ${IQA_DATASET_HOST_PATH:-../data/raw/hss-iad}:/opt/iqa/iqa-mlops/data/raw/hss-iad:ro
     deploy:
       resources:
         reservations:
