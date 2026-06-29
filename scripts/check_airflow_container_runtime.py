@@ -21,7 +21,8 @@ CONTAINER_DAGS = {
     "iqa_replay.py": "iqa-run-replay",
     "iqa_monitoring.py": "iqa-run-monitoring",
     "iqa_lifecycle.py": "iqa-run-replay-lifecycle-cycle",
-    "iqa_lifecycle_trigger.py": "iqa-run-lifecycle-decision",
+    "iqa_lifecycle_trigger.py": "iqa-run-monitoring",
+    "iqa_drift_piece_a_p4.py": "iqa-run-drift-observation-replay",
 }
 EXPECTED_DAG_IDS = {
     "iqa_ingestion",
@@ -29,6 +30,7 @@ EXPECTED_DAG_IDS = {
     "iqa_monitoring",
     "iqa_lifecycle",
     "iqa_lifecycle_trigger",
+    "iqa_drift_piece_a_p4",
     "iqa_dvc_reproducibility",
 }
 FORBIDDEN_RUNTIME_IMPORTS = (
@@ -176,8 +178,10 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "airflow dags list-import-errors",
         "airflow dags unpause iqa_dvc_reproducibility",
         "airflow dags unpause iqa_lifecycle_trigger",
+        "airflow dags unpause iqa_drift_piece_a_p4",
         "airflow dags trigger iqa_dvc_reproducibility",
         "airflow dags trigger iqa_lifecycle_trigger",
+        "airflow dags trigger iqa_drift_piece_a_p4",
         "iqa-run-replay-lifecycle-cycle",
         "pipeline applicatif Feature-AE",
         "Docker Compose orchestre les services longs",
@@ -206,8 +210,10 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
             "airflow pools list",
             "airflow dags unpause iqa_dvc_reproducibility",
             "airflow dags unpause iqa_lifecycle_trigger",
+            "airflow dags unpause iqa_drift_piece_a_p4",
             "airflow dags trigger iqa_dvc_reproducibility",
             "airflow dags trigger iqa_lifecycle_trigger",
+            "airflow dags trigger iqa_drift_piece_a_p4",
         ],
         "socket_mount": "/var/run/docker.sock",
         "status": "validated",

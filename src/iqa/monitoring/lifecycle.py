@@ -6,13 +6,17 @@ from dataclasses import asdict, dataclass
 
 NATURAL_REPLAY_SCENARIO_ID = "production_replay_natural"
 NATURAL_TRAIN_REPLAY_SCENARIO_ID = "production_replay_natural_train_v004"
+PIECE_B_FULL_REPLAY_SCENARIO_ID = "production_replay_natural_piece_b_full"
+PIECE_B_TO_PIECE_A_P4_DRIFT_SCENARIO_ID = "production_replay_natural_piece_b_to_piece_a_p4_drift"
 NATURAL_REPLAY_SCENARIO_IDS = frozenset(
     {
         NATURAL_REPLAY_SCENARIO_ID,
         NATURAL_TRAIN_REPLAY_SCENARIO_ID,
+        PIECE_B_FULL_REPLAY_SCENARIO_ID,
     }
 )
 DRIFT_REPLAY_SCENARIO_ID = "drift_domain_extension"
+DRIFT_CORRECTION_SCENARIO_IDS = frozenset({DRIFT_REPLAY_SCENARIO_ID, PIECE_B_TO_PIECE_A_P4_DRIFT_SCENARIO_ID})
 NATURAL_CONFORMING_VALIDATED_TRIGGER_COUNT = 50
 FEATURE_AE_V002_DATASET_VERSION = "feature_ae_good_mvp_v001"
 FEATURE_AE_V003_DATASET_VERSION = "feature_ae_good_mvp_v001"
@@ -65,11 +69,18 @@ def evaluate_lifecycle_signal(
             drift_confirmed=signal.drift_confirmed,
         )
 
-    if signal.scenario_id == DRIFT_REPLAY_SCENARIO_ID:
+    if signal.scenario_id in DRIFT_CORRECTION_SCENARIO_IDS:
+        trigger_reason = (
+            "drift_piece_a_p4_confirmed"
+            if signal.scenario_id == PIECE_B_TO_PIECE_A_P4_DRIFT_SCENARIO_ID and signal.drift_confirmed
+            else "drift_confirmed"
+            if signal.drift_confirmed
+            else "drift_not_confirmed"
+        )
         return LifecycleDecision(
             scenario_id=signal.scenario_id,
             trigger_lifecycle=signal.drift_confirmed,
-            trigger_reason="drift_confirmed" if signal.drift_confirmed else "drift_not_confirmed",
+            trigger_reason=trigger_reason,
             candidate_dataset_version=FEATURE_AE_V003_DATASET_VERSION if signal.drift_confirmed else None,
             conforming_validated_count=signal.conforming_validated_count,
             drift_confirmed=signal.drift_confirmed,
@@ -92,6 +103,7 @@ def should_trigger_lifecycle(signal: LifecycleSignal, *, min_conforming: int = 5
 
 __all__ = [
     "DRIFT_REPLAY_SCENARIO_ID",
+    "DRIFT_CORRECTION_SCENARIO_IDS",
     "FEATURE_AE_V002_DATASET_VERSION",
     "FEATURE_AE_V003_DATASET_VERSION",
     "LifecycleDecision",
@@ -100,6 +112,8 @@ __all__ = [
     "NATURAL_REPLAY_SCENARIO_ID",
     "NATURAL_REPLAY_SCENARIO_IDS",
     "NATURAL_TRAIN_REPLAY_SCENARIO_ID",
+    "PIECE_B_FULL_REPLAY_SCENARIO_ID",
+    "PIECE_B_TO_PIECE_A_P4_DRIFT_SCENARIO_ID",
     "evaluate_lifecycle_signal",
     "should_trigger_lifecycle",
 ]

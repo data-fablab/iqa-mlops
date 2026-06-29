@@ -62,35 +62,38 @@ def load_feature_ae_decision_thresholds(
 def load_feature_ae_reference_contract(
     model_version: str = DEFAULT_FEATURE_AE_MODEL_VERSION,
 ) -> FeatureAEReferenceContract:
+    manifest = load_model_manifest(model_version)
+    validate_feature_ae_reference_manifest(manifest, model_version=model_version)
+    return feature_ae_reference_contract_from_payload(manifest["feature_ae_reference_contract"])
+
+
+def feature_ae_reference_contract_from_payload(payload: dict[str, Any]) -> FeatureAEReferenceContract:
     from iqa.models.feature_ae.reference import (
         REFERENCE_FEATURE_AE_CONTRACT,
         FeatureAEReferenceContract,
     )
 
-    manifest = load_model_manifest(model_version)
-    validate_feature_ae_reference_manifest(manifest, model_version=model_version)
-    payload = manifest["feature_ae_reference_contract"]
-
+    version = payload.get("version") or payload.get("score_contract_version")
     layer_weights = payload.get("layer_weights")
     normalization_stats = payload.get("layer_normalization_stats")
 
     return FeatureAEReferenceContract(
-        version=str(payload["version"]),
-        teacher_weights=str(payload["teacher_weights"]),
-        tile_size=int(payload["tile_size"]),
-        context_size=int(payload["context_size"]),
-        tile_stride=int(payload["tile_stride"]),
-        layers=tuple(str(layer) for layer in payload["layers"]),
+        version=str(version or REFERENCE_FEATURE_AE_CONTRACT.version),
+        teacher_weights=str(payload.get("teacher_weights", REFERENCE_FEATURE_AE_CONTRACT.teacher_weights)),
+        tile_size=int(payload.get("tile_size", REFERENCE_FEATURE_AE_CONTRACT.tile_size)),
+        context_size=int(payload.get("context_size", REFERENCE_FEATURE_AE_CONTRACT.context_size)),
+        tile_stride=int(payload.get("tile_stride", REFERENCE_FEATURE_AE_CONTRACT.tile_stride)),
+        layers=tuple(str(layer) for layer in payload.get("layers", REFERENCE_FEATURE_AE_CONTRACT.layers)),
         layer_weights=(
             {str(name): float(value) for name, value in layer_weights.items()}
             if isinstance(layer_weights, dict)
-            else None
+            else REFERENCE_FEATURE_AE_CONTRACT.normalized_layer_weights()
         ),
-        score_smoothing=str(payload["score_smoothing"]),
-        roi_mode=str(payload["roi_mode"]),
-        roi_threshold=float(payload["roi_threshold"]),
-        score_image=str(payload["score_image"]),
-        topk_fraction=float(payload["topk_fraction"]),
+        score_smoothing=str(payload.get("score_smoothing", REFERENCE_FEATURE_AE_CONTRACT.score_smoothing)),
+        roi_mode=str(payload.get("roi_mode", REFERENCE_FEATURE_AE_CONTRACT.roi_mode)),
+        roi_threshold=float(payload.get("roi_threshold", REFERENCE_FEATURE_AE_CONTRACT.roi_threshold)),
+        score_image=str(payload.get("score_image", REFERENCE_FEATURE_AE_CONTRACT.score_image)),
+        topk_fraction=float(payload.get("topk_fraction", REFERENCE_FEATURE_AE_CONTRACT.topk_fraction)),
         layer_score_mode=str(
             payload.get("layer_score_mode", REFERENCE_FEATURE_AE_CONTRACT.layer_score_mode)
         ),
@@ -106,6 +109,27 @@ def load_feature_ae_reference_contract(
             payload.get("cosine_weight", REFERENCE_FEATURE_AE_CONTRACT.cosine_weight)
         ),
     )
+
+
+def load_feature_ae_runtime_contract(path: str | Path) -> dict[str, Any]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    reference_contract = payload.get("feature_ae_reference_contract") or payload.get("score_contract")
+    if not isinstance(reference_contract, dict):
+        raise ValueError(f"Feature-AE runtime contract is missing feature_ae_reference_contract: {path}")
+    thresholds = payload.get("decision_thresholds")
+    if not isinstance(thresholds, dict):
+        raise ValueError(f"Feature-AE runtime contract is missing decision_thresholds: {path}")
+    contract_version = reference_contract.get("version") or reference_contract.get("score_contract_version")
+    if contract_version != FEATURE_AE_REFERENCE_CONTRACT_VERSION:
+        raise ValueError(
+            f"Feature-AE runtime contract uses unsupported score contract {contract_version!r}"
+        )
+    if thresholds.get("score_contract_version") != FEATURE_AE_REFERENCE_CONTRACT_VERSION:
+        raise ValueError(
+            f"Feature-AE runtime thresholds use unsupported score contract "
+            f"{thresholds.get('score_contract_version')!r}"
+        )
+    return payload
 
 
 def validate_feature_ae_reference_manifest(
@@ -185,11 +209,12 @@ __all__ = [
     "DEFAULT_ROI_MODEL_VERSION",
     "load_feature_ae_decision_thresholds",
     "load_feature_ae_reference_contract",
+    "load_feature_ae_runtime_contract",
     "load_model_manifest",
     "model_manifest_path",
+    "feature_ae_reference_contract_from_payload",
     "resolve_feature_ae_checkpoint",
     "resolve_model_checkpoint",
     "resolve_roi_segmenter_checkpoint",
     "validate_feature_ae_reference_manifest",
 ]
-

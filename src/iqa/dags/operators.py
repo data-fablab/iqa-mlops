@@ -96,8 +96,33 @@ def _task_environment(env: dict[str, str] | None) -> dict[str, str]:
     can override a value for a single task.
     """
     environment = {name: os.environ[name] for name in _passthrough_names() if name in os.environ}
+    _normalise_docker_task_data_plane_env(environment)
     environment.update(env or {})
     return environment
+
+
+def _normalise_docker_task_data_plane_env(environment: dict[str, str]) -> None:
+    """Translate host-facing .env values into task-container data-plane values.
+
+    The same ``.env`` is read by host users, long-running Compose services, and
+    DockerOperator task containers. Host values such as ``http://localhost:9000``
+    are correct from Windows/Linux shells, but wrong inside sibling task
+    containers on ``iqa_net``. Task containers must use service DNS names and the
+    same credentials MinIO/MLflow use.
+    """
+    s3_endpoint = environment.get("IQA_S3_ENDPOINT_URL", "")
+    mlflow_s3_endpoint = environment.get("MLFLOW_S3_ENDPOINT_URL", "")
+    if _is_loopback_endpoint(s3_endpoint) and mlflow_s3_endpoint:
+        environment["IQA_S3_ENDPOINT_URL"] = mlflow_s3_endpoint
+
+    if environment.get("IQA_S3_ACCESS_KEY_ID") == "change-me" and environment.get("AWS_ACCESS_KEY_ID"):
+        environment["IQA_S3_ACCESS_KEY_ID"] = environment["AWS_ACCESS_KEY_ID"]
+    if environment.get("IQA_S3_SECRET_ACCESS_KEY") == "change-me" and environment.get("AWS_SECRET_ACCESS_KEY"):
+        environment["IQA_S3_SECRET_ACCESS_KEY"] = environment["AWS_SECRET_ACCESS_KEY"]
+
+
+def _is_loopback_endpoint(value: str) -> bool:
+    return "://localhost" in value or "://127.0.0.1" in value
 
 
 def _normalise_command(command: str | list[str] | None) -> list[str] | None:

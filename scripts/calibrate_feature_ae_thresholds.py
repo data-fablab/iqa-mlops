@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -37,12 +38,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--red-quantile", type=float, default=0.99)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--max-images", type=int)
+    parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--write-manifest", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    _load_env_file(args.env_file)
     result = calibrate_feature_ae_thresholds(args)
     print(json.dumps(result, indent=2, sort_keys=True))
 
@@ -172,6 +175,21 @@ def update_manifest_thresholds(model_version: str, thresholds: dict[str, Any]) -
     manifest["decision_thresholds"] = thresholds
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+    if os.environ.get("IQA_S3_ACCESS_KEY_ID") == "change-me" and os.environ.get("MINIO_ROOT_USER"):
+        os.environ["IQA_S3_ACCESS_KEY_ID"] = os.environ["MINIO_ROOT_USER"]
+    if os.environ.get("IQA_S3_SECRET_ACCESS_KEY") == "change-me" and os.environ.get("MINIO_ROOT_PASSWORD"):
+        os.environ["IQA_S3_SECRET_ACCESS_KEY"] = os.environ["MINIO_ROOT_PASSWORD"]
 
 
 if __name__ == "__main__":

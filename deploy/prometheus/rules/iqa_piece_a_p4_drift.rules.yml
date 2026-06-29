@@ -1,0 +1,12 @@
+groups:
+  - name: iqa_piece_a_p4_drift
+    rules:
+      - alert: IqaPieceAP4DriftConfirmed
+        expr: iqa_drift_status{source_domain="piece_a_p4",status="confirmed"} == 1
+        for: 30s
+        labels:
+          severity: critical
+          signal: drift_piece_a_p4
+        annotations:
+          summary: "Drift Piece A/P4 confirme"
+          description: "Le monitoring IQA a confirme un drift Piece A/P4. Airflow doit declencher la correction lifecycle via le signal monitoring."

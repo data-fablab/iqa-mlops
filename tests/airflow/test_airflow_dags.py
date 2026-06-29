@@ -118,6 +118,10 @@ def test_monitoring_dag_containerises_via_factory() -> None:
     assert '"{{ params.conforming_validated_count }}"' in monitoring
     assert '"--drift-confirmed", "{{ params.drift_confirmed }}"' in monitoring
     assert '"{{ params.roi_fail_rate }}"' in monitoring
+    assert '"--domain-ratio", "{{ params.domain_ratio }}"' in monitoring
+    assert '"--unexpected-red-rate", "{{ params.unexpected_red_rate }}"' in monitoring
+    assert '"--critical-window-count", "{{ params.critical_window_count }}"' in monitoring
+    assert '"--api-url", "{{ params.api_url }}"' in monitoring
     assert '"{{ params.thresholds_config }}"' in monitoring
     # No BashOperator shell form left.
     assert "BashOperator(" not in monitoring
@@ -170,8 +174,12 @@ def test_lifecycle_dag_declares_comparative_promotion_params() -> None:
     assert "--promotion-min-delta" in source
     assert "--gate-eval-profile" in source
     assert "--reference-eval-manifest" in source
+    assert "--classification-selection-manifest" in source
     assert "--reference-gt-masks-manifest" in source
     assert "--max-steps" in source
+    assert "--external-drift-confirmed" in source
+    assert "--initial-classification-registered-model" in source
+    assert "--initial-localization-registered-model" in source
     assert "--require-mlflow-registry" in source
     assert "params.require_mlflow_registry in [true, 'True', 'true', '1', 1]" in source
 
@@ -256,7 +264,7 @@ def test_lifecycle_trigger_dag_evaluates_in_container_and_triggers_lifecycle() -
     """Trigger DAG (issue 16) evaluates the event rule in a container, then fires
     iqa_lifecycle via native Airflow glue -- no manual trigger, no iqa import.
 
-    evaluate_decision runs iqa-run-lifecycle-decision on the data image; a
+    evaluate_decision runs iqa-run-monitoring on the data image; a
     ShortCircuitOperator gates on the container's trigger_lifecycle decision; a
     TriggerDagRunOperator launches iqa_lifecycle and relays the signal as conf.
     """
@@ -264,9 +272,12 @@ def test_lifecycle_trigger_dag_evaluates_in_container_and_triggers_lifecycle() -
 
     # The metier decision runs in the data-image container (ADR 0008).
     assert "make_container_task(" in trigger
-    assert '"iqa-run-lifecycle-decision"' in trigger
+    assert '"iqa-run-monitoring"' in trigger
     assert '"{{ params.conforming_validated_count }}"' in trigger
     assert '"--drift-confirmed", "{{ params.drift_confirmed }}"' in trigger
+    assert '"--domain-ratio", "{{ params.domain_ratio }}"' in trigger
+    assert '"--unexpected-red-rate", "{{ params.unexpected_red_rate }}"' in trigger
+    assert '"--critical-window-count", "{{ params.critical_window_count }}"' in trigger
     # Native Airflow glue: gate on the decision, then trigger the lifecycle.
     assert "ShortCircuitOperator(" in trigger
     assert "TriggerDagRunOperator(" in trigger
@@ -275,18 +286,97 @@ def test_lifecycle_trigger_dag_evaluates_in_container_and_triggers_lifecycle() -
     for relayed_param in [
         '"gate_eval_profile": "{{ params.gate_eval_profile }}"',
         '"reference_eval_manifest": "{{ params.reference_eval_manifest }}"',
+        '"classification_selection_manifest": "{{ params.classification_selection_manifest }}"',
         '"reference_gt_masks_manifest": "{{ params.reference_gt_masks_manifest }}"',
         '"max_steps": "{{ params.max_steps }}"',
         '"require_mlflow_registry": "{{ params.require_mlflow_registry }}"',
         '"mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}"',
         '"ml_image": "{{ params.ml_image }}"',
+        '"initial_classification_registered_model": "{{ params.initial_classification_registered_model }}"',
+        '"initial_localization_registered_model": "{{ params.initial_localization_registered_model }}"',
+        '"external_drift_confirmed": "{{ params.drift_confirmed }}"',
     ]:
         assert relayed_param in trigger
-    assert '"scenario_id": "production_replay_natural_train_v004"' in trigger
-    assert '"reference_eval_manifest": "data/validation/validation_set_replay_gate_v002.csv"' in trigger
+    assert '"scenario_id": "production_replay_natural_piece_b_to_piece_a_p4_drift"' in trigger
+    assert '"candidate_init_policy": "active"' in trigger
+    assert '"initial_classification_registered_model": "feature_ae_classifier__production_replay_natural_piece_b_full"' in trigger
+    assert '"initial_localization_registered_model": "feature_ae_localization__production_replay_natural_piece_b_full"' in trigger
+    assert '"dual_promotion": True' in trigger
+    assert '"epochs": 16' in trigger
+    assert '"reference_eval_manifest": "data/validation/validation_set_piece_b_to_piece_a_p4_drift_v001.csv"' in trigger
+    assert '"classification_selection_manifest": "data/validation/classification_selection_piece_b_to_piece_a_p4_drift_v001.csv"' in trigger
     # No shell / no eager iqa import in the scheduler.
     assert "BashOperator(" not in trigger
     assert "bash_command" not in trigger
+
+
+@pytest.mark.unit
+def test_piece_a_p4_drift_dag_observes_before_triggering_one_correction() -> None:
+    """The natural P4 drift DAG must observe inference metrics before training."""
+    source = _read_dag_source("iqa_drift_piece_a_p4.py")
+
+    assert 'dag_id="iqa_drift_piece_a_p4"' in source
+    assert "iqa-run-drift-observation-replay" in source
+    assert "ShortCircuitOperator(" in source
+    assert 'task_id="trigger_lifecycle_correction"' in source
+    assert 'trigger_dag_id=LIFECYCLE_DAG_ID' in source
+    assert "op_observe_replay >> op_gate_on_confirmed_drift >> op_trigger_correction" in source
+    assert '"max_cycles": 1' in source
+    assert '"candidate_init_policy": "active"' in source
+    assert '"external_drift_confirmed": True' in source
+    assert '"reference_eval_manifest": "data/validation/validation_set_piece_b_to_piece_a_p4_drift_v001.csv"' in source
+    assert '"classification_selection_manifest": "data/validation/classification_selection_piece_b_to_piece_a_p4_drift_v001.csv"' in source
+    assert '"reference_gt_masks_manifest": "data/validation/validation_gt_masks_piece_b_to_piece_a_p4_drift_v001.csv"' in source
+    assert '"epochs": 16' in source
+    assert '"initial_classification_registered_model": "feature_ae_classifier__production_replay_natural_piece_b_full"' in source
+    assert '"initial_localization_registered_model": "feature_ae_localization__production_replay_natural_piece_b_full"' in source
+    assert "BashOperator(" not in source
+    assert "bash_command" not in source
+
+
+@pytest.mark.unit
+def test_piece_a_p4_drift_gate_parses_noisy_container_xcom() -> None:
+    """DockerOperator XCom may contain dependency download logs before JSON."""
+    try:
+        import iqa_drift_piece_a_p4
+    except ImportError as e:
+        pytest.skip(f"Airflow not installed: {e}")
+
+    noisy_payload = (
+        'Downloading: "https://download.pytorch.org/models/resnet18-f37072fd.pth"\n'
+        '{"status":"validated","trigger_lifecycle":true,"drift_confirmed":true}\n'
+    )
+
+    assert iqa_drift_piece_a_p4._parse_observation_payload(noisy_payload)["trigger_lifecycle"] is True
+
+    class FakeTaskInstance:
+        @staticmethod
+        def xcom_pull(task_ids: str) -> str:
+            assert task_ids == iqa_drift_piece_a_p4.OBSERVE_TASK_ID
+            return noisy_payload
+
+    assert iqa_drift_piece_a_p4._should_trigger_correction(ti=FakeTaskInstance()) is True
+
+
+@pytest.mark.docker_contract
+def test_piece_a_p4_drift_dag_has_observe_gate_trigger_chain() -> None:
+    """P4 drift DAG wires observation -> gate -> one correction trigger."""
+    try:
+        import iqa_drift_piece_a_p4
+    except ImportError as e:
+        pytest.skip(f"Airflow not installed: {e}")
+
+    dag = iqa_drift_piece_a_p4.dag
+    if dag is None:
+        pytest.skip("DAG is None (Airflow provider not available)")
+
+    expected_chain = ["observe_replay", "gate_on_confirmed_drift", "trigger_lifecycle_correction"]
+    task_ids = {task.task_id for task in dag.tasks}
+    assert set(expected_chain) <= task_ids
+
+    for upstream, downstream in zip(expected_chain, expected_chain[1:]):
+        task = dag.get_task(upstream)
+        assert downstream in {t.task_id for t in task.downstream_list}
 
 
 @pytest.mark.docker_contract

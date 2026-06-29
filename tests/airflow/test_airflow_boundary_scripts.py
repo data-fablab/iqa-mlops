@@ -157,3 +157,131 @@ def test_run_monitoring_evaluates_thresholds_config_in_container(
     assert roi["status"] == "critical"
     assert roi["breached"] is True
     assert roi["critical"] == 0.10
+
+
+def test_run_monitoring_detects_piece_a_p4_drift_after_confirmed_windows(
+    tmp_path: Path,
+    run_boundary_script: Callable[[object, list[str]], dict],
+) -> None:
+    thresholds = tmp_path / "monitoring_thresholds.yaml"
+    thresholds.write_text(
+        "\n".join(
+            [
+                "drift:",
+                "  min_window_events: 30",
+                "  confirm_windows: 2",
+                "  domain_ratio_critical: 0.50",
+                "  alert_rate_critical: 0.50",
+                "  red_rate_critical: 0.20",
+                "  unexpected_red_rate_critical: 0.20",
+                "  roi_fail_rate_critical: 0.10",
+                "  oracle_fn_rate_critical: 0.05",
+                "",
+                "quality:",
+                "  roi_fail_rate_warning: 0.05",
+                "  roi_fail_rate_critical: 0.10",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_boundary_script(
+        run_monitoring,
+        [
+            "iqa-run-monitoring",
+            "--scenario-id",
+            "production_replay_natural_piece_b_to_piece_a_p4_drift",
+            "--window-events",
+            "60",
+            "--domain-ratio",
+            "0.70",
+            "--alert-rate",
+            "0.70",
+            "--unexpected-red-rate",
+            "0.70",
+            "--critical-window-count",
+            "1",
+            "--thresholds-config",
+            str(thresholds),
+        ],
+    )
+
+    assert result["drift_suspected"] is True
+    assert result["drift_confirmed"] is True
+    assert result["trigger_lifecycle"] is True
+    assert result["trigger_reason"] == "drift_piece_a_p4_confirmed"
+
+
+def test_run_monitoring_does_not_confirm_piece_a_p4_on_domain_ratio_only(
+    tmp_path: Path,
+    run_boundary_script: Callable[[object, list[str]], dict],
+) -> None:
+    thresholds = tmp_path / "monitoring_thresholds.yaml"
+    thresholds.write_text(
+        "\n".join(
+            [
+                "drift:",
+                "  min_window_events: 30",
+                "  confirm_windows: 2",
+                "  domain_ratio_critical: 0.50",
+                "  alert_rate_critical: 0.50",
+                "  red_rate_critical: 0.20",
+                "  unexpected_red_rate_critical: 0.20",
+                "  roi_fail_rate_critical: 0.10",
+                "  oracle_fn_rate_critical: 0.05",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_boundary_script(
+        run_monitoring,
+        [
+            "iqa-run-monitoring",
+            "--scenario-id",
+            "production_replay_natural_piece_b_to_piece_a_p4_drift",
+            "--window-events",
+            "60",
+            "--domain-ratio",
+            "0.90",
+            "--critical-window-count",
+            "99",
+            "--thresholds-config",
+            str(thresholds),
+        ],
+    )
+
+    assert result["drift_suspected"] is True
+    assert result["drift_confirmed"] is False
+    assert result["trigger_lifecycle"] is False
+    assert result["drift_evaluation"]["signals"]["domain_ratio"] is True
+    assert result["drift_evaluation"]["critical_window"] is False
+
+
+def test_run_monitoring_does_not_confirm_drift_on_small_window(
+    tmp_path: Path,
+    run_boundary_script: Callable[[object, list[str]], dict],
+) -> None:
+    thresholds = tmp_path / "monitoring_thresholds.yaml"
+    thresholds.write_text("drift:\n  min_window_events: 30\n  confirm_windows: 2\n", encoding="utf-8")
+
+    result = run_boundary_script(
+        run_monitoring,
+        [
+            "iqa-run-monitoring",
+            "--scenario-id",
+            "production_replay_natural_piece_b_to_piece_a_p4_drift",
+            "--window-events",
+            "10",
+            "--domain-ratio",
+            "0.90",
+            "--critical-window-count",
+            "2",
+            "--thresholds-config",
+            str(thresholds),
+        ],
+    )
+
+    assert result["drift_suspected"] is False
+    assert result["drift_confirmed"] is False
+    assert result["trigger_lifecycle"] is False

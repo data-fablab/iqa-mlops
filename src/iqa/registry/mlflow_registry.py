@@ -8,6 +8,7 @@ States: candidate, test, prod, archived (per scenario_id)
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 
 try:
@@ -109,6 +110,7 @@ def register_run_to_model(
     scenario_id: str,
     stage: str = "candidate",
     model_name_base: str = "feature_ae",
+    model_artifact_path: str = "model",
     tracking_uri: str | None = None,
     require_model_artifact: bool = True,
 ) -> dict[str, str]:
@@ -119,6 +121,7 @@ def register_run_to_model(
         scenario_id: Scenario identifier (used to determine registered model name)
         stage: MLflow stage (candidate, test, prod, archived)
         model_name_base: Base name for the registered model (default: feature_ae)
+        model_artifact_path: MLflow model artifact path inside the source run
         tracking_uri: MLflow tracking URI (optional)
 
     Returns:
@@ -130,22 +133,25 @@ def register_run_to_model(
     if not HAS_MLFLOW:
         raise ImportError("MLflow is required for register_run_to_model")
 
-    if tracking_uri:
-        mlflow.set_tracking_uri(tracking_uri)
+    resolved_tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI") or os.getenv("IQA_MLFLOW_TRACKING_URI")
+    if resolved_tracking_uri:
+        os.environ.setdefault("MLFLOW_TRACKING_URI", resolved_tracking_uri)
+        mlflow.set_tracking_uri(resolved_tracking_uri)
 
-    client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
+    client = mlflow.tracking.MlflowClient(tracking_uri=resolved_tracking_uri)
 
     # Determine registered model name
     model_name = registered_model_name(scenario_id, base_name=model_name_base)
 
     run = client.get_run(run_id)
-    model_source = f"{run.info.artifact_uri.rstrip('/')}/model"
+    normalized_artifact_path = model_artifact_path.strip("/") or "model"
+    model_source = f"{run.info.artifact_uri.rstrip('/')}/{normalized_artifact_path}"
     if require_model_artifact:
         try:
-            client.download_artifacts(run_id, "model/MLmodel")
+            client.download_artifacts(run_id, f"{normalized_artifact_path}/MLmodel")
         except Exception as exc:
             raise FileNotFoundError(
-                f"missing_mlflow_model_artifact: run {run_id} has no model/MLmodel artifact"
+                f"missing_mlflow_model_artifact: run {run_id} has no {normalized_artifact_path}/MLmodel artifact"
             ) from exc
 
     try:
@@ -182,6 +188,7 @@ def register_run_to_model(
         "stage": stage,
         "alias": stage,
         "source_of_truth": "mlflow_registry",
+        "model_artifact_path": normalized_artifact_path,
     }
 
 

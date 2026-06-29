@@ -78,7 +78,8 @@ def _validate_bootstrap_row(row: dict[str, str]) -> None:
     is_defective = (row.get("is_defective") or "").lower()
     if label != "good" or is_defective == "true":
         raise ValueError(f"Bootstrap row {event_id!r} is not good-only.")
-    if row.get("bootstrap_role") not in {"", "train_normal"}:
+    bootstrap_role = row.get("bootstrap_role") or ""
+    if bootstrap_role and not bootstrap_role.startswith("train_normal"):
         raise ValueError(f"Bootstrap row {event_id!r} has unsupported bootstrap_role.")
 
 

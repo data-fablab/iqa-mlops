@@ -54,12 +54,15 @@ Contrats actuels :
 | --- | --- | --- | --- |
 | `data/metadata/casting_piece_events.csv` | `casting_piece_events_v001` | `hss_iad_casting_raw_v1` | `piece_event_id == event_id` |
 | `data/metadata/feature_ae_bootstrap_events.csv` | `feature_ae_bootstrap_events_v001` | `feature_ae_good_v001_bootstrap` | `piece_event_id == event_id` |
+| `data/metadata/feature_ae_bootstrap_piece_b_minimal_v001.csv` | `feature_ae_bootstrap_piece_b_minimal_v001` | `feature_ae_piece_b_minimal_bootstrap_v001` | `piece_event_id == event_id` |
 | `data/metadata/casting_flux_replay_plan_natural_v003.csv` | `casting_flux_replay_plan_natural_v002` | `production_replay_natural_v002` | `piece_event_id == simulated_event_id` |
 | `data/metadata/casting_flux_replay_plan_natural_train_v004.csv` | `casting_flux_replay_plan_natural_train_v004` | `production_replay_natural_train_v004` | `piece_event_id == simulated_event_id` |
 | `data/metadata/casting_flux_replay_plan_drift.csv` | `casting_flux_replay_plan_drift_v001` | `drift_domain_extension_v001` | `piece_event_id == simulated_event_id` |
+| `data/metadata/casting_flux_replay_plan_piece_b_minimal_v001.csv` | `casting_flux_replay_plan_piece_b_minimal_v001` | `production_replay_natural_piece_b_minimal` | `piece_event_id == simulated_event_id` |
 | `data/validation/validation_set_replay_gate_v001.csv` | `validation_set_replay_gate_v001` | `validation_set_replay_gate_v001` | `piece_event_id == event_id` |
 | `data/validation/validation_set_replay_gate_v002.csv` | `validation_set_replay_gate_v002` | `validation_set_replay_gate_v002` | `piece_event_id == event_id` |
 | `data/validation/validation_set_replay_gate_v003.csv` | `validation_set_replay_gate_v003` | `validation_set_replay_gate_v003` | `piece_event_id == event_id` |
+| `data/validation/validation_set_piece_b_minimal_v001.csv` | `validation_set_piece_b_minimal_v001` | `validation_set_piece_b_minimal_v001` | `piece_event_id == event_id` |
 | `data/validation/validation_set_replay_representative_v001.csv` | `validation_set_replay_representative_v001` | `validation_set_replay_representative_v001` | `piece_event_id == event_id` |
 | `data/validation/calibration_good_reference_v001.csv` | `calibration_good_reference_v001` | `calibration_good_reference_v001` | `piece_event_id == event_id` |
 

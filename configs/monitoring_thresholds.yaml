@@ -3,6 +3,14 @@ drift:
   teacher_drift_mean_critical: 0.25
   reconstruction_p95_warning: 0.75
   reconstruction_p95_critical: 0.90
+  min_window_events: 30
+  confirm_windows: 2
+  domain_ratio_critical: 0.50
+  alert_rate_critical: 0.50
+  red_rate_critical: 0.20
+  unexpected_red_rate_critical: 0.20
+  roi_fail_rate_critical: 0.10
+  oracle_fn_rate_critical: 0.05
 
 quality:
   false_negative_total_critical: 1

@@ -1,0 +1,12 @@
+route:
+  receiver: webhook-catcher
+  group_by: ["alertname"]
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 1m
+
+receivers:
+  - name: webhook-catcher
+    webhook_configs:
+      - url: http://webhook-catcher:8080/alert
+        send_resolved: true

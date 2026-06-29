@@ -1,36 +1,29 @@
 {
   "artifact_uri": "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt",
-  "dataset_version": "feature_ae_good_v001_bootstrap",
+  "checkpoint_selection_policy": "business_metric_only",
+  "dataset_version": "feature_ae_piece_b_minimal_bootstrap_v001",
   "decision_thresholds": {
-    "calibration_set_id": "historical_bootstrap_manifest_thresholds",
-    "created_at": "2026-06-18T12:56:24.127337+00:00",
+    "calibration_set_id": "feature_ae_bootstrap_piece_b_minimal_v001",
+    "created_at": "2026-06-26T07:23:13.026962+00:00",
     "method": "calibration_good_quantiles",
     "model_version": "rd_feature_ae_gated_v001_bootstrap",
     "orange_quantile": 0.95,
     "red_quantile": 0.99,
-    "sample_count": 102,
-    "layer_weights": {
-      "layer2": 0.65,
-      "layer3": 0.35
-    },
-    "roi_mode": "soft_map",
-    "roi_threshold": 0.5,
+    "sample_count": 6,
     "score_contract_version": "feature_ae_reference_v001",
     "score_image": "topk_mean",
-    "score_max": 292.6936340332031,
-    "score_median": 2.961828827857971,
-    "score_min": 0.6641950011253357,
+    "score_max": 0.9839649200439453,
+    "score_median": 0.9796085059642792,
+    "score_min": 0.9500693082809448,
     "score_region": "functional_surface_prediction",
     "score_smoothing": "median3",
-    "threshold_orange": 125.7439712524414,
-    "threshold_red": 203.27940811157205,
+    "threshold_orange": 0.9838417619466782,
+    "threshold_red": 0.9839402884244919,
     "topk_fraction": 0.005
   },
-  "model_type": "reverse_distill_resnet18_dual_context_gated",
-  "model_version": "rd_feature_ae_gated_v001_bootstrap",
   "feature_ae_reference_contract": {
-    "context_size": 768,
     "checkpoint_selection_policy": "business_metric_only",
+    "context_size": 768,
     "cosine_weight": 0.5,
     "layer_normalization": "good_p99",
     "layer_normalization_stats": {
@@ -57,12 +50,15 @@
     "topk_fraction": 0.005,
     "version": "feature_ae_reference_v001"
   },
+  "model_type": "reverse_distill_resnet18_dual_context_gated",
+  "model_version": "rd_feature_ae_gated_v001_bootstrap",
   "preprocessing_contract": {
     "augmentation_profile": "none",
     "context_size": 768,
     "cosine_weight": 0.5,
     "image_size": 384,
     "layer_normalization": "good_p99",
+    "layer_normalization_stats": null,
     "layer_score_mode": "sqrt_l2_plus_cosine",
     "layer_weights": {
       "layer2": 0.65,
@@ -91,11 +87,11 @@
   },
   "selected_epoch": 1,
   "selected_metric": "image_ap",
-  "selected_metric_value": 0.9190951612731334,
-  "selected_val_loss": 1.153761516014735,
-  "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss stability only",
-  "sha256": "9e4e3cc84fb359408ec5c58020e799816942d6c46ae024b29acb82c1c8ebe146",
+  "selected_metric_value": 0.34678932178932176,
+  "selected_val_loss": 0.5185302197933197,
+  "selection_policy": "pixel_aupimo_1e-5_1e-3 -> pixel_ap -> image_ap -> image_auroc; val_loss informational only",
+  "sha256": "34446fb3e373552fd6892c532029d23d95b9cc96afcb94fb9bace6c8ad0ee541",
   "source_checkpoint": "checkpoint_best_image_ap.pt",
   "status": "bootstrap",
-  "validation_set_id": "validation_set_replay_representative_v001"
+  "validation_set_id": "validation_set_piece_b_minimal_v001"
 }

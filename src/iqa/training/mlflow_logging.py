@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -22,6 +23,7 @@ from iqa.training.feature_ae_contracts import (
     FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
     canonical_feature_ae_preprocessing_dict,
 )
+from iqa.storage.artifacts import sha256_file
 from iqa.training.feature_ae_evaluation import EvaluationReport
 
 
@@ -56,13 +58,14 @@ class MLflowRunLogger:
 
         self.run_name = run_name
         self.scenario_id = scenario_id
-        self.tracking_uri = tracking_uri
+        self.tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI") or os.getenv("IQA_MLFLOW_TRACKING_URI")
         self.run: Any = None
         self._run_id: str | None = None
 
         # Configure MLflow backend
-        if tracking_uri:
-            mlflow.set_tracking_uri(tracking_uri)
+        if self.tracking_uri:
+            os.environ.setdefault("MLFLOW_TRACKING_URI", self.tracking_uri)
+            mlflow.set_tracking_uri(self.tracking_uri)
 
         # Start the run
         self.run = mlflow.start_run(run_name=run_name)
@@ -102,6 +105,11 @@ class MLflowRunLogger:
             "candidate_version": config.candidate_version,
             "roi_model_version": config.roi_model_version,
             "feature_ae_version": config.feature_ae_version,
+            "candidate_init_policy": config.initial_checkpoint_policy,
+            "candidate_initial_model_version": config.candidate_initial_model_version,
+            "candidate_initial_checkpoint_sha256": config.candidate_initial_checkpoint_sha256,
+            "lifecycle_run_id": config.lifecycle_run_id,
+            "cycle_id": config.cycle_id,
         }
         mlflow.log_params(params)
 
@@ -166,7 +174,14 @@ class MLflowRunLogger:
         if eval_report_path and eval_report_path.exists():
             mlflow.log_artifact(str(eval_report_path), artifact_path="reports")
 
-    def log_feature_ae_model(self, config: FeatureAETrainingConfig, checkpoint_path: Path) -> bool:
+    def log_feature_ae_model(
+        self,
+        config: FeatureAETrainingConfig,
+        checkpoint_path: Path,
+        *,
+        artifact_path: str = "model",
+        model_role: str = "",
+    ) -> bool:
         """Log a real MLflow Model wrapper for the Feature-AE checkpoint."""
         if not checkpoint_path.exists():
             return False
@@ -188,17 +203,27 @@ class MLflowRunLogger:
                     manifest_artifact = tmp_path / "model_manifest.json"
                     shutil.copy2(source_manifest, manifest_artifact)
                     artifacts["model_manifest"] = str(manifest_artifact)
+            resolved_role = model_role or "legacy_compatibility"
+            metadata = {
+                "model_type": "feature_ae_reference",
+                "model_role": resolved_role,
+                "scenario_id": config.scenario_id,
+                "candidate_version": config.candidate_version,
+                "score_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
+                "checkpoint_filename": checkpoint_path.name,
+                "checkpoint_sha256": sha256_file(checkpoint_path),
+                "candidate_init_policy": config.initial_checkpoint_policy,
+                "lifecycle_run_id": config.lifecycle_run_id,
+                "cycle_id": config.cycle_id,
+            }
+            if resolved_role == "legacy_compatibility":
+                metadata["model_purpose"] = "backward_compatibility_only"
+                metadata["registration_policy"] = "not_registered_in_dual_promotion"
             mlflow.pyfunc.log_model(
-                artifact_path="model",
+                artifact_path=artifact_path,
                 python_model=FeatureAEReferencePyfuncModel(),
                 artifacts=artifacts,
-                metadata={
-                    "model_type": "feature_ae_reference",
-                    "scenario_id": config.scenario_id,
-                    "candidate_version": config.candidate_version,
-                    "score_contract_version": FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
-                    "checkpoint_filename": checkpoint_path.name,
-                },
+                metadata=metadata,
             )
         return True
 
@@ -212,6 +237,12 @@ class MLflowRunLogger:
         candidate_version: str = "",
         roi_model_version: str = "",
         feature_ae_version: str = "",
+        candidate_init_policy: str = "",
+        candidate_initial_model_version: str = "",
+        candidate_initial_checkpoint: str = "",
+        candidate_initial_checkpoint_sha256: str = "",
+        lifecycle_run_id: str = "",
+        cycle_id: str = "",
         preprocessing_contract_version: str = FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
     ) -> None:
         """Set traceability tags.
@@ -232,6 +263,12 @@ class MLflowRunLogger:
             "candidate_version": candidate_version,
             "roi_model_version": roi_model_version,
             "feature_ae_version": feature_ae_version,
+            "candidate_init_policy": candidate_init_policy,
+            "candidate_initial_model_version": candidate_initial_model_version,
+            "candidate_initial_checkpoint": candidate_initial_checkpoint,
+            "candidate_initial_checkpoint_sha256": candidate_initial_checkpoint_sha256,
+            "lifecycle_run_id": lifecycle_run_id,
+            "cycle_id": cycle_id,
             "preprocessing_contract_version": preprocessing_contract_version,
         }
         mlflow.set_tags(tags)
@@ -287,6 +324,12 @@ def train_feature_ae_with_mlflow_logging(
             candidate_version=config.candidate_version,
             roi_model_version=config.roi_model_version,
             feature_ae_version=config.feature_ae_version,
+            candidate_init_policy=config.initial_checkpoint_policy,
+            candidate_initial_model_version=config.candidate_initial_model_version,
+            candidate_initial_checkpoint=config.candidate_initial_checkpoint,
+            candidate_initial_checkpoint_sha256=config.candidate_initial_checkpoint_sha256,
+            lifecycle_run_id=config.lifecycle_run_id,
+            cycle_id=config.cycle_id,
             preprocessing_contract_version=FEATURE_AE_PREPROCESSING_CONTRACT_VERSION,
         )
 
@@ -309,6 +352,29 @@ def train_feature_ae_with_mlflow_logging(
                     if metrics:
                         logger.log_metrics(metrics, step=step)
 
+        # Log business/reference evaluation metrics by epoch as first-class MLflow
+        # metrics. The JSONL artifact remains the detailed evidence, but these
+        # scalar series make the run readable directly in the MLflow UI.
+        for epoch_record in result.get("epoch_metric_history") or []:
+            epoch = int(epoch_record.get("epoch") or 0)
+            epoch_metrics = epoch_record.get("metrics") or {}
+            if not isinstance(epoch_metrics, dict):
+                continue
+            logger.log_metrics(
+                {
+                    f"epoch_eval.{name}": float(value)
+                    for name, value in epoch_metrics.items()
+                    if _is_loggable_number(value)
+                },
+                step=epoch,
+            )
+        if result.get("best_business_metric"):
+            mlflow.log_param("best_business_metric", str(result.get("best_business_metric")))
+        if _is_loggable_number(result.get("best_business_metric_value")):
+            mlflow.log_metric("best_business_metric_value", float(result["best_business_metric_value"]))
+        if _is_loggable_number(result.get("steps")):
+            mlflow.log_metric("training.steps", float(result["steps"]))
+
         # Log artifacts from the run directory
         checkpoint_path = Path(result["checkpoint"])
 
@@ -316,7 +382,25 @@ def train_feature_ae_with_mlflow_logging(
         model_logged = False
         if checkpoint_path.exists():
             logger.log_artifacts(checkpoint_path=checkpoint_path)
-            model_logged = logger.log_feature_ae_model(config, checkpoint_path)
+            model_logged = logger.log_feature_ae_model(
+                config,
+                checkpoint_path,
+                model_role="legacy_compatibility",
+            )
+        role_model_logged = {"localization": False, "classification": False}
+        for role, filename, artifact_path in (
+            ("localization", "checkpoint_best_localization.pt", "model_localization"),
+            ("classification", "checkpoint_best_image.pt", "model_classification"),
+        ):
+            role_checkpoint = run_dir / filename
+            if role_checkpoint.exists():
+                logger.log_artifacts(checkpoint_path=role_checkpoint)
+                role_model_logged[role] = logger.log_feature_ae_model(
+                    config,
+                    role_checkpoint,
+                    artifact_path=artifact_path,
+                    model_role=role,
+                )
 
         # Log evaluation report if it exists
         eval_best_path = run_dir / "metric_eval_best.json"
@@ -331,6 +415,8 @@ def train_feature_ae_with_mlflow_logging(
         result["mlflow_training_dataset_logged"] = dataset_logging["training"]
         result["mlflow_metric_eval_dataset_logged"] = dataset_logging["metric_eval"]
         result["mlflow_model_logged"] = model_logged
+        result["mlflow_localization_model_logged"] = role_model_logged["localization"]
+        result["mlflow_classification_model_logged"] = role_model_logged["classification"]
         return result
     finally:
         # Always end the run
@@ -350,6 +436,18 @@ def _log_manifest_dataset(*, manifest_path: Path, name: str, context: str) -> bo
     except TypeError:
         dataset = mlflow.data.from_pandas(frame, name=name)
     mlflow.log_input(dataset, context=context)
+    return True
+
+
+def _is_loggable_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return True
+    if value is None:
+        return False
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
     return True
 
 

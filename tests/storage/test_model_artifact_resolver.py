@@ -202,3 +202,41 @@ def test_load_feature_ae_reference_contract_from_manifest(
     assert contract.roi_mode == "soft_map"
     assert contract.topk_fraction == pytest.approx(0.005)
     assert contract.cosine_weight == pytest.approx(0.75)
+
+
+def test_feature_ae_runtime_contract_accepts_gate_score_contract(tmp_path: Path) -> None:
+    """Gate metrics store score_contract_version, not the full manifest-style key set."""
+    runtime_contract = tmp_path / "runtime_contract.json"
+    runtime_contract.write_text(
+        json.dumps(
+            {
+                "feature_ae_reference_contract": {
+                    "score_contract_version": model_artifacts.FEATURE_AE_REFERENCE_CONTRACT_VERSION,
+                    "layer_score_mode": "sqrt_l2_plus_cosine",
+                    "layer_normalization": "good_p99",
+                    "layer_normalization_stats": {"layer2": 1.2, "layer3": 2.4},
+                    "layer_weights": {"layer2": 0.65, "layer3": 0.35},
+                    "cosine_weight": 0.5,
+                    "score_smoothing": "median3",
+                    "roi_threshold": 0.5,
+                    "score_image": "topk_mean",
+                    "topk_fraction": 0.005,
+                },
+                "decision_thresholds": {
+                    "score_contract_version": model_artifacts.FEATURE_AE_REFERENCE_CONTRACT_VERSION,
+                    "threshold_orange": 1.1,
+                    "threshold_red": 1.2,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = model_artifacts.load_feature_ae_runtime_contract(runtime_contract)
+    contract = model_artifacts.feature_ae_reference_contract_from_payload(
+        payload["feature_ae_reference_contract"]
+    )
+
+    assert contract.version == model_artifacts.FEATURE_AE_REFERENCE_CONTRACT_VERSION
+    assert contract.layer_normalization_stats == {"layer2": 1.2, "layer3": 2.4}
+    assert contract.teacher_weights == "IMAGENET1K_V1"

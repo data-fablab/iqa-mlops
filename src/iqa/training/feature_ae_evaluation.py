@@ -339,7 +339,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         tile_stride=config.tile_stride,
         roi_masks=roi_lookup.masks,
         roi_status=roi_lookup.status,
-        gt_masks=_load_gt_mask_lookup(config.gt_masks_manifest),
+        gt_masks=_load_gt_mask_lookup(config.gt_masks_manifest, image_root=config.image_root),
         roi_threshold=config.roi_threshold,
         train_only_normal=False,
     )
@@ -618,7 +618,7 @@ def _save_preview(path: Path, score_map: np.ndarray) -> None:
     Image.fromarray((normalized * 255.0).astype(np.uint8)).save(path)
 
 
-def _load_gt_mask_lookup(path: Path | None) -> dict[str, Path]:
+def _load_gt_mask_lookup(path: Path | None, *, image_root: Path | None = None) -> dict[str, Path]:
     if path is None:
         return {}
     masks: dict[str, Path] = {}
@@ -627,13 +627,36 @@ def _load_gt_mask_lookup(path: Path | None) -> dict[str, Path]:
             mask_value = row.get("gt_mask_path") or row.get("mask_path") or row.get("path") or ""
             if not mask_value:
                 continue
-            mask_path = Path(mask_value)
-            if not mask_path.is_absolute():
-                mask_path = path.parent / mask_path
+            mask_path = _resolve_gt_mask_lookup_path(mask_value, image_root=image_root, manifest_path=path)
             for key in (row.get("image_id") or "", row.get("relative_path") or ""):
                 if key:
                     masks[key] = mask_path
     return masks
+
+
+def _resolve_gt_mask_lookup_path(mask_value: str, *, image_root: Path | None, manifest_path: Path) -> Path:
+    raw_path = Path(mask_value.strip())
+    if raw_path.is_absolute():
+        if raw_path.is_file():
+            return raw_path
+        raise FileNotFoundError(f"GT mask declared in {manifest_path} does not exist: {raw_path}")
+    candidates: list[Path] = []
+    normalized = Path(str(raw_path).replace("\\", "/"))
+    if image_root is not None:
+        candidates.append(Path(image_root) / normalized)
+        parts = normalized.parts
+        if "hss-iad" in parts:
+            hss_index = parts.index("hss-iad")
+            candidates.append(Path(image_root) / Path(*parts[hss_index + 1 :]))
+    candidates.extend([manifest_path.parent / normalized, Path.cwd() / normalized])
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    searched = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(
+        f"GT mask declared in {manifest_path} could not be resolved from image_root={image_root}: "
+        f"{mask_value}. Searched: {searched}"
+    )
 
 
 def evaluate_on_validation_set_v001(
