@@ -619,6 +619,12 @@ def _lifecycle_api_payload(
         "classification_promotion_status",
         "localization_gate_reason",
         "classification_gate_reason",
+        "localization_selected_epoch",
+        "localization_selected_metric",
+        "localization_selected_metric_value",
+        "classification_selected_epoch",
+        "classification_selected_metric",
+        "classification_selected_metric_value",
     }
     body = {
         "event_type": event_type,
@@ -1538,6 +1544,12 @@ def handle_lifecycle_decision(
         classification_promotion_status=cycle_result.get("classification_promotion_status"),
         localization_gate_reason=cycle_result.get("localization_gate_reason"),
         classification_gate_reason=cycle_result.get("classification_gate_reason"),
+        localization_selected_epoch=cycle_result.get("selected_epoch"),
+        localization_selected_metric=cycle_result.get("localization_selected_metric"),
+        localization_selected_metric_value=cycle_result.get("localization_candidate_metric_value"),
+        classification_selected_epoch=cycle_result.get("classification_selected_epoch"),
+        classification_selected_metric=cycle_result.get("classification_selected_metric"),
+        classification_selected_metric_value=cycle_result.get("classification_candidate_metric_value"),
         metrics={
             "localization_metric_delta": cycle_result.get("localization_metric_delta"),
             "classification_metric_delta": cycle_result.get("classification_metric_delta"),
@@ -1698,6 +1710,7 @@ def build_progressive_cycle(
         result["classification_selection_manifest"] = classification_selection.get("selection_manifest") or result.get("classification_selection_manifest")
         result["classification_selection_reason"] = classification_selection.get("reason")
         result["classification_selection_checkpoint_sha256"] = classification_selection.get("selected_checkpoint_sha256")
+        result["classification_selected_epoch"] = classification_selection.get("selected_epoch")
         result["classification_selection_false_negatives"] = classification_selection.get("selected_false_negatives")
         result["classification_selection_image_recall"] = classification_selection.get("selected_image_recall")
         result["classification_selection_image_ap"] = classification_selection.get("selected_image_ap")
@@ -3151,6 +3164,7 @@ def select_classification_candidate_checkpoint(
             {
                 "checkpoint": str(checkpoint),
                 "checkpoint_sha256": sha256_file(checkpoint),
+                "selected_epoch": _classification_checkpoint_epoch(checkpoint),
                 "false_negatives": candidate_fn,
                 "image_recall": candidate_recall,
                 "image_ap": candidate_ap,
@@ -3188,6 +3202,7 @@ def select_classification_candidate_checkpoint(
         "selection_manifest": str(manifest_path),
         "selected_checkpoint": selected["checkpoint"],
         "selected_checkpoint_sha256": selected["checkpoint_sha256"],
+        "selected_epoch": selected.get("selected_epoch"),
         "selected_false_negatives": selected["false_negatives"],
         "selected_image_recall": selected["image_recall"],
         "selected_image_ap": selected["image_ap"],
@@ -3217,6 +3232,35 @@ def _classification_selection_checkpoint_candidates(run_dir: Path, *, default_ch
         seen_hashes.add(digest)
         output.append(candidate)
     return output
+
+
+def _classification_checkpoint_epoch(checkpoint: Path) -> int | None:
+    prefix = "checkpoint_epoch_"
+    stem = checkpoint.stem
+    if stem.startswith(prefix):
+        try:
+            return int(stem.removeprefix(prefix))
+        except ValueError:
+            return None
+    metric_by_checkpoint = {
+        "checkpoint_best_image.pt": "image_ap",
+        "checkpoint_best_image_ap.pt": "image_ap",
+        "checkpoint_best_image_auroc.pt": "image_auroc",
+    }
+    metric = metric_by_checkpoint.get(checkpoint.name)
+    if metric is None:
+        return None
+    try:
+        payload = json.loads((checkpoint.parent / "metric_eval_best.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    record = payload.get(metric)
+    if not isinstance(record, dict):
+        return None
+    try:
+        return int(record["epoch"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def resolve_specialized_candidate_checkpoints(train_result: dict[str, Any]) -> dict[str, Path]:

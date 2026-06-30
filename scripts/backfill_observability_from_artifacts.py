@@ -246,10 +246,46 @@ def _promotion_event(
         "classification_promotion_status": cycle.get("classification_promotion_status"),
         "localization_gate_reason": cycle.get("localization_gate_reason"),
         "classification_gate_reason": cycle.get("classification_gate_reason"),
+        "localization_selected_epoch": cycle.get("selected_epoch") or cycle.get("epoch_selected_epoch"),
+        "localization_selected_metric": cycle.get("localization_selected_metric") or cycle.get("selected_metric"),
+        "localization_selected_metric_value": cycle.get("localization_candidate_metric_value")
+        or cycle.get("selected_metric_value"),
+        "classification_selected_epoch": _classification_selected_epoch(cycle),
+        "classification_selected_metric": cycle.get("classification_selected_metric"),
+        "classification_selected_metric_value": cycle.get("classification_candidate_metric_value"),
         "active_classification_model_version": _runtime_version(cycle.get("active_classification_runtime_after")),
         "active_localization_model_version": _runtime_version(cycle.get("active_localization_runtime_after")),
         "metrics": _finite_metrics(metrics),
     }
+
+
+def _classification_selected_epoch(cycle: dict[str, Any]) -> int | None:
+    explicit_epoch = _int_or_none(cycle.get("classification_selected_epoch"))
+    if explicit_epoch is not None:
+        return explicit_epoch
+    checkpoint = Path(str(cycle.get("classification_candidate_checkpoint") or ""))
+    if checkpoint.name.startswith("checkpoint_epoch_"):
+        try:
+            return int(checkpoint.stem.removeprefix("checkpoint_epoch_"))
+        except ValueError:
+            return None
+    metric_by_checkpoint = {
+        "checkpoint_best_image.pt": "image_ap",
+        "checkpoint_best_image_ap.pt": "image_ap",
+        "checkpoint_best_image_auroc.pt": "image_auroc",
+    }
+    metric = metric_by_checkpoint.get(checkpoint.name)
+    candidate_run_dir = cycle.get("candidate_run_dir")
+    if metric is None or not candidate_run_dir:
+        return None
+    try:
+        payload = _read_json(Path(str(candidate_run_dir)) / "metric_eval_best.json")
+    except (OSError, json.JSONDecodeError):
+        return None
+    record = payload.get(metric)
+    if not isinstance(record, dict):
+        return None
+    return _int_or_none(record.get("epoch"))
 
 
 def _run_completed_event(

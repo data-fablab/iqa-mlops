@@ -19,6 +19,8 @@ def _reset_lifecycle_state() -> None:
     LIFECYCLE_STATE["final_models"].clear()
     LIFECYCLE_STATE["summary_metrics"].clear()
     LIFECYCLE_STATE["promotion_decisions"].clear()
+    LIFECYCLE_STATE["promotion_selected_epochs"].clear()
+    LIFECYCLE_STATE["promotion_selected_metric_values"].clear()
     LIFECYCLE_STATE["promotion_seen"].clear()
     LIFECYCLE_STATE["promotion_counters"].clear()
 
@@ -100,6 +102,12 @@ def test_api_metrics_exposes_lifecycle_metrics(monkeypatch) -> None:
             candidate_init_policy="active",
             localization_promotion_status="promoted",
             classification_promotion_status="rejected_no_classification_improvement",
+            localization_selected_epoch=3,
+            localization_selected_metric="pixel_aupimo",
+            localization_selected_metric_value=0.15,
+            classification_selected_epoch=2,
+            classification_selected_metric="image_ap",
+            classification_selected_metric_value=0.80,
             metrics={
                 "localization_metric_delta": 0.05,
                 "classification_metric_delta": -1,
@@ -157,9 +165,14 @@ def test_api_metrics_exposes_lifecycle_metrics(monkeypatch) -> None:
     assert 'role="localization",version="rd_feature_ae_gated_natural_cycle_005"' in body
     assert "iqa_lifecycle_promotion_total" in body
     assert "iqa_lifecycle_promotion_decision_info" in body
+    assert "iqa_lifecycle_promotion_selected_epoch" in body
+    assert "iqa_lifecycle_promotion_selected_metric_value" in body
     assert "iqa_lifecycle_final_model_info" in body
     assert "iqa_lifecycle_run_events_processed" in body
     assert "iqa_lifecycle_run_cycles_completed" in body
     assert 'status="promoted"' in body
+    assert 'selected_metric="pixel_aupimo"' in body
+    assert "iqa_lifecycle_promotion_selected_epoch" in body
+    assert " 3" in body
     assert "aaaaaaaa" not in body
     assert list(text_string_to_metric_families(body))
