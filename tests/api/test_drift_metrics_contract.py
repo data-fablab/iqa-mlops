@@ -4,12 +4,12 @@ import pytest
 from fastapi import HTTPException
 from prometheus_client.parser import text_string_to_metric_families
 
-from iqa.api.main import DRIFT_STATE, metrics, record_drift_metric_event
+from iqa.api.main import OBSERVABILITY, metrics, record_drift_metric_event
 from iqa.api.schemas import DriftEventRequest
 
 
 def _reset_drift_state() -> None:
-    DRIFT_STATE["current"].clear()
+    OBSERVABILITY.reset()
 
 
 def test_drift_internal_event_requires_service_token(monkeypatch) -> None:

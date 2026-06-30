@@ -81,6 +81,7 @@ def reset_api_runtime(request: pytest.FixtureRequest):
     from iqa.api import main as api
 
     api.METADATA_REPOSITORY.reset()
+    api.OBSERVABILITY.reset()
 
     if request.node.path.name != "test_inference_http_delegation.py":
         from iqa.inference.client import StubInferenceClient
@@ -90,6 +91,7 @@ def reset_api_runtime(request: pytest.FixtureRequest):
     yield
 
     api.METADATA_REPOSITORY.reset()
+    api.OBSERVABILITY.reset()
     api.INFERENCE_CLIENT.reset()
 
 

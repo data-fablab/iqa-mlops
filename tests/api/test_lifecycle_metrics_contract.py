@@ -4,23 +4,12 @@ import pytest
 from fastapi import HTTPException
 from prometheus_client.parser import text_string_to_metric_families
 
-from iqa.api.main import LIFECYCLE_STATE, metrics, record_lifecycle_metric_event
+from iqa.api.main import OBSERVABILITY, metrics, record_lifecycle_metric_event
 from iqa.api.schemas import LifecycleEventRequest
 
 
 def _reset_lifecycle_state() -> None:
-    LIFECYCLE_STATE["current"].clear()
-    LIFECYCLE_STATE["epoch_metrics"].clear()
-    LIFECYCLE_STATE["epoch_updated_at"] = 0.0
-    LIFECYCLE_STATE["gate_metrics"].clear()
-    LIFECYCLE_STATE["gate_values"].clear()
-    LIFECYCLE_STATE["gate_deltas"].clear()
-    LIFECYCLE_STATE["active_models"].clear()
-    LIFECYCLE_STATE["final_models"].clear()
-    LIFECYCLE_STATE["summary_metrics"].clear()
-    LIFECYCLE_STATE["promotion_decisions"].clear()
-    LIFECYCLE_STATE["promotion_seen"].clear()
-    LIFECYCLE_STATE["promotion_counters"].clear()
+    OBSERVABILITY.reset()
 
 
 def test_lifecycle_internal_event_requires_service_token(monkeypatch) -> None:
