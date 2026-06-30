@@ -3,8 +3,6 @@ from __future__ import annotations
 import pytest
 
 from iqa.api.main import (
-    FEEDBACK_STORE,
-    PREDICTION_STORE,
     FeedbackRequest,
     PredictRequest,
     feedback,
@@ -17,11 +15,7 @@ from iqa.api.main import (
 @pytest.fixture(autouse=True)
 def _reset_stores(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
 
 
 def _predict(piece: str, lot: str) -> str:

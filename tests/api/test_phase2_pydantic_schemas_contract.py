@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from metadata_support import set_prediction_field
+
 from iqa.api.main import (
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    PREDICTION_STORE,
     feedback,
     list_predictions,
     lots_summary,
@@ -34,15 +33,9 @@ from iqa.registry import ModelRegistryRef
 
 @pytest.fixture(autouse=True)
 def _reset_state() -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
 
 
 def test_nat12_streamlit_prediction_and_lot_rows_match_pydantic_contracts() -> None:
@@ -58,7 +51,7 @@ def test_nat12_streamlit_prediction_and_lot_rows_match_pydantic_contracts() -> N
         )
     )
     prediction_id = prediction_response["prediction"]["prediction_id"]
-    PREDICTION_STORE[prediction_id]["decision"] = "Vert"
+    set_prediction_field(prediction_id, "decision", "Vert")
 
     feedback(
         FeedbackRequest(

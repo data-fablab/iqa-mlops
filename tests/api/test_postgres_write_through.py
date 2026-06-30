@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from iqa.api import main as api
 from iqa.api.schemas import FeedbackRequest, PredictRequest, ReloadModelRequest
+from iqa.metadata.repository import MemoryMetadataRepository
 
 
 class RecordingRepository:
@@ -14,6 +15,7 @@ class RecordingRepository:
         self.display_feedbacks: dict[str, dict] = {}
         self.closed_predictions: list[tuple[str, str]] = []
         self.admin_reload_events: list[dict] = []
+        self.incidents: list[dict] = []
 
     def save_piece_event(self, piece_event_id: str, record: dict) -> None:
         pass
@@ -53,12 +55,20 @@ class RecordingRepository:
 
     def mark_feedback_closed(self, prediction_id: str, closed_at: str) -> None:
         self.closed_predictions.append((prediction_id, closed_at))
+        if prediction_id in self.predictions:
+            self.predictions[prediction_id]["feedback_closed"] = True
 
     def save_admin_reload_event(self, record: dict) -> None:
         self.admin_reload_events.append(dict(record))
 
     def list_admin_reload_events(self) -> list[dict]:
         return list(self.admin_reload_events)
+
+    def save_incident_event(self, record: dict) -> None:
+        self.incidents.append(dict(record))
+
+    def list_incident_events(self) -> list[dict]:
+        return list(self.incidents)
 
 
 class FailingRepository(RecordingRepository):
@@ -73,40 +83,29 @@ class FailingAdminReloadRepository(RecordingRepository):
 
 @pytest.fixture(autouse=True)
 def _reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    api.PREDICTION_STORE.clear()
-    api.FEEDBACK_STORE.clear()
-    api.DISPLAY_FEEDBACK_STORE.clear()
-    api.ADMIN_RELOAD_LOG.clear()
-    api.INCIDENT_STORE.clear()
+    api.METADATA_REPOSITORY.reset()
     for metric in api.AI_SECURITY_METRICS:
         api.AI_SECURITY_METRICS[metric] = 0
-    api.METADATA_WRITE_THROUGH.reset()
     monkeypatch.delenv("IQA_METADATA_BACKEND", raising=False)
     monkeypatch.delenv("IQA_METADATA_DB_URL", raising=False)
     monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
     monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
     yield
-    api.PREDICTION_STORE.clear()
-    api.FEEDBACK_STORE.clear()
-    api.DISPLAY_FEEDBACK_STORE.clear()
-    api.ADMIN_RELOAD_LOG.clear()
-    api.INCIDENT_STORE.clear()
+    api.METADATA_REPOSITORY.reset()
     for metric in api.AI_SECURITY_METRICS:
         api.AI_SECURITY_METRICS[metric] = 0
-    api.METADATA_WRITE_THROUGH.reset()
 
 
-def test_memory_backend_does_not_create_metadata_repository(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail_if_called():
-        raise AssertionError("PostgreSQL repository should not be created in memory mode")
-
-    monkeypatch.setattr(api, "create_metadata_repository", fail_if_called)
-
+def test_memory_backend_persists_prediction_in_memory_adapter() -> None:
     response = api.predict(
         PredictRequest(piece_event_id="piece_mem_001", scenario_id="demo", image_uri="s3://bucket/key.jpg")
     )
 
-    assert response["prediction"]["prediction_id"] in api.PREDICTION_STORE
+    prediction_id = response["prediction"]["prediction_id"]
+    repository = api.metadata_repository()
+
+    assert isinstance(repository, MemoryMetadataRepository)
+    assert repository.get_prediction(prediction_id)["piece_event_id"] == "piece_mem_001"
 
 
 def test_postgres_backend_persists_predict_feedback_and_reload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -146,33 +145,36 @@ def test_postgres_backend_persists_predict_feedback_and_reload(monkeypatch: pyte
     assert repo.admin_reload_events[0]["reload_status"] == "accepted"
 
 
-def test_postgres_write_failure_returns_503_without_memory_prediction(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_postgres_write_failure_returns_503_without_persisting_prediction(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = FailingRepository()
     monkeypatch.setenv("IQA_METADATA_BACKEND", "postgres")
-    monkeypatch.setattr(api, "create_metadata_repository", lambda: FailingRepository())
+    monkeypatch.setattr(api, "create_metadata_repository", lambda: repo)
 
     with pytest.raises(HTTPException) as exc_info:
         api.predict(PredictRequest(piece_event_id="piece_fail_001", scenario_id="demo", image_uri="s3://bucket/key.jpg"))
 
     assert exc_info.value.status_code == 503
-    assert api.PREDICTION_STORE == {}
+    assert repo.predictions == {}
 
 
 def test_admin_reload_refusal_keeps_security_audit_when_postgres_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = FailingAdminReloadRepository()
     monkeypatch.setenv("IQA_METADATA_BACKEND", "postgres")
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
-    monkeypatch.setattr(api, "create_metadata_repository", lambda: FailingAdminReloadRepository())
+    monkeypatch.setattr(api, "create_metadata_repository", lambda: repo)
 
     with pytest.raises(HTTPException) as exc_info:
         api.reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="wrong")
 
     assert exc_info.value.status_code == 401
     assert api.AI_SECURITY_METRICS["reload_refused_total"] == 1
-    assert api.ADMIN_RELOAD_LOG[0]["reload_status"] == "refused"
-    assert api.ADMIN_RELOAD_LOG[0]["metadata_persisted"] is False
-    assert api.INCIDENT_STORE[0]["incident_type"] == "reload_refused"
+    # The durable reload-event write failed best-effort (no exception bubbled up),
+    # while the security incident is still recorded through the same seam.
+    assert repo.admin_reload_events == []
+    assert repo.incidents[0]["incident_type"] == "reload_refused"
 
 
-def test_postgres_backend_without_url_returns_503_without_memory_prediction(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_postgres_backend_without_url_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IQA_METADATA_BACKEND", "postgres")
     monkeypatch.delenv("IQA_METADATA_DB_URL", raising=False)
 
@@ -180,4 +182,3 @@ def test_postgres_backend_without_url_returns_503_without_memory_prediction(monk
         api.predict(PredictRequest(piece_event_id="piece_no_url", scenario_id="demo", image_uri="s3://bucket/key.jpg"))
 
     assert exc_info.value.status_code == 503
-    assert api.PREDICTION_STORE == {}

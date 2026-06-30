@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from metadata_support import get_display_feedback, get_feedback, set_prediction_field
+
 from iqa.api.main import (
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    PREDICTION_STORE,
     feedback,
     list_predictions,
     predict,
@@ -18,15 +17,9 @@ from iqa.api.schemas import FeedbackRequest, FeedbackStatus, PredictRequest
 
 @pytest.fixture(autouse=True)
 def _reset_state() -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
 
 
 def test_nat09_audit_trail_links_sha256_piece_scenario_lot_model_and_feedback() -> None:
@@ -41,7 +34,7 @@ def test_nat09_audit_trail_links_sha256_piece_scenario_lot_model_and_feedback() 
         )
     )
     prediction_id = prediction_response["prediction"]["prediction_id"]
-    PREDICTION_STORE[prediction_id]["decision"] = "Vert"
+    set_prediction_field(prediction_id, "decision", "Vert")
 
     feedback(
         FeedbackRequest(
@@ -96,11 +89,13 @@ def test_nat09_audit_trail_links_sha256_piece_scenario_lot_model_and_feedback() 
     assert audit_trail["feedback"]["feedback_closed"] is True
     assert audit_trail["feedback"]["conflict_logged"] is True
 
-    assert DISPLAY_FEEDBACK_STORE[prediction_id]["sha256"] == "9" * 64
-    assert DISPLAY_FEEDBACK_STORE[prediction_id]["lot_id"] == "lot_nat09"
-    assert DISPLAY_FEEDBACK_STORE[prediction_id]["dataset_version"] == "casting_v009"
-    assert FEEDBACK_STORE[prediction_id]["sha256"] == "9" * 64
-    assert FEEDBACK_STORE[prediction_id]["lot_id"] == "lot_nat09"
-    assert FEEDBACK_STORE[prediction_id]["dataset_version"] == "casting_v009"
-    assert FEEDBACK_STORE[prediction_id]["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
-    assert FEEDBACK_STORE[prediction_id]["roi_model_version"] == "roi_segmenter_v001_fixed"
+    display_feedback = get_display_feedback(prediction_id)
+    oracle_feedback = get_feedback(prediction_id)
+    assert display_feedback["sha256"] == "9" * 64
+    assert display_feedback["lot_id"] == "lot_nat09"
+    assert display_feedback["dataset_version"] == "casting_v009"
+    assert oracle_feedback["sha256"] == "9" * 64
+    assert oracle_feedback["lot_id"] == "lot_nat09"
+    assert oracle_feedback["dataset_version"] == "casting_v009"
+    assert oracle_feedback["model_version"] == "rd_feature_ae_gated_v001_bootstrap"
+    assert oracle_feedback["roi_model_version"] == "roi_segmenter_v001_fixed"

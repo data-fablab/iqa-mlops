@@ -14,21 +14,13 @@ def postgres_api_repo(
 ) -> PostgresMetadataRepository:
     db_url = isolated_postgres_db_url
     initialize_metadata_db(db_url)
-    api.PREDICTION_STORE.clear()
-    api.FEEDBACK_STORE.clear()
-    api.DISPLAY_FEEDBACK_STORE.clear()
-    api.ADMIN_RELOAD_LOG.clear()
-    api.METADATA_WRITE_THROUGH.reset()
+    api.METADATA_REPOSITORY.reset()
     monkeypatch.setenv("IQA_METADATA_BACKEND", "postgres")
     monkeypatch.setenv("IQA_METADATA_DB_URL", db_url)
     monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
     yield PostgresMetadataRepository(db_url)
-    api.PREDICTION_STORE.clear()
-    api.FEEDBACK_STORE.clear()
-    api.DISPLAY_FEEDBACK_STORE.clear()
-    api.ADMIN_RELOAD_LOG.clear()
-    api.METADATA_WRITE_THROUGH.reset()
+    api.METADATA_REPOSITORY.reset()
 
 
 @pytest.mark.postgres_contract
@@ -106,10 +98,7 @@ def test_api_recovers_transactional_feedback_flow_after_restart(
         )
     )
 
-    api.PREDICTION_STORE.clear()
-    api.FEEDBACK_STORE.clear()
-    api.DISPLAY_FEEDBACK_STORE.clear()
-    api.METADATA_WRITE_THROUGH.reset()
+    api.METADATA_REPOSITORY.reset()
 
     oracle_response = api.feedback(
         FeedbackRequest(
@@ -135,10 +124,7 @@ def test_api_recovers_transactional_feedback_flow_after_restart(
     assert saved_display["feedback_source"] == "human_sophie"
     assert saved_feedback["feedback_source"] == "oracle_gt"
 
-    api.PREDICTION_STORE.clear()
-    api.FEEDBACK_STORE.clear()
-    api.DISPLAY_FEEDBACK_STORE.clear()
-    api.METADATA_WRITE_THROUGH.reset()
+    api.METADATA_REPOSITORY.reset()
 
     rows = api.list_predictions()
     row = next(item for item in rows if item["prediction_id"] == prediction_id)

@@ -4,8 +4,9 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from metadata_support import list_admin_reload_events
+
 from iqa.api.main import (
-    ADMIN_RELOAD_LOG,
     AI_SECURITY_METRICS,
     FeedbackRequest,
     PieceEventPredictRequest,
@@ -162,7 +163,6 @@ def test_human_feedback_is_display_only_and_not_train_eligible() -> None:
 
 
 def test_admin_reload_security_logs_refused_without_configured_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    ADMIN_RELOAD_LOG.clear()
     _reset_security_metrics()
     monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
 
@@ -170,8 +170,9 @@ def test_admin_reload_security_logs_refused_without_configured_token(monkeypatch
         reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
 
     assert exc_info.value.status_code == 503
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "refused"
-    assert ADMIN_RELOAD_LOG[-1]["accepted"] is False
+    reload_events = list_admin_reload_events()
+    assert reload_events[-1]["reload_status"] == "refused"
+    assert reload_events[-1]["accepted"] is False
 
     body = metrics()
     assert "iqa_reload_refused_total 1" in body
@@ -179,7 +180,6 @@ def test_admin_reload_security_logs_refused_without_configured_token(monkeypatch
 
 
 def test_admin_reload_security_logs_refused_with_invalid_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    ADMIN_RELOAD_LOG.clear()
     _reset_security_metrics()
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
 
@@ -187,8 +187,9 @@ def test_admin_reload_security_logs_refused_with_invalid_token(monkeypatch: pyte
         reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="bad")
 
     assert exc_info.value.status_code == 401
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "refused"
-    assert ADMIN_RELOAD_LOG[-1]["accepted"] is False
+    reload_events = list_admin_reload_events()
+    assert reload_events[-1]["reload_status"] == "refused"
+    assert reload_events[-1]["accepted"] is False
 
     body = metrics()
     assert "iqa_reload_refused_total 1" in body
@@ -196,7 +197,6 @@ def test_admin_reload_security_logs_refused_with_invalid_token(monkeypatch: pyte
 
 
 def test_admin_reload_security_accepts_valid_token_and_writes_audit(monkeypatch: pytest.MonkeyPatch) -> None:
-    ADMIN_RELOAD_LOG.clear()
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
 
     response = reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
@@ -206,4 +206,4 @@ def test_admin_reload_security_accepts_valid_token_and_writes_audit(monkeypatch:
     assert response["audit_logged"] is True
     assert response["audit"]["reload_status"] == "accepted"
     assert response["audit"]["scenario_id"] == "demo"
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "accepted"
+    assert list_admin_reload_events()[-1]["reload_status"] == "accepted"

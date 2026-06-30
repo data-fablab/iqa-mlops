@@ -51,19 +51,11 @@ class RestartRepository:
 
 @pytest.fixture(autouse=True)
 def reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    api.PREDICTION_STORE.clear()
-    api.FEEDBACK_STORE.clear()
-    api.DISPLAY_FEEDBACK_STORE.clear()
-    api.INCIDENT_STORE.clear()
-    api.METADATA_WRITE_THROUGH.reset()
+    api.METADATA_REPOSITORY.reset()
     monkeypatch.setenv("IQA_METADATA_BACKEND", "postgres")
     monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
     yield
-    api.PREDICTION_STORE.clear()
-    api.FEEDBACK_STORE.clear()
-    api.DISPLAY_FEEDBACK_STORE.clear()
-    api.INCIDENT_STORE.clear()
-    api.METADATA_WRITE_THROUGH.reset()
+    api.METADATA_REPOSITORY.reset()
 
 
 def prediction_record() -> dict:

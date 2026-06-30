@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from metadata_support import get_display_feedback, get_feedback
+
 from iqa.api.main import (
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    PREDICTION_STORE,
     feedback,
     list_predictions,
     predict,
@@ -17,13 +16,7 @@ from iqa.api.schemas import FeedbackRequest, FeedbackStatus, PredictRequest
 
 @pytest.fixture(autouse=True)
 def _reset_stores() -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
 
 
 def test_human_sophie_display_feedback_is_visible_before_oracle_gt() -> None:
@@ -117,10 +110,12 @@ def test_human_sophie_then_oracle_gt_divergence_is_journaled_in_predictions() ->
     assert gt_response["eligible_for_train"] is False
     assert gt_response["conflict_logged"] is True
 
-    assert DISPLAY_FEEDBACK_STORE[prediction_id]["feedback_source"] == "human_sophie"
-    assert DISPLAY_FEEDBACK_STORE[prediction_id]["feedback_status"] == "conforme_valide"
-    assert FEEDBACK_STORE[prediction_id]["feedback_source"] == "oracle_gt"
-    assert FEEDBACK_STORE[prediction_id]["conflict_logged"] is True
+    display_feedback = get_display_feedback(prediction_id)
+    oracle_feedback = get_feedback(prediction_id)
+    assert display_feedback["feedback_source"] == "human_sophie"
+    assert display_feedback["feedback_status"] == "conforme_valide"
+    assert oracle_feedback["feedback_source"] == "oracle_gt"
+    assert oracle_feedback["conflict_logged"] is True
 
     assert row["prediction_id"] == prediction_id
     assert row["oracle_verdict"] == "defective"

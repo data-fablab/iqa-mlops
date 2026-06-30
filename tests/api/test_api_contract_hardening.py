@@ -5,13 +5,10 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
+from metadata_support import get_feedback, list_admin_reload_events
+
 from iqa.api.main import (
-    ADMIN_RELOAD_LOG,
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    INCIDENT_STORE,
-    PREDICTION_STORE,
     _api_error_detail,
     feedback,
     list_incidents,
@@ -31,21 +28,11 @@ from iqa.api.schemas import (
 
 @pytest.fixture(autouse=True)
 def _reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    INCIDENT_STORE.clear()
-    ADMIN_RELOAD_LOG.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
     monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    INCIDENT_STORE.clear()
-    ADMIN_RELOAD_LOG.clear()
 
 
 def _create_prediction(
@@ -158,7 +145,7 @@ def test_nat15_service_token_accepts_matching_token_and_preserves_feedback_flow(
     assert response["feedback_closed"] is True
     assert response["train_eligibility_source"] == "oracle_gt"
     assert response["eligible_for_train"] is True
-    assert FEEDBACK_STORE[prediction_id]["feedback_source"] == "oracle_gt"
+    assert get_feedback(prediction_id)["feedback_source"] == "oracle_gt"
 
 
 def test_nat15_admin_reload_success_does_not_create_reload_refused_incident(
@@ -174,7 +161,7 @@ def test_nat15_admin_reload_success_does_not_create_reload_refused_incident(
     assert response["accepted"] is True
     assert response["reload_status"] == "accepted"
     assert response["audit_logged"] is True
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "accepted"
+    assert list_admin_reload_events()[-1]["reload_status"] == "accepted"
     assert list_incidents(incident_type="reload_refused") == []
 
 

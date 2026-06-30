@@ -4,8 +4,9 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from metadata_support import list_admin_reload_events
+
 from iqa.api.main import (
-    ADMIN_RELOAD_LOG,
     AI_SECURITY_METRICS,
     FeedbackRequest,
     PieceEventPredictRequest,
@@ -327,29 +328,29 @@ def test_metrics_count_feedback_conflict_and_train_block() -> None:
 
 
 def test_admin_reload_fails_when_admin_token_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    ADMIN_RELOAD_LOG.clear()
     monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
 
     with pytest.raises(HTTPException) as exc_info:
         reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
 
     assert exc_info.value.status_code == 503
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "refused"
-    assert ADMIN_RELOAD_LOG[-1]["accepted"] is False
-    assert ADMIN_RELOAD_LOG[-1]["reason"] == "IQA_ADMIN_TOKEN is not configured."
+    reload_events = list_admin_reload_events()
+    assert reload_events[-1]["reload_status"] == "refused"
+    assert reload_events[-1]["accepted"] is False
+    assert reload_events[-1]["reason"] == "IQA_ADMIN_TOKEN is not configured."
 
 
 def test_admin_reload_requires_token_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    ADMIN_RELOAD_LOG.clear()
     monkeypatch.setenv("IQA_ADMIN_TOKEN", "secret")
 
     with pytest.raises(HTTPException) as exc_info:
         reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="bad")
 
     assert exc_info.value.status_code == 401
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "refused"
-    assert ADMIN_RELOAD_LOG[-1]["accepted"] is False
-    assert ADMIN_RELOAD_LOG[-1]["reason"] == "Missing or invalid IQA_ADMIN_TOKEN."
+    refused_events = list_admin_reload_events()
+    assert refused_events[-1]["reload_status"] == "refused"
+    assert refused_events[-1]["accepted"] is False
+    assert refused_events[-1]["reason"] == "Missing or invalid IQA_ADMIN_TOKEN."
 
     response = reload_model(ReloadModelRequest(scenario_id="demo"), x_iqa_admin_token="secret")
 
@@ -360,7 +361,7 @@ def test_admin_reload_requires_token_when_configured(monkeypatch: pytest.MonkeyP
     assert response["audit"]["reload_status"] == "accepted"
     assert response["audit"]["accepted"] is True
     assert response["audit"]["scenario_id"] == "demo"
-    assert ADMIN_RELOAD_LOG[-1]["reload_status"] == "accepted"
+    assert list_admin_reload_events()[-1]["reload_status"] == "accepted"
 
 
 def test_replay_scenarios_endpoint() -> None:

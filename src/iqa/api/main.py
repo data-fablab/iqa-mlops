@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
-from urllib.error import HTTPError, URLError
-from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -32,8 +29,13 @@ from iqa.api.schemas import (
 
 
 from iqa.feedback import OracleFeedbackRequest, oracle_gt_verdict
-from iqa.inference.contracts import InferenceRequest, InferenceResult
-from iqa.metadata.repository import MEMORY_BACKEND, MetadataRepository, create_metadata_repository, metadata_backend
+from iqa.inference.client import (
+    InferenceClient,
+    InferenceClientError,
+    create_inference_client,
+)
+from iqa.inference.contracts import InferenceRequest
+from iqa.metadata.repository import MetadataRepository, create_metadata_repository, metadata_backend
 from iqa.registry import ModelRegistryRef, registered_model_name
 from iqa.replay import ReplayRunStore, list_replay_scenarios
 
@@ -44,11 +46,6 @@ FEATURE_AE_MANIFEST = BASE_DIR / "models" / "manifests" / "rd_feature_ae_gated_v
 
 app = FastAPI(title="Industrial Quality Assistant API", version="0.1.0")
 
-PREDICTION_STORE: dict[str, dict[str, Any]] = {}
-FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
-DISPLAY_FEEDBACK_STORE: dict[str, dict[str, Any]] = {}
-ADMIN_RELOAD_LOG: list[dict[str, Any]] = []
-INCIDENT_STORE: list[dict[str, Any]] = []
 REPLAY_RUN_STORE = ReplayRunStore()
 
 AI_SECURITY_METRICS: dict[str, int] = {
@@ -159,8 +156,14 @@ OPTIONAL_METADATA_TRACEABILITY_FIELDS = (
 )
 
 
-class MetadataWriteThrough:
-    """Optional PostgreSQL journal for API metadata writes."""
+class MetadataRepositoryHandle:
+    """Single owner of the configured ``MetadataRepository`` for the API.
+
+    The handle resolves the adapter once per backend and caches it. The memory
+    adapter is the default store (not a fallback); PostgreSQL is just another
+    adapter selected via ``IQA_METADATA_BACKEND`` (ADR 0004). Tests reset the
+    handle to obtain a fresh adapter instead of clearing parallel globals.
+    """
 
     def __init__(self) -> None:
         self._backend: str | None = None
@@ -170,17 +173,53 @@ class MetadataWriteThrough:
         self._backend = None
         self._repository = None
 
-    def repository(self) -> MetadataRepository | None:
+    def get(self) -> MetadataRepository:
         backend = metadata_backend()
-        if backend == MEMORY_BACKEND:
-            return None
         if self._backend != backend or self._repository is None:
             self._repository = create_metadata_repository()
             self._backend = backend
         return self._repository
 
 
-METADATA_WRITE_THROUGH = MetadataWriteThrough()
+METADATA_REPOSITORY = MetadataRepositoryHandle()
+
+
+def metadata_repository() -> MetadataRepository:
+    """Return the single metadata repository owned by the API."""
+
+    return METADATA_REPOSITORY.get()
+
+
+class InferenceClientHandle:
+    """Single owner of the configured ``InferenceClient`` for the API.
+
+    Resolves the adapter once (env → HTTP by default) and caches it. Tests
+    inject a ``StubInferenceClient`` via :meth:`set` and restore via
+    :meth:`reset`.
+    """
+
+    def __init__(self) -> None:
+        self._client: InferenceClient | None = None
+
+    def set(self, client: InferenceClient) -> None:
+        self._client = client
+
+    def reset(self) -> None:
+        self._client = None
+
+    def get(self) -> InferenceClient:
+        if self._client is None:
+            self._client = create_inference_client()
+        return self._client
+
+
+INFERENCE_CLIENT = InferenceClientHandle()
+
+
+def inference_client() -> InferenceClient:
+    """Return the single inference client owned by the API."""
+
+    return INFERENCE_CLIENT.get()
 
 
 # Legacy inline Pydantic schemas kept temporarily for review traceability.
@@ -216,232 +255,6 @@ def _read_manifest(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"version": "missing", "manifest_path": str(path)}
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _inference_http_error_detail(error: HTTPError) -> str:
-    try:
-        payload = json.loads(error.read().decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return str(error.reason or f"HTTP {error.code}")
-
-    if isinstance(payload, dict):
-        detail = payload.get("detail")
-        if isinstance(detail, str):
-            return detail
-        if detail is not None:
-            return json.dumps(detail, ensure_ascii=False)
-
-    return str(error.reason or f"HTTP {error.code}")
-
-
-def _call_inference_service(request: InferenceRequest) -> InferenceResult:
-    base_url = os.environ.get(
-        "IQA_INFERENCE_URL",
-        "http://iqa-inference:8100",
-    ).strip().rstrip("/")
-
-    if not base_url:
-        _raise_api_error(
-            status_code=503,
-            error_code="inference_service_configuration_error",
-            message="Inference service URL is not configured.",
-            reason="IQA_INFERENCE_URL is empty.",
-            details={"path": "/predict"},
-        )
-
-    timeout_raw = os.environ.get("IQA_INFERENCE_TIMEOUT_SECONDS", "120")
-    try:
-        timeout = float(timeout_raw)
-    except ValueError:
-        _raise_api_error(
-            status_code=503,
-            error_code="inference_service_configuration_error",
-            message="Inference service timeout is invalid.",
-            reason=f"Invalid IQA_INFERENCE_TIMEOUT_SECONDS: {timeout_raw!r}.",
-            details={"path": "/predict"},
-        )
-        raise AssertionError("unreachable")
-
-    if timeout <= 0:
-        _raise_api_error(
-            status_code=503,
-            error_code="inference_service_configuration_error",
-            message="Inference service timeout is invalid.",
-            reason="IQA_INFERENCE_TIMEOUT_SECONDS must be greater than zero.",
-            details={"path": "/predict"},
-        )
-
-    payload = {
-        "piece_event_id": request.piece_event_id,
-        "scenario_id": request.scenario_id,
-        "image_uri": request.image_uri,
-        "sha256": request.sha256,
-        "lot_id": request.lot_id,
-        "source_class": request.source_class,
-        "dataset_version": request.dataset_version,
-    }
-    http_request = UrlRequest(
-        f"{base_url}/predict",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urlopen(http_request, timeout=timeout) as response:
-            raw_response = response.read()
-    except HTTPError as error:
-        detail = _inference_http_error_detail(error)
-
-        if error.code == 404:
-            _raise_api_error(
-                status_code=404,
-                error_code="inference_input_not_found",
-                message="Inference input image was not found.",
-                reason=detail,
-                details={"path": "/predict", "upstream_status": error.code},
-            )
-        if error.code == 422:
-            _raise_api_error(
-                status_code=422,
-                error_code="inference_input_invalid",
-                message="Inference input was rejected.",
-                reason=detail,
-                details={"path": "/predict", "upstream_status": error.code},
-            )
-        if error.code == 503:
-            _raise_api_error(
-                status_code=503,
-                error_code="inference_service_unavailable",
-                message="Inference service is unavailable.",
-                reason=detail,
-                details={"path": "/predict", "upstream_status": error.code},
-            )
-
-        _raise_api_error(
-            status_code=502,
-            error_code="invalid_inference_response",
-            message="Inference service returned an unexpected HTTP response.",
-            reason=detail,
-            details={"path": "/predict", "upstream_status": error.code},
-        )
-    except socket.timeout as error:
-        _raise_api_error(
-            status_code=504,
-            error_code="inference_service_timeout",
-            message="Inference service timed out.",
-            reason=str(error),
-            details={"path": "/predict"},
-        )
-    except URLError as error:
-        if isinstance(error.reason, (socket.timeout, TimeoutError)):
-            _raise_api_error(
-                status_code=504,
-                error_code="inference_service_timeout",
-                message="Inference service timed out.",
-                reason=str(error.reason),
-                details={"path": "/predict"},
-            )
-
-        _raise_api_error(
-            status_code=503,
-            error_code="inference_service_unavailable",
-            message="Inference service is unavailable.",
-            reason=str(error.reason),
-            details={"path": "/predict"},
-        )
-
-    try:
-        response_payload = json.loads(raw_response.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        _raise_api_error(
-            status_code=502,
-            error_code="invalid_inference_response",
-            message="Inference service returned invalid JSON.",
-            reason=str(error),
-            details={"path": "/predict"},
-        )
-        raise AssertionError("unreachable")
-
-    if not isinstance(response_payload, dict):
-        _raise_api_error(
-            status_code=502,
-            error_code="invalid_inference_response",
-            message="Inference service returned an invalid contract.",
-            reason="Expected a JSON object.",
-            details={"path": "/predict"},
-        )
-
-    required_fields = {
-        "piece_event_id",
-        "scenario_id",
-        "score",
-        "decision",
-        "heatmap_uri",
-        "roi_status",
-        "roi_model_version",
-        "feature_ae_version",
-    }
-    missing = sorted(required_fields - set(response_payload))
-    if missing:
-        _raise_api_error(
-            status_code=502,
-            error_code="invalid_inference_response",
-            message="Inference service returned an incomplete contract.",
-            reason=f"Missing fields: {', '.join(missing)}.",
-            details={"path": "/predict"},
-        )
-
-    decision = response_payload["decision"]
-    if decision not in {"Vert", "Orange", "Rouge"}:
-        _raise_api_error(
-            status_code=502,
-            error_code="invalid_inference_response",
-            message="Inference service returned an invalid decision.",
-            reason=f"Unsupported decision: {decision!r}.",
-            details={"path": "/predict"},
-        )
-
-    if (
-        response_payload["piece_event_id"] != request.piece_event_id
-        or response_payload["scenario_id"] != request.scenario_id
-    ):
-        _raise_api_error(
-            status_code=502,
-            error_code="invalid_inference_response",
-            message="Inference service returned mismatched traceability identifiers.",
-            reason="piece_event_id or scenario_id does not match the request.",
-            details={"path": "/predict"},
-        )
-
-    try:
-        return InferenceResult(
-            piece_event_id=str(response_payload["piece_event_id"]),
-            scenario_id=str(response_payload["scenario_id"]),
-            score=float(response_payload["score"]),
-            decision=decision,
-            heatmap_uri=(
-                None
-                if response_payload["heatmap_uri"] is None
-                else str(response_payload["heatmap_uri"])
-            ),
-            roi_status=(
-                None
-                if response_payload["roi_status"] is None
-                else str(response_payload["roi_status"])
-            ),
-            roi_model_version=str(response_payload["roi_model_version"]),
-            feature_ae_version=str(response_payload["feature_ae_version"]),
-        )
-    except (TypeError, ValueError) as error:
-        _raise_api_error(
-            status_code=502,
-            error_code="invalid_inference_response",
-            message="Inference service returned an invalid contract.",
-            reason=str(error),
-            details={"path": "/predict"},
-        )
-        raise AssertionError("unreachable")
 
 
 def _api_error_detail(
@@ -567,7 +380,11 @@ def _create_incident(
         message=message,
         metadata=metadata or {},
     ).model_dump(mode="json")
-    INCIDENT_STORE.append(incident)
+    _persist_metadata(
+        "incident",
+        lambda repository: repository.save_incident_event(incident),
+        best_effort=True,
+    )
     return incident
 
 
@@ -605,34 +422,41 @@ def _persist_metadata(
     *,
     best_effort: bool = False,
 ) -> bool:
+    """Write to the metadata repository, mapping failures to a 503 envelope.
+
+    ``best_effort`` keeps governance flows alive when a durable write fails
+    (e.g. PostgreSQL is down): the failure is swallowed and reported as
+    ``False`` instead of surfacing a 503.
+    """
+
     try:
-        repository = METADATA_WRITE_THROUGH.repository()
-        if repository is None:
-            return True
-        writer(repository)
+        writer(metadata_repository())
         return True
+    except HTTPException:
+        raise
     except Exception as exc:
         if best_effort:
             return False
-        raise HTTPException(status_code=503, detail=f"PostgreSQL metadata write failed during {operation}.") from exc
-
+        raise HTTPException(
+            status_code=503,
+            detail=f"Metadata write failed during {operation}.",
+        ) from exc
 
 
 def _read_metadata(
     operation: str,
     reader: Callable[[MetadataRepository], Any],
-    *,
-    default: Any = None,
 ) -> Any:
+    """Read from the metadata repository, mapping failures to a 503 envelope."""
+
     try:
-        repository = METADATA_WRITE_THROUGH.repository()
-        if repository is None:
-            return default
-        return reader(repository)
+        return reader(metadata_repository())
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"PostgreSQL metadata read failed during {operation}.",
+            detail=f"Metadata read failed during {operation}.",
         ) from exc
 
 
@@ -716,17 +540,27 @@ def reset_replay_run(replay_run_id: str) -> dict[str, Any]:
 @app.post("/predict")
 def predict(request: PredictRequest) -> dict[str, Any]:
     _started = time.perf_counter()
-    inference_result = _call_inference_service(
-        InferenceRequest(
-            piece_event_id=request.piece_event_id,
-            scenario_id=request.scenario_id,
-            image_uri=request.image_uri,
-            sha256=request.sha256,
-            lot_id=request.lot_id,
-            source_class=request.source_class,
-            dataset_version=request.dataset_version,
+    try:
+        inference_result = inference_client().predict(
+            InferenceRequest(
+                piece_event_id=request.piece_event_id,
+                scenario_id=request.scenario_id,
+                image_uri=request.image_uri,
+                sha256=request.sha256,
+                lot_id=request.lot_id,
+                source_class=request.source_class,
+                dataset_version=request.dataset_version,
+            )
         )
-    )
+    except InferenceClientError as exc:
+        _raise_api_error(
+            status_code=exc.status_code,
+            error_code=exc.error_code,
+            message=exc.message,
+            reason=exc.reason,
+            details=exc.details,
+        )
+        raise AssertionError("unreachable") from exc
     _record_prediction_metrics(inference_result.to_dict(), time.perf_counter() - _started)
 
     prediction_id = f"pred_{uuid4().hex}"
@@ -766,7 +600,6 @@ def predict(request: PredictRequest) -> dict[str, Any]:
         "predict",
         lambda repository: repository.save_prediction(prediction_id, prediction_record),
     )
-    PREDICTION_STORE[prediction_id] = prediction_record
 
     return {
         "service": "iqa-api",
@@ -813,10 +646,6 @@ def _get_open_prediction_for_feedback(request: FeedbackRequest) -> dict[str, Any
         "prediction lookup",
         lambda repository: repository.get_prediction(request.prediction_id),
     )
-    if prediction is None:
-        prediction = PREDICTION_STORE.get(request.prediction_id)
-    else:
-        PREDICTION_STORE[request.prediction_id] = prediction
 
     if prediction is None:
         _inc_security_metric("ai_security_incident_total")
@@ -1003,7 +832,6 @@ def feedback(
             "human_sophie feedback",
             lambda repository: repository.save_display_feedback(request.prediction_id, display_feedback_record),
         )
-        DISPLAY_FEEDBACK_STORE[request.prediction_id] = display_feedback_record
 
         return {
             "accepted": True,
@@ -1039,7 +867,6 @@ def feedback(
     )
 
     closed_at = datetime.now(timezone.utc).isoformat()
-    updated_prediction = {**prediction, "feedback_closed": True, "feedback_closed_at": closed_at}
 
     verdict_dict = verdict.to_dict()
     eligible_for_train, train_block_reason = _train_eligibility_from_feedback(request)
@@ -1050,10 +877,6 @@ def feedback(
         "display feedback lookup",
         lambda repository: repository.get_display_feedback(request.prediction_id),
     )
-    if display_feedback is None:
-        display_feedback = DISPLAY_FEEDBACK_STORE.get(request.prediction_id)
-    else:
-        DISPLAY_FEEDBACK_STORE[request.prediction_id] = display_feedback
 
     conflict_logged = display_feedback is not None
     feedback_record = {
@@ -1081,8 +904,6 @@ def feedback(
             closed_at,
         ),
     )
-    prediction.update(updated_prediction)
-    FEEDBACK_STORE[request.prediction_id] = feedback_record
 
     divergence = _oracle_divergence(prediction.get("decision", ""), verdict_dict.get("verdict"))
 
@@ -1160,7 +981,6 @@ def _prediction_rows() -> list[dict[str, Any]]:
     persisted_predictions = _read_metadata(
         "prediction history lookup",
         lambda repository: repository.list_predictions(),
-        default=[],
     )
 
     records: dict[str, dict[str, Any]] = {}
@@ -1169,10 +989,6 @@ def _prediction_rows() -> list[dict[str, Any]]:
         prediction_id = record.get("prediction_id")
         if prediction_id:
             records[prediction_id] = record
-            PREDICTION_STORE[prediction_id] = record
-
-    for prediction_id, record in PREDICTION_STORE.items():
-        records.setdefault(prediction_id, record)
 
     rows: list[dict[str, Any]] = []
 
@@ -1183,10 +999,6 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 prediction_id
             ),
         )
-        if feedback is None:
-            feedback = FEEDBACK_STORE.get(prediction_id)
-        else:
-            FEEDBACK_STORE[prediction_id] = feedback
 
         display_feedback = _read_metadata(
             "display feedback lookup",
@@ -1194,10 +1006,6 @@ def _prediction_rows() -> list[dict[str, Any]]:
                 prediction_id
             ),
         )
-        if display_feedback is None:
-            display_feedback = DISPLAY_FEEDBACK_STORE.get(prediction_id)
-        else:
-            DISPLAY_FEEDBACK_STORE[prediction_id] = display_feedback
 
         feedback_trace = feedback or display_feedback or {}
         verdict = (feedback or {}).get("verdict", {}).get("verdict") if feedback else None
@@ -2003,7 +1811,10 @@ def list_incidents(
     incident_type: str | None = None,
     scenario_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    rows = list(INCIDENT_STORE)
+    rows = _read_metadata(
+        "incident history lookup",
+        lambda repository: repository.list_incident_events(),
+    )
     if incident_type is not None:
         rows = [row for row in rows if row.get("incident_type") == incident_type]
     if scenario_id is not None:
@@ -2087,7 +1898,6 @@ def _append_admin_reload_log(
         "source_of_truth": "mlflow_registry",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    ADMIN_RELOAD_LOG.append(audit_event)
     persisted = _persist_metadata(
         "admin reload",
         lambda repository: repository.save_admin_reload_event(audit_event),
@@ -2197,16 +2007,17 @@ __all__ = [
     "PieceEventPredictRequest",
     "PredictRequest",
     "ReloadModelRequest",
-    "ADMIN_RELOAD_LOG",
     "REPLAY_RUN_STORE",
     "record_dataset_blocked_incident",
     "create_replay_run",
     "list_incidents",
-    "INCIDENT_STORE",
     "AI_SECURITY_METRICS",
     "DRIFT_STATE",
     "LIFECYCLE_STATE",
-    "METADATA_WRITE_THROUGH",
+    "INFERENCE_CLIENT",
+    "METADATA_REPOSITORY",
+    "inference_client",
+    "metadata_repository",
     "app",
     "feedback",
     "health",

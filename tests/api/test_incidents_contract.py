@@ -5,13 +5,10 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
+from metadata_support import list_admin_reload_events, set_prediction_field
+
 from iqa.api.main import (
-    ADMIN_RELOAD_LOG,
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    INCIDENT_STORE,
-    PREDICTION_STORE,
     feedback,
     list_incidents,
     predict,
@@ -23,21 +20,11 @@ from iqa.api.schemas import FeedbackRequest, FeedbackStatus, PredictRequest, Rel
 
 @pytest.fixture(autouse=True)
 def _reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    INCIDENT_STORE.clear()
-    ADMIN_RELOAD_LOG.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
     monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    INCIDENT_STORE.clear()
-    ADMIN_RELOAD_LOG.clear()
 
 
 def _create_prediction(piece_event_id: str = "piece_nat14", scenario_id: str = "scenario_nat14") -> str:
@@ -79,7 +66,7 @@ def test_nat14_creates_feedback_conflict_incident() -> None:
 
 def test_nat14_creates_false_negative_incident() -> None:
     prediction_id = _create_prediction(piece_event_id="piece_nat14_fn")
-    PREDICTION_STORE[prediction_id]["decision"] = "Vert"
+    set_prediction_field(prediction_id, "decision", "Vert")
 
     feedback(
         FeedbackRequest(
@@ -129,7 +116,7 @@ def test_nat14_creates_reload_refused_incident() -> None:
     assert len(incidents) == 1
     assert incidents[0]["severity"] == "high"
     assert incidents[0]["scenario_id"] == "scenario_nat14"
-    assert incidents[0]["metadata"]["reload_event_id"] == ADMIN_RELOAD_LOG[-1]["reload_event_id"]
+    assert incidents[0]["metadata"]["reload_event_id"] == list_admin_reload_events()[-1]["reload_event_id"]
 
 
 def test_nat14_creates_dataset_blocked_incident() -> None:

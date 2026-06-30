@@ -69,30 +69,28 @@ def isolated_postgres_db_url():
 
 
 @pytest.fixture(autouse=True)
-def fake_inference_service(
-    monkeypatch: pytest.MonkeyPatch,
-    request: pytest.FixtureRequest,
-) -> None:
-    """Keep tests independent from the HTTP inference service."""
-    if request.node.path.name == "test_inference_http_delegation.py":
-        return
+def reset_api_runtime(request: pytest.FixtureRequest):
+    """Reset the API-owned seams between tests.
 
+    Each test gets a fresh in-memory metadata adapter (replacing the old
+    ``.clear()`` dance on parallel globals) and a deterministic
+    ``StubInferenceClient`` so tests stay independent from the HTTP inference
+    service. The HTTP delegation test exercises the real adapter and is left
+    untouched.
+    """
     from iqa.api import main as api
-    from iqa.inference.contracts import InferenceRequest, InferenceResult
 
-    def fake_call(inference_request: InferenceRequest) -> InferenceResult:
-        return InferenceResult(
-            piece_event_id=inference_request.piece_event_id,
-            scenario_id=inference_request.scenario_id,
-            score=0.0,
-            decision="Vert",
-            heatmap_uri=None,
-            roi_status="ok",
-            roi_model_version="roi_segmenter_v001_fixed",
-            feature_ae_version="rd_feature_ae_gated_v001_bootstrap",
-        )
+    api.METADATA_REPOSITORY.reset()
 
-    monkeypatch.setattr(api, "_call_inference_service", fake_call, raising=False)
+    if request.node.path.name != "test_inference_http_delegation.py":
+        from iqa.inference.client import StubInferenceClient
+
+        api.INFERENCE_CLIENT.set(StubInferenceClient())
+
+    yield
+
+    api.METADATA_REPOSITORY.reset()
+    api.INFERENCE_CLIENT.reset()
 
 
 @pytest.fixture

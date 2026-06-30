@@ -7,14 +7,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from metadata_support import get_display_feedback, get_feedback, set_prediction_field
+
 from iqa.api.main import (
-    ADMIN_RELOAD_LOG,
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    INCIDENT_STORE,
     PREDICTION_METRICS,
-    PREDICTION_STORE,
     feedback,
     list_incidents,
     list_predictions,
@@ -27,11 +24,6 @@ from iqa.datasets import filter_candidate_samples, validate_good_only_samples
 
 @pytest.fixture(autouse=True)
 def _reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    INCIDENT_STORE.clear()
-    ADMIN_RELOAD_LOG.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     for key in PREDICTION_METRICS:
@@ -39,11 +31,6 @@ def _reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
     monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    INCIDENT_STORE.clear()
-    ADMIN_RELOAD_LOG.clear()
 
 
 def _sample(
@@ -102,8 +89,7 @@ def test_nat16_unknown_prediction_is_blocked_before_feedback_state_mutation() ->
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail["error_code"] == "prediction_not_found"
     assert exc_info.value.detail["incident_type"] == "invalid_prediction_request"
-    assert FEEDBACK_STORE == {}
-    assert DISPLAY_FEEDBACK_STORE == {}
+    assert list_predictions() == []
     assert list_incidents() == []
 
     body = metrics()
@@ -136,14 +122,14 @@ def test_nat16_human_sophie_cannot_make_feedback_train_eligible_before_oracle_gt
     assert row["feedback_closed"] is False
     assert row["eligible_for_train"] is False
     assert row["train_block_reason"] == "human_sophie_display_only"
-    assert prediction_id not in FEEDBACK_STORE
-    assert DISPLAY_FEEDBACK_STORE[prediction_id]["feedback_source"] == "human_sophie"
+    assert get_feedback(prediction_id) is None
+    assert get_display_feedback(prediction_id)["feedback_source"] == "human_sophie"
     assert "iqa_unsafe_train_blocked_total 1" in metrics()
 
 
 def test_nat16_oracle_gt_false_negative_creates_security_incident_and_blocks_training() -> None:
     prediction_id = _create_prediction(piece_event_id="piece_nat16_false_negative")
-    PREDICTION_STORE[prediction_id]["decision"] = "Vert"
+    set_prediction_field(prediction_id, "decision", "Vert")
 
     response = feedback(
         FeedbackRequest(
@@ -191,7 +177,7 @@ def test_nat16_roi_warning_blocks_train_but_does_not_create_roi_fail_incident() 
     assert response["feedback_closed"] is True
     assert response["eligible_for_train"] is False
     assert response["train_block_reason"] == "roi_warning"
-    assert FEEDBACK_STORE[prediction_id]["train_block_reason"] == "roi_warning"
+    assert get_feedback(prediction_id)["train_block_reason"] == "roi_warning"
     assert list_incidents(incident_type="roi_fail") == []
     assert "iqa_unsafe_train_blocked_total 1" in metrics()
 

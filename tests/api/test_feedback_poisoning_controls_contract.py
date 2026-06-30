@@ -8,9 +8,6 @@ from pydantic import ValidationError
 
 from iqa.api.main import (
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    PREDICTION_STORE,
     feedback,
     metrics,
     predict,
@@ -20,15 +17,9 @@ from iqa.api.schemas import FeedbackRequest, PredictRequest
 
 @pytest.fixture(autouse=True)
 def _reset_state() -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
 
 
 def _create_prediction(piece_event_id: str = "piece_nat06", scenario_id: str = "scenario_nat06") -> str:

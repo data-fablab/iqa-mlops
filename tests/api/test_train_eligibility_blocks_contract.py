@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from metadata_support import get_feedback, set_prediction_field
+
 from iqa.api.main import (
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    PREDICTION_STORE,
     feedback,
     list_predictions,
     metrics,
@@ -19,15 +18,9 @@ from iqa.api.schemas import FeedbackRequest, FeedbackStatus, PredictRequest
 
 @pytest.fixture(autouse=True)
 def _reset_state() -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
 
 
 def _create_prediction(piece_event_id: str = "piece_nat07", scenario_id: str = "scenario_nat07") -> str:
@@ -61,13 +54,13 @@ def test_nat07_allows_conforming_oracle_feedback_for_train() -> None:
     assert response["train_eligibility_source"] == "oracle_gt"
     assert response["eligible_for_train"] is True
     assert response["train_block_reason"] is None
-    assert FEEDBACK_STORE[prediction_id]["eligible_for_train"] is True
-    assert FEEDBACK_STORE[prediction_id]["train_block_reason"] is None
+    assert get_feedback(prediction_id)["eligible_for_train"] is True
+    assert get_feedback(prediction_id)["train_block_reason"] is None
 
 
 def test_nat07_blocks_defective_oracle_feedback_and_faux_negatif_row() -> None:
     prediction_id = _create_prediction(piece_event_id="piece_nat07_faux_negatif")
-    PREDICTION_STORE[prediction_id]["decision"] = "Vert"
+    set_prediction_field(prediction_id, "decision", "Vert")
 
     response = feedback(
         FeedbackRequest(
@@ -120,7 +113,7 @@ def test_nat07_blocks_unsafe_feedback_statuses_from_train(
     assert response["train_eligibility_source"] == "oracle_gt"
     assert response["eligible_for_train"] is False
     assert response["train_block_reason"] == expected_reason
-    assert FEEDBACK_STORE[prediction_id]["train_block_reason"] == expected_reason
+    assert get_feedback(prediction_id)["train_block_reason"] == expected_reason
 
 
 def test_nat07_exposes_train_block_reason_in_predictions() -> None:

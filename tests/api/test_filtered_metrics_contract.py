@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from metadata_support import get_prediction, set_prediction_field
+
 from iqa.api.main import (
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
     PREDICTION_METRICS,
-    PREDICTION_STORE,
     feedback,
     list_predictions,
     metrics,
@@ -20,17 +19,11 @@ from iqa.api.schemas import FeedbackRequest, PredictRequest
 
 @pytest.fixture(autouse=True)
 def _reset_state() -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     for key in PREDICTION_METRICS:
         PREDICTION_METRICS[key] = 0
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
 
 
 def test_nat10_predict_propagates_source_class_to_traceability_fields() -> None:
@@ -53,7 +46,7 @@ def test_nat10_predict_propagates_source_class_to_traceability_fields() -> None:
 
     assert prediction["source_class"] == "Casting_class1"
     assert audit["source_class"] == "Casting_class1"
-    assert PREDICTION_STORE[prediction_id]["source_class"] == "Casting_class1"
+    assert get_prediction(prediction_id)["source_class"] == "Casting_class1"
     assert row["source_class"] == "Casting_class1"
     assert row["audit_trail"]["prediction"]["source_class"] == "Casting_class1"
 
@@ -109,7 +102,7 @@ def test_nat10_divergence_metrics_are_filterable_by_trace_labels() -> None:
         )
     )
     prediction_id = response["prediction"]["prediction_id"]
-    PREDICTION_STORE[prediction_id]["decision"] = "Vert"
+    set_prediction_field(prediction_id, "decision", "Vert")
 
     feedback(
         FeedbackRequest(

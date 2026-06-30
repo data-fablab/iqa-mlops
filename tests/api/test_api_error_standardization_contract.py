@@ -10,11 +10,7 @@ from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
 
 from iqa.api.main import (
-    ADMIN_RELOAD_LOG,
     AI_SECURITY_METRICS,
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    PREDICTION_STORE,
     _api_error_detail,
     _request_validation_error_handler,
     feedback,
@@ -26,19 +22,11 @@ from iqa.api.schemas import FeedbackRequest, PredictRequest, ReloadModelRequest
 
 @pytest.fixture(autouse=True)
 def _reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    ADMIN_RELOAD_LOG.clear()
     for key in AI_SECURITY_METRICS:
         AI_SECURITY_METRICS[key] = 0
     monkeypatch.delenv("IQA_SERVICE_TOKEN", raising=False)
     monkeypatch.delenv("IQA_ADMIN_TOKEN", raising=False)
     yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    ADMIN_RELOAD_LOG.clear()
 
 
 def _assert_error_detail(

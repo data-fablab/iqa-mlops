@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
+from metadata_support import get_prediction
 
 from iqa.api.main import (
-    DISPLAY_FEEDBACK_STORE,
-    FEEDBACK_STORE,
-    PREDICTION_STORE,
     list_predictions,
     lots_summary,
     predict,
@@ -33,17 +30,6 @@ OPTIONAL_METADATA_FIELDS = (
 )
 
 
-@pytest.fixture(autouse=True)
-def _reset_stores() -> None:
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-    yield
-    PREDICTION_STORE.clear()
-    FEEDBACK_STORE.clear()
-    DISPLAY_FEEDBACK_STORE.clear()
-
-
 def test_predict_returns_audit_and_store_traceability_fields() -> None:
     response = predict(
         PredictRequest(
@@ -59,7 +45,7 @@ def test_predict_returns_audit_and_store_traceability_fields() -> None:
     prediction = response["prediction"]
     audit = response["audit"]
     prediction_id = prediction["prediction_id"]
-    stored = PREDICTION_STORE[prediction_id]
+    stored = get_prediction(prediction_id)
 
     assert prediction["piece_event_id"] == "piece_nat02_001"
     assert prediction["scenario_id"] == "scenario_nat02"
@@ -104,7 +90,7 @@ def test_piece_event_predict_keeps_nat02_traceability_fields() -> None:
 
     prediction = response["prediction"]
     audit = response["audit"]
-    stored = PREDICTION_STORE[prediction["prediction_id"]]
+    stored = get_prediction(prediction["prediction_id"])
 
     assert prediction["piece_event_id"] == "piece_nat02_002"
     assert prediction["lot_id"] == "lot_nat02_002"
