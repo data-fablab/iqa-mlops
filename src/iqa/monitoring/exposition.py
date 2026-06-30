@@ -23,10 +23,9 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle via iqa.api
-    from iqa.api.schemas import DriftEventRequest, LifecycleEventRequest
+from iqa.api.schemas import DriftEventRequest, LifecycleEventRequest
 
 
 OBSERVABILITY_TRANSIENT_TTL_SECONDS = float(
