@@ -13,12 +13,32 @@
       {
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "enable": true,
-        "expr": "iqa_lifecycle_promotion_decision_info",
+        "expr": "sum by (scenario_id,lifecycle_run_id) (increase(iqa_lifecycle_promotion_total{status=\"promoted\"}[$__rate_interval])) >= 2",
+        "iconColor": "rgba(216, 180, 254, 1)",
+        "name": "Decision gate - dual promotion",
+        "tagKeys": "scenario_id,lifecycle_run_id",
+        "textFormat": "Classification + localisation promoted sur le meme cycle.",
+        "titleFormat": "Classification + localisation promoted"
+      },
+      {
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "expr": "increase(iqa_lifecycle_promotion_total{role=\"localization\",status=\"promoted\"}[$__rate_interval]) > 0",
         "iconColor": "rgba(121, 211, 107, 1)",
-        "name": "Promotions lifecycle",
+        "name": "Decision gate - localisation",
         "tagKeys": "role,status",
-        "textFormat": "promotion {{role}} {{status}}",
-        "titleFormat": "Decision gate"
+        "textFormat": "Promotion localisation en fin de cycle. L'epoch promue est affichee dans le panneau Epoch localisation.",
+        "titleFormat": "Decision gate localisation"
+      },
+      {
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "expr": "increase(iqa_lifecycle_promotion_total{role=\"classification\",status=\"promoted\"}[$__rate_interval]) > 0",
+        "iconColor": "rgba(147, 197, 253, 1)",
+        "name": "Decision gate - classification",
+        "tagKeys": "role,status",
+        "textFormat": "Promotion classification en fin de cycle. L'epoch promue est affichee dans le panneau Epoch classification.",
+        "titleFormat": "Decision gate classification"
       }
     ]
   },
@@ -50,9 +70,9 @@
       "id": 2,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_run_events_processed[$__range])", "instant": true, "legendFormat": "events", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(last_over_time(iqa_lifecycle_cycle_current[$__range]))", "instant": true, "legendFormat": "cycle", "refId": "A" }
       ],
-      "title": "Evenements traites",
+      "title": "Cycle courant",
       "type": "stat"
     },
     {
@@ -62,78 +82,257 @@
       "id": 3,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_run_cycles_completed[$__range])", "instant": true, "legendFormat": "cycles", "refId": "A" }
-      ],
-      "title": "Cycles completes",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 4 },
-      "id": 4,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_cycle_current[$__range])", "instant": true, "legendFormat": "cycle", "refId": "A" }
-      ],
-      "title": "Cycle courant",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 4 },
-      "id": 5,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_epoch_current[$__range])", "instant": true, "legendFormat": "epoch", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(last_over_time(iqa_lifecycle_epoch_current[$__range]))", "instant": true, "legendFormat": "epoch", "refId": "A" }
       ],
       "title": "Epoch courant",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 4 },
-      "id": 6,
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Value" },
+            "properties": [{ "id": "displayName", "value": "epoch_promue" }]
+          }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 32 },
+      "id": 4,
+      "options": { "showHeader": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_promotion_selected_epoch{status=\"promoted\"}[$__range])", "format": "table", "instant": true, "legendFormat": "{{cycle_id}} {{role}} {{candidate_version}} epoch promue", "refId": "A" }
+      ],
+      "title": "Cycles avec promotions - modele et epoch promue",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 4 },
+      "id": 5,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(iqa_lifecycle_promotion_total{status=\"promoted\"}[$__range]))", "instant": true, "legendFormat": "promotions", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(round(increase(iqa_lifecycle_promotion_total{role=\"localization\",status=\"promoted\"}[$__range])))", "instant": true, "legendFormat": "localisation", "refId": "A" }
       ],
-      "title": "Promotions acceptees",
+      "title": "Localisation promue",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 4 },
-      "id": 7,
+      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 4 },
+      "id": 18,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(iqa_lifecycle_promotion_total{status!=\"promoted\"}[$__range]))", "instant": true, "legendFormat": "rejets", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(round(increase(iqa_lifecycle_promotion_total{role=\"classification\",status=\"promoted\"}[$__range])))", "instant": true, "legendFormat": "classification", "refId": "A" }
+      ],
+      "title": "Classification promue",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 4 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(round(increase(iqa_lifecycle_promotion_total{status!=\"promoted\"}[$__range])))", "instant": true, "legendFormat": "rejets", "refId": "A" }
       ],
       "title": "Candidats rejetes",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 4 },
+      "id": 19,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count(last_over_time(iqa_lifecycle_active_model_info[$__range]))", "instant": true, "legendFormat": "modeles", "refId": "A" }
+      ],
+      "title": "Modeles actifs",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 8 },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 8 },
       "id": 8,
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_metric", "legendFormat": "{{metric}} {{role}}", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_pixel_aupimo", "legendFormat": "pixel AUPIMO", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_pixel_ap", "legendFormat": "pixel AP", "refId": "C" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_image_ap", "legendFormat": "image AP", "refId": "D" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_pixel_aupimo", "legendFormat": "{{cycle_id}} - AUPIMO", "refId": "A" }
       ],
-      "title": "Progression des metriques par epoch",
+      "title": "Pixel AUPIMO par epoch",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 8 },
       "id": 9,
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_pixel_ap", "legendFormat": "{{cycle_id}} - pixel AP", "refId": "A" }
+      ],
+      "title": "Pixel AP par epoch",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 8 },
+      "id": 15,
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_image_ap", "legendFormat": "{{cycle_id}} - image AP", "refId": "A" }
+      ],
+      "title": "Image AP par epoch",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "stepAfter", "lineWidth": 2, "showPoints": "never" }, "decimals": 0, "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "total train set" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "conformes vus" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "bootstrap anchors" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 15 },
+      "id": 20,
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max without(cycle_id,candidate_version,candidate_init_policy) (iqa_lifecycle_train_set_size{kind=\"total\"})", "legendFormat": "total train set", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max without(cycle_id,candidate_version,candidate_init_policy) (iqa_lifecycle_train_set_size{kind=\"seen_conforming\"})", "legendFormat": "conformes vus", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max without(cycle_id,candidate_version,candidate_init_policy) (iqa_lifecycle_train_set_size{kind=\"anchor_good\"})", "legendFormat": "bootstrap anchors", "refId": "C" }
+      ],
+      "title": "Taille train set par cycle",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 20 },
+      "id": 10,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(last_over_time(iqa_lifecycle_promotion_selected_epoch{role=\"localization\",status=\"promoted\"}[$__range]))", "instant": true, "legendFormat": "epoch", "refId": "A" }
+      ],
+      "title": "Epoch localisation",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 20 },
+      "id": 17,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(last_over_time(iqa_lifecycle_promotion_selected_epoch{role=\"classification\",status=\"promoted\"}[$__range]))", "instant": true, "legendFormat": "epoch", "refId": "A" }
+      ],
+      "title": "Epoch classification",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 10, "y": 20 },
+      "id": 11,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(round(increase(iqa_lifecycle_promotion_total{role=\"localization\",status=\"promoted\"}[$__range])))", "instant": true, "legendFormat": "localisation", "refId": "A" }
+      ],
+      "title": "Gate - localisation",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 5, "x": 15, "y": 20 },
+      "id": 12,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(round(increase(iqa_lifecycle_promotion_total{role=\"classification\",status=\"promoted\"}[$__range])))", "instant": true, "legendFormat": "classification", "refId": "A" }
+      ],
+      "title": "Gate - classification",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 20 },
+      "id": 16,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(round(increase(iqa_lifecycle_promotion_total{status!=\"promoted\"}[$__range])))", "instant": true, "legendFormat": "rejets", "refId": "A" }
+      ],
+      "title": "Rejets gate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "classification promoted" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "localization promoted" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "classification rejected_no_classification_improvement" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 25 },
+      "id": 13,
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_promotion_total", "legendFormat": "{{role}} {{status}}", "refId": "A" }
       ],
@@ -142,59 +341,22 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 16 },
-      "id": 10,
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_gate_value", "legendFormat": "{{role}} {{kind}} {{metric}}", "refId": "A" }
-      ],
-      "title": "Gate - valeurs active/candidate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 16 },
-      "id": 11,
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_gate_metric_delta", "legendFormat": "{{role}}", "refId": "A" }
-      ],
-      "title": "Gate - delta metrique",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 16 },
-      "id": 12,
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_gate_fn_delta", "legendFormat": "{{role}}", "refId": "A" }
-      ],
-      "title": "Gate - delta FN classification",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
-      "id": 13,
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "decimals": 0, "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Value" },
+            "properties": [{ "id": "displayName", "value": "train_set_total" }]
+          }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 38 },
+      "id": 21,
       "options": { "showHeader": true },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_promotion_decision_info[$__range])", "format": "table", "instant": true, "legendFormat": "decision", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_train_set_size{kind=\"total\"}[$__range])", "format": "table", "instant": true, "legendFormat": "{{cycle_id}} train set", "refId": "A" }
       ],
-      "title": "Decision gate - promotions et rejets",
-      "type": "table"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
-      "id": 14,
-      "options": { "showHeader": true },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_final_model_info[$__range])", "format": "table", "instant": true, "legendFormat": "final model", "refId": "A" }
-      ],
-      "title": "Registry final - modeles promus",
+      "title": "Train sets utilises par cycle",
       "type": "table"
     }
   ],

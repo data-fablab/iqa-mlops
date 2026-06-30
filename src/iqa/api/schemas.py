@@ -328,6 +328,12 @@ class LifecycleEventRequest(IQABaseModel):
     classification_promotion_status: str | None = None
     localization_gate_reason: str | None = None
     classification_gate_reason: str | None = None
+    localization_selected_epoch: int | None = None
+    localization_selected_metric: str | None = None
+    localization_selected_metric_value: float | None = None
+    classification_selected_epoch: int | None = None
+    classification_selected_metric: str | None = None
+    classification_selected_metric_value: float | None = None
     metrics: dict[str, float | int | bool] = Field(default_factory=dict)
 
     @field_validator("event_type", "scenario_id", "lifecycle_run_id")

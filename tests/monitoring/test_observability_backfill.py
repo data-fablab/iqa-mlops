@@ -55,6 +55,12 @@ def test_backfill_lifecycle_artifacts_pushes_epoch_and_gate_events(tmp_path) -> 
                 "candidate_run_dir": str(candidate_dir),
                 "localization_promotion_status": "promoted",
                 "classification_promotion_status": "promoted",
+                "selected_epoch": 4,
+                "localization_selected_metric": "pixel_aupimo_1e-5_1e-3",
+                "localization_candidate_metric_value": 0.3,
+                "classification_candidate_checkpoint": str(candidate_dir / "checkpoint_epoch_002.pt"),
+                "classification_selected_metric": "false_negatives",
+                "classification_candidate_metric_value": 1,
                 "localization_metric_delta": 0.2,
                 "classification_metric_delta": -1,
                 "localization_active_metrics_on_eval_set": {
@@ -111,6 +117,10 @@ def test_backfill_lifecycle_artifacts_pushes_epoch_and_gate_events(tmp_path) -> 
     assert promotion_event["metrics"]["gate_localization_active_pixel_aupimo"] == 0.1
     assert promotion_event["metrics"]["gate_classification_candidate_false_negatives"] == 1
     assert promotion_event["localization_promotion_status"] == "promoted"
+    assert promotion_event["localization_selected_epoch"] == 4
+    assert promotion_event["localization_selected_metric"] == "pixel_aupimo_1e-5_1e-3"
+    assert promotion_event["localization_selected_metric_value"] == 0.3
+    assert promotion_event["classification_selected_epoch"] == 2
     assert "candidate_run_dir" not in json.dumps(events)
     assert "checkpoint" not in json.dumps(events).lower()
 

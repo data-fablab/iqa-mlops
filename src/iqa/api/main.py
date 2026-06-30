@@ -81,6 +81,8 @@ LIFECYCLE_STATE: dict[str, Any] = {
     "final_models": {},
     "summary_metrics": {},
     "promotion_decisions": {},
+    "promotion_selected_epochs": {},
+    "promotion_selected_metric_values": {},
     "promotion_seen": set(),
     "promotion_counters": {},
 }
@@ -1803,6 +1805,35 @@ def _record_lifecycle_promotion_status(event: LifecycleEventRequest) -> None:
             ("candidate_version", event.candidate_version or ""),
         )
         LIFECYCLE_STATE["promotion_decisions"][decision_labels] = 1
+        if status == "promoted":
+            _record_lifecycle_promotion_selection(event, role=role, status=status)
+
+
+def _record_lifecycle_promotion_selection(
+    event: LifecycleEventRequest,
+    *,
+    role: str,
+    status: str,
+) -> None:
+    selected_epoch = getattr(event, f"{role}_selected_epoch", None)
+    selected_metric = getattr(event, f"{role}_selected_metric", None)
+    selected_metric_value = getattr(event, f"{role}_selected_metric_value", None)
+    finite_epoch = _finite_metric(selected_epoch)
+    if finite_epoch is None:
+        return
+    labels = (
+        ("scenario_id", event.scenario_id),
+        ("lifecycle_run_id", event.lifecycle_run_id),
+        ("cycle_id", event.cycle_id or "unknown"),
+        ("role", role),
+        ("status", status),
+        ("candidate_version", event.candidate_version or ""),
+        ("selected_metric", selected_metric or ""),
+    )
+    LIFECYCLE_STATE["promotion_selected_epochs"][labels] = int(finite_epoch)
+    finite_metric_value = _finite_metric(selected_metric_value)
+    if finite_metric_value is not None:
+        LIFECYCLE_STATE["promotion_selected_metric_values"][labels] = finite_metric_value
 
 
 def _reject_sensitive_drift_payload(payload: dict[str, Any]) -> None:
@@ -1948,6 +1979,10 @@ def _lifecycle_metrics_lines() -> list[str]:
         "# TYPE iqa_lifecycle_promotion_total counter",
         "# HELP iqa_lifecycle_promotion_decision_info Latest lifecycle promotion decisions by role",
         "# TYPE iqa_lifecycle_promotion_decision_info gauge",
+        "# HELP iqa_lifecycle_promotion_selected_epoch Epoch selected by a promoted lifecycle decision",
+        "# TYPE iqa_lifecycle_promotion_selected_epoch gauge",
+        "# HELP iqa_lifecycle_promotion_selected_metric_value Selected metric value for a promoted lifecycle decision",
+        "# TYPE iqa_lifecycle_promotion_selected_metric_value gauge",
         "# HELP iqa_lifecycle_active_model_info Active lifecycle model versions observed by the API",
         "# TYPE iqa_lifecycle_active_model_info gauge",
         "# HELP iqa_lifecycle_final_model_info Final promoted model versions for the lifecycle run",
@@ -2024,6 +2059,13 @@ def _lifecycle_metrics_lines() -> list[str]:
         lines.append(f"iqa_lifecycle_promotion_total{{{_metric_labels(labels)}}} {value}")
     for labels, value in sorted(LIFECYCLE_STATE["promotion_decisions"].items(), key=lambda item: str(item[0])):
         lines.append(f"iqa_lifecycle_promotion_decision_info{{{_metric_labels(labels)}}} {value}")
+    for labels, value in sorted(LIFECYCLE_STATE["promotion_selected_epochs"].items(), key=lambda item: str(item[0])):
+        lines.append(f"iqa_lifecycle_promotion_selected_epoch{{{_metric_labels(labels)}}} {value}")
+    for labels, value in sorted(
+        LIFECYCLE_STATE["promotion_selected_metric_values"].items(),
+        key=lambda item: str(item[0]),
+    ):
+        lines.append(f"iqa_lifecycle_promotion_selected_metric_value{{{_metric_labels(labels)}}} {value}")
     return lines
 
 
