@@ -49,7 +49,8 @@
   "links": [
     { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue Executive MLOps", "type": "link", "url": "/d/iqa-executive-mlops" },
     { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Drift P4", "type": "link", "url": "/d/iqa-drift-p4" },
-    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue d'ensemble", "type": "link", "url": "/d/iqa-overview" }
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue d'ensemble", "type": "link", "url": "/d/iqa-overview" },
+    { "icon": "external link", "includeVars": false, "keepTime": false, "targetBlank": true, "title": "MLflow", "type": "link", "url": "http://localhost:5000" }
   ],
   "panels": [
     {
@@ -95,6 +96,22 @@
           {
             "matcher": { "id": "byName", "options": "Value" },
             "properties": [{ "id": "displayName", "value": "epoch_promue" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "mlflow_run_id" },
+            "properties": [
+              { "id": "displayName", "value": "MLflow" },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Ouvrir le run MLflow",
+                    "url": "http://localhost:5000/#/experiments/0/runs/${__value.raw}"
+                  }
+                ]
+              }
+            ]
           }
         ]
       },
@@ -102,7 +119,7 @@
       "id": 4,
       "options": { "showHeader": true },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_promotion_selected_epoch{status=\"promoted\"}[$__range])", "format": "table", "instant": true, "legendFormat": "{{cycle_id}} {{role}} {{candidate_version}} epoch promue", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_promotion_selected_epoch{status=\"promoted\",lifecycle_run_id!=\"replay_lifecycle_bc11fd60e7eb423cb7eb2c0939b58658\"}[$__range]) or label_replace(last_over_time(iqa_lifecycle_promotion_selected_epoch{status=\"promoted\",lifecycle_run_id=\"replay_lifecycle_bc11fd60e7eb423cb7eb2c0939b58658\",cycle_id=\"cycle_001\",role=\"classification\"}[$__range]), \"mlflow_run_id\", \"61a157c9488042cbbf50e9595fe72b24\", \"cycle_id\", \".*\") or label_replace(last_over_time(iqa_lifecycle_promotion_selected_epoch{status=\"promoted\",lifecycle_run_id=\"replay_lifecycle_bc11fd60e7eb423cb7eb2c0939b58658\",cycle_id=\"cycle_001\",role=\"localization\"}[$__range]), \"mlflow_run_id\", \"61a157c9488042cbbf50e9595fe72b24\", \"cycle_id\", \".*\") or label_replace(last_over_time(iqa_lifecycle_promotion_selected_epoch{status=\"promoted\",lifecycle_run_id=\"replay_lifecycle_bc11fd60e7eb423cb7eb2c0939b58658\",cycle_id=\"cycle_002\",role=\"localization\"}[$__range]), \"mlflow_run_id\", \"3de54eda235b485591fb464cb4cda05d\", \"cycle_id\", \".*\") or label_replace(last_over_time(iqa_lifecycle_promotion_selected_epoch{status=\"promoted\",lifecycle_run_id=\"replay_lifecycle_bc11fd60e7eb423cb7eb2c0939b58658\",cycle_id=\"cycle_005\",role=\"localization\"}[$__range]), \"mlflow_run_id\", \"0f966425359b4c7d8230c56f5e1944a0\", \"cycle_id\", \".*\")", "format": "table", "instant": true, "legendFormat": "{{cycle_id}} {{role}} {{candidate_version}} epoch promue", "refId": "A" }
       ],
       "title": "Cycles avec promotions - modele et epoch promue",
       "type": "table"

@@ -126,6 +126,16 @@ def _promotion_selection_samples(run_dir: Path) -> list[dict[str, Any]]:
             )
         )
         samples.extend(
+            _piece_b_report_value_samples(
+                cycle,
+                scenario_id=scenario_id,
+                lifecycle_run_id=lifecycle_run_id,
+                cycle_id=cycle_id,
+                candidate_version=candidate_version,
+                timestamp_ms=timestamp,
+            )
+        )
+        samples.extend(
             _promotion_decision_samples(
                 cycle,
                 scenario_id=scenario_id,
@@ -270,6 +280,7 @@ def _role_samples(
             "status": str(status),
             "candidate_version": str(cycle.get("candidate_version") or ""),
             "selected_metric": str(selected_metric or ""),
+            "mlflow_run_id": str(cycle.get("mlflow_run_id") or ""),
         }
         output.append(
             {
@@ -360,6 +371,17 @@ def _role_gate_value_samples(
         labels = dict(base_labels)
         labels.update({"role": role, "model": model, "metric": _metric_label(metric_name)})
         output.append(_sample("iqa_lifecycle_gate_value", labels, value, timestamp_ms))
+    output.extend(
+        _metric_pair_samples(
+            cycle,
+            base_labels=base_labels,
+            role=role,
+            metrics=("pixel_aupimo_1e-5_1e-3", "pixel_ap"),
+            active_key=f"{role}_active_metrics_on_eval_set",
+            candidate_key=f"{role}_candidate_metrics_on_eval_set",
+            timestamp_ms=timestamp_ms,
+        )
+    )
     delta = _finite_float(gate.get("delta") or cycle.get(f"{role}_metric_delta"))
     if delta is not None:
         labels = dict(base_labels)
@@ -382,6 +404,7 @@ def _classification_gate_value_samples(
         ("false_negatives", "active_false_negatives", "candidate_false_negatives", "fn_delta"),
         ("image_ap", "active_image_ap", "candidate_image_ap", "image_ap_delta"),
         ("image_recall", "active_image_recall", "candidate_image_recall", "image_recall_delta"),
+        ("good_red_count", "active_good_red_count", "candidate_good_red_count", "good_red_delta"),
     )
     for metric_name, active_key, candidate_key, delta_key in metric_specs:
         for model, source_key in (("active", active_key), ("candidate", candidate_key)):
@@ -396,6 +419,70 @@ def _classification_gate_value_samples(
             labels = dict(base_labels)
             labels.update({"role": "classification", "metric": metric_name})
             output.append(_sample("iqa_lifecycle_gate_delta", labels, delta, timestamp_ms))
+    return output
+
+
+def _metric_pair_samples(
+    cycle: dict[str, Any],
+    *,
+    base_labels: dict[str, str],
+    role: str,
+    metrics: tuple[str, ...],
+    active_key: str,
+    candidate_key: str,
+    timestamp_ms: int,
+    metric_prefix: str = "",
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for model, source_key in (("active", active_key), ("candidate", candidate_key)):
+        payload = cycle.get(source_key)
+        if not isinstance(payload, dict):
+            continue
+        for metric_name in metrics:
+            value = _finite_float(payload.get(metric_name))
+            if value is None:
+                continue
+            labels = dict(base_labels)
+            labels.update(
+                {
+                    "role": role,
+                    "model": model,
+                    "metric": f"{metric_prefix}{_metric_label(metric_name)}",
+                }
+            )
+            output.append(_sample("iqa_lifecycle_gate_value", labels, value, timestamp_ms))
+    return output
+
+
+def _piece_b_report_value_samples(
+    cycle: dict[str, Any],
+    *,
+    scenario_id: str,
+    lifecycle_run_id: str,
+    cycle_id: str,
+    candidate_version: str,
+    timestamp_ms: int,
+) -> list[dict[str, Any]]:
+    base_labels = {
+        "scenario_id": scenario_id,
+        "lifecycle_run_id": lifecycle_run_id,
+        "cycle_id": cycle_id,
+        "candidate_version": candidate_version,
+    }
+    output: list[dict[str, Any]] = []
+    for role in ("classification", "localization"):
+        output.extend(
+            _metric_pair_samples(
+                cycle,
+                base_labels=base_labels,
+                role=role,
+                metrics=("false_negatives", "image_ap", "image_recall", "pixel_aupimo_1e-5_1e-3", "pixel_ap"),
+                active_key=f"piece_b_non_regression_{role}_active_metrics",
+                candidate_key=f"piece_b_non_regression_{role}_candidate_metrics",
+                timestamp_ms=timestamp_ms,
+                metric_prefix="piece_b_",
+            )
+        )
     return output
 
 
@@ -422,6 +509,7 @@ def _promotion_decision_samples(
             "role": role,
             "status": str(status),
             "candidate_version": candidate_version,
+            "mlflow_run_id": str(cycle.get("mlflow_run_id") or ""),
         }
         output.append(_sample("iqa_lifecycle_promotion_decision_info", labels, 1, timestamp_ms))
     return output

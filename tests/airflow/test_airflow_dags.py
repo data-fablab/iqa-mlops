@@ -317,21 +317,67 @@ def test_piece_a_p4_drift_dag_observes_before_triggering_one_correction() -> Non
 
     assert 'dag_id="iqa_drift_piece_a_p4"' in source
     assert "iqa-run-drift-observation-replay" in source
+    assert "--stable-reference-events {{ params.stable_reference_events }}" in source
+    assert "--drift-observation-windows {{ params.drift_observation_windows }}" in source
     assert "ShortCircuitOperator(" in source
-    assert 'task_id="trigger_lifecycle_correction"' in source
-    assert 'trigger_dag_id=LIFECYCLE_DAG_ID' in source
-    assert "op_observe_replay >> op_gate_on_confirmed_drift >> op_trigger_correction" in source
-    assert '"max_cycles": 1' in source
-    assert '"candidate_init_policy": "active"' in source
+    assert "PythonOperator(" in source
+    assert 'task_id="trigger_drift_correction_lifecycle"' in source
+    assert 'trigger_dag_id=CORRECTION_DAG_ID' in source
+    assert "iqa_drift_correction_lifecycle" in source
+    assert "op_observe_replay >> op_gate_on_confirmed_drift >> op_build_correction_conf >> op_trigger_correction" in source
+    assert '"drift_context_path": "{{ ti.xcom_pull(task_ids=' in source
+    assert '"anchor_good_manifest": "{{ ti.xcom_pull(task_ids=' in source
+    assert '"reference_eval_manifest": "{{ ti.xcom_pull(task_ids=' in source
+    assert '"epochs": 4' in source
+    assert '"max_events": 40' in source
+    assert '"window_size": 10' in source
+    assert '"stable_reference_events": 10' in source
+    assert '"drift_observation_windows": 3' in source
+    assert '"lifecycle_interval": "{{ ti.xcom_pull(task_ids=' in source
+    assert '"lifecycle_interval": 24' in source
+    assert '"candidate_init_policy": "{{ params.candidate_init_policy }}"' in source
+    assert '"candidate_init_policy": "stable_base"' in source
+    assert '"skip_report_only_reference_eval": "{{ params.skip_report_only_reference_eval }}"' in source
+    assert '"skip_report_only_reference_eval": True' in source
     assert '"external_drift_confirmed": True' in source
     assert '"reference_eval_manifest": "data/validation/validation_set_piece_b_to_piece_a_p4_drift_v001.csv"' in source
     assert '"classification_selection_manifest": "data/validation/classification_selection_piece_b_to_piece_a_p4_drift_v001.csv"' in source
     assert '"reference_gt_masks_manifest": "data/validation/validation_gt_masks_piece_b_to_piece_a_p4_drift_v001.csv"' in source
-    assert '"epochs": 16' in source
-    assert '"initial_classification_registered_model": "feature_ae_classifier__production_replay_natural_piece_b_full"' in source
-    assert '"initial_localization_registered_model": "feature_ae_localization__production_replay_natural_piece_b_full"' in source
+    assert '"epochs": 4' in source
+    assert '"initial_classification_registered_model": ""' in source
+    assert '"initial_localization_registered_model": ""' in source
+    assert '"require_mlflow_registry": False' in source
     assert "BashOperator(" not in source
     assert "bash_command" not in source
+
+
+@pytest.mark.unit
+def test_drift_correction_lifecycle_dag_requires_context_and_does_not_trigger_general_lifecycle() -> None:
+    source = _read_dag_source("iqa_drift_correction_lifecycle.py")
+
+    assert 'dag_id="iqa_drift_correction_lifecycle"' in source
+    assert 'task_id="run_drift_correction_lifecycle"' in source
+    assert "iqa-run-replay-lifecycle-cycle" in source
+    assert "--drift-context-path {{ params.drift_context_path }}" in source
+    assert '"drift_context_path": ""' in source
+    assert '"epochs": 4' in source
+    assert '"lifecycle_interval": 10' in source
+    assert '"candidate_init_policy": "stable_base"' in source
+    assert "--epochs {{ params.epochs }}" in source
+    assert "--candidate-init-policy {{ params.candidate_init_policy }}" in source
+    assert "--skip-report-only-reference-eval" in source
+    assert '"skip_report_only_reference_eval": True' in source
+    assert '"initial_classification_registered_model": ""' in source
+    assert '"initial_localization_registered_model": ""' in source
+    assert '"require_mlflow_registry": False' in source
+    assert "--external-drift-confirmed" in source
+    assert "--max-cycles 1" in source
+    assert "params.promotion_min_delta not in [none, 'None', 'none', 'null', '']" in source
+    assert "params.localization_promotion_min_delta not in [none, 'None', 'none', 'null', '']" in source
+    assert "params.classification_min_image_recall_delta not in [none, 'None', 'none', 'null', '']" in source
+    assert "params.classification_min_image_ap_delta not in [none, 'None', 'none', 'null', '']" in source
+    assert "TriggerDagRunOperator(" not in source
+    assert 'trigger_dag_id="iqa_lifecycle"' not in source
 
 
 @pytest.mark.unit

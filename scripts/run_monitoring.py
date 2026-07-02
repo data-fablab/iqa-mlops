@@ -26,9 +26,12 @@ from scripts.airflow_contracts import load_yaml_config, print_json, str2bool
 
 
 DEFAULT_DRIFT_THRESHOLDS = {
-    "min_window_events": 30,
+    "min_window_events": 10,
     "confirm_windows": 2,
-    "domain_ratio_critical": 0.50,
+    "roi_mask_novelty_rate_critical": 0.80,
+    "roi_mask_nn_distance_critical": 0.50,
+    "roi_area_ratio_critical": 0.40,
+    "domain_ratio_critical": 0.40,
     "alert_rate_critical": 0.50,
     "red_rate_critical": 0.20,
     "unexpected_red_rate_critical": 0.20,
@@ -47,6 +50,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-domain", default="piece_a_p4")
     parser.add_argument("--window-events", type=int, default=0)
     parser.add_argument("--domain-ratio", type=float, default=0.0)
+    parser.add_argument("--roi-mask-nn-distance", type=float, default=0.0)
+    parser.add_argument("--roi-mask-novelty-rate", type=float, default=0.0)
+    parser.add_argument("--roi-area-ratio", type=float, default=0.0)
+    parser.add_argument("--context-events-total", type=float, default=0.0)
     parser.add_argument("--alert-rate", type=float, default=0.0)
     parser.add_argument("--red-rate", type=float, default=0.0)
     parser.add_argument("--unexpected-red-rate", type=float, default=0.0)
@@ -108,6 +115,10 @@ def evaluate_drift_metrics(
     roi_fail_rate: float,
     oracle_fn_rate: float,
     critical_window_count: int,
+    roi_mask_nn_distance: float = 0.0,
+    roi_mask_novelty_rate: float = 0.0,
+    roi_area_ratio: float = 0.0,
+    context_events_total: float = 0.0,
     unexpected_red_rate: float = 0.0,
     drift_confirmed: bool = False,
     thresholds: dict[str, object] | None = None,
@@ -115,6 +126,9 @@ def evaluate_drift_metrics(
     drift_thresholds = _drift_thresholds(thresholds)
     min_window_events = int(drift_thresholds["min_window_events"])
     confirm_windows = int(drift_thresholds["confirm_windows"])
+    roi_mask_novelty_rate_critical = float(drift_thresholds["roi_mask_novelty_rate_critical"])
+    roi_mask_nn_distance_critical = float(drift_thresholds["roi_mask_nn_distance_critical"])
+    roi_area_ratio_critical = float(drift_thresholds["roi_area_ratio_critical"])
     domain_ratio_critical = float(drift_thresholds["domain_ratio_critical"])
     alert_rate_critical = float(drift_thresholds["alert_rate_critical"])
     red_rate_critical = float(drift_thresholds["red_rate_critical"])
@@ -123,6 +137,9 @@ def evaluate_drift_metrics(
     oracle_fn_rate_critical = float(drift_thresholds["oracle_fn_rate_critical"])
     enough_events = window_events >= min_window_events
     signals = {
+        "roi_mask_novelty_rate": roi_mask_novelty_rate >= roi_mask_novelty_rate_critical,
+        "roi_mask_nn_distance": roi_mask_nn_distance >= roi_mask_nn_distance_critical,
+        "roi_area_ratio": roi_area_ratio >= roi_area_ratio_critical,
         "domain_ratio": domain_ratio >= domain_ratio_critical,
         "alert_rate": alert_rate >= alert_rate_critical,
         "red_rate": red_rate >= red_rate_critical,
@@ -137,14 +154,22 @@ def evaluate_drift_metrics(
     }
     degradation_signal_count = sum(1 for breached in degradation_signals.values() if breached)
     domain_signal = signals["domain_ratio"]
-    critical_window = enough_events and domain_signal and degradation_signal_count > 0
+    roi_novelty_signal = signals["roi_mask_novelty_rate"]
+    roi_reference_signal = signals["roi_mask_nn_distance"] or signals["roi_area_ratio"]
+    roi_context_complete = context_events_total >= window_events if window_events > 0 else False
+    roi_critical_window = enough_events and roi_context_complete and roi_novelty_signal and roi_reference_signal
+    legacy_critical_window = enough_events and domain_signal and degradation_signal_count > 0
+    critical_window = roi_critical_window or legacy_critical_window
     next_critical_window_count = (critical_window_count + 1) if critical_window else 0
-    drift_suspected = enough_events and domain_signal
+    drift_suspected = enough_events and (roi_novelty_signal or domain_signal)
     drift_confirmed = bool(drift_confirmed) or (
-        critical_window and next_critical_window_count >= confirm_windows
+        roi_critical_window or (legacy_critical_window and next_critical_window_count >= confirm_windows)
     )
     status = "confirmed" if drift_confirmed else "suspected" if drift_suspected else "clear"
     domain_score = _score_ratio(domain_ratio, domain_ratio_critical)
+    roi_novelty_score = _score_ratio(roi_mask_novelty_rate, roi_mask_novelty_rate_critical)
+    roi_distance_score = _score_ratio(roi_mask_nn_distance, roi_mask_nn_distance_critical)
+    roi_area_score = _score_ratio(roi_area_ratio, roi_area_ratio_critical)
     degradation_score = max(
         _score_ratio(alert_rate, alert_rate_critical),
         _score_ratio(red_rate, red_rate_critical),
@@ -152,7 +177,8 @@ def evaluate_drift_metrics(
         _score_ratio(roi_fail_rate, roi_fail_rate_critical),
         _score_ratio(oracle_fn_rate, oracle_fn_rate_critical),
     )
-    drift_score = domain_score * degradation_score
+    roi_score = roi_novelty_score * max(roi_distance_score, roi_area_score)
+    drift_score = roi_score if roi_score > 0 else domain_score * degradation_score
     return {
         "scenario_id": scenario_id,
         "status": status,
@@ -168,12 +194,20 @@ def evaluate_drift_metrics(
         "metrics": {
             "window_events": window_events,
             "domain_ratio": domain_ratio,
+            "roi_mask_nn_distance": roi_mask_nn_distance,
+            "roi_mask_novelty_rate": roi_mask_novelty_rate,
+            "roi_area_ratio": roi_area_ratio,
+            "context_events_total": context_events_total,
             "alert_rate": alert_rate,
             "red_rate": red_rate,
             "unexpected_red_rate": unexpected_red_rate,
             "roi_fail_rate": roi_fail_rate,
             "oracle_fn_rate": oracle_fn_rate,
             "domain_score": domain_score,
+            "roi_novelty_score": roi_novelty_score,
+            "roi_distance_score": roi_distance_score,
+            "roi_area_score": roi_area_score,
+            "roi_context_complete": 1.0 if roi_context_complete else 0.0,
             "degradation_score": degradation_score,
             "drift_score": drift_score,
         },
@@ -186,6 +220,10 @@ def _evaluate_drift(args: argparse.Namespace, thresholds: dict[str, object]) -> 
         scenario_id=args.scenario_id,
         window_events=args.window_events,
         domain_ratio=args.domain_ratio,
+        roi_mask_nn_distance=args.roi_mask_nn_distance,
+        roi_mask_novelty_rate=args.roi_mask_novelty_rate,
+        roi_area_ratio=args.roi_area_ratio,
+        context_events_total=args.context_events_total,
         alert_rate=args.alert_rate,
         red_rate=args.red_rate,
         unexpected_red_rate=args.unexpected_red_rate,
@@ -208,6 +246,8 @@ def _push_drift_event(args: argparse.Namespace, drift_evaluation: dict[str, obje
         "status": drift_evaluation["status"],
         "source_domain": args.source_domain,
         "window_events": args.window_events,
+        "window_index": getattr(args, "window_index", None),
+        "first_confirmed_window_index": getattr(args, "first_confirmed_window_index", None),
         "trigger_lifecycle": bool(drift_evaluation.get("drift_confirmed")),
         "metrics": drift_evaluation["metrics"],
     }

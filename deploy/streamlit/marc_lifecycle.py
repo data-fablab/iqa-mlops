@@ -1,4 +1,4 @@
-"""Helpers for Marc's production lifecycle dashboard."""
+"""Helpers for Streamlit production and lineage dashboards."""
 
 from __future__ import annotations
 
@@ -190,7 +190,7 @@ def production_alerts(lots: list[dict[str, Any]], cycles: list[dict[str, Any]]) 
     alerts: list[str] = []
     for lot in lots:
         if int(lot.get("defauts_gt") or 0) > 0:
-            alerts.append(f"{lot['lot_id']} contient {lot['defauts_gt']} defaut(s) GT.")
+            alerts.append(f"{lot['lot_id']} contient {lot['defauts_gt']} defaut(s) confirmes.")
         if int(lot.get("rouge") or 0) > 0 or int(lot.get("orange") or 0) > 0:
             alerts.append(f"{lot['lot_id']} contient des decisions a verifier/non conformes.")
         if float(lot.get("roi_fail_rate") or 0) > 0:

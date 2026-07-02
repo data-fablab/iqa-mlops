@@ -1,13 +1,14 @@
 """IQA Streamlit - Accueil.
 
-Talks to the `iqa-api` FastAPI gateway. The two operational views are in the
+Talks to the `iqa-api` FastAPI gateway. The role-based views are in the
 ``pages/`` folder:
 
-- Dashboard Marc : pilotage production (conformite lots, alertes, lifecycle).
-- Review Sophie : revue en lecture seule des decisions vs oracle GT.
+- Dashboard Responsable Production : lots, conformite et alertes.
+- Interface Inspecteur Qualite : revue visuelle display-only.
+- Data Lineage : lifecycle, gates, promotions et registry.
 
-This Accueil page keeps the predict + oracle GT feedback demo used to feed the
-in-memory history that both views read.
+This Accueil page keeps the predict + quality-control feedback demo used to feed the
+in-memory history that the views read.
 """
 
 from __future__ import annotations
@@ -22,9 +23,10 @@ st.set_page_config(page_title="IQA - Accueil", layout="wide")
 st.title("Industrial Quality Assistant")
 st.caption(f"iqa-api: {API_URL}")
 st.markdown(
-    "Utilise le menu de gauche : **Dashboard Marc** (production, lots, lifecycle) et "
-    "**Review Sophie** (revue lecture seule, divergence oracle). Cette page sert "
-    "a generer des predictions et a fermer le feedback oracle GT."
+    "Utilise le menu de gauche : **Dashboard Responsable Production** pour les lots et alertes, "
+    "**Interface Inspecteur Qualite** pour la revue visuelle, et **Data Lineage** pour la "
+    "tracabilite technique modele/cycles. Cette page sert a generer des predictions et a fermer "
+    "le feedback controle qualite."
 )
 
 if "last_prediction" not in st.session_state:
@@ -68,8 +70,8 @@ if submitted:
 
 st.divider()
 
-st.header("Feedback (oracle GT)")
-st.caption("MVP : oracle_gt ferme le feedback ; human_sophie reste limitee a l'affichage.")
+st.header("Feedback controle qualite")
+st.caption("Le controle qualite ferme le feedback ; l'avis inspecteur reste limite a l'affichage.")
 last_prediction = st.session_state.get("last_prediction") or {}
 last_prediction_payload = last_prediction.get("prediction", {})
 last_prediction_id = last_prediction_payload.get("prediction_id", "")
@@ -79,8 +81,8 @@ with st.form("feedback_form"):
     prediction_id = st.text_input("prediction_id", value=last_prediction_id)
     fb_piece_event_id = st.text_input("piece_event_id ", value="demo-piece-0001")
     fb_scenario_id = st.text_input("scenario_id ", value="production_replay_natural")
-    gt_mask_has_defect = st.checkbox("gt_mask_has_defect")
-    gt_mask_uri = st.text_input("gt_mask_uri (optionnel)", value="")
+    gt_mask_has_defect = st.checkbox("Masque controle qualite defectueux")
+    gt_mask_uri = st.text_input("Masque controle qualite URI (optionnel)", value="")
     fb_submitted = st.form_submit_button("Envoyer feedback")
 
 if fb_submitted:

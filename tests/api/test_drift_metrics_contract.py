@@ -79,6 +79,11 @@ def test_api_metrics_exposes_drift_metrics(monkeypatch) -> None:
                 "drift_score": 0.82,
                 "degradation_score": 0.91,
                 "domain_score": 1.0,
+                "roi_mask_nn_distance": 0.73,
+                "roi_mask_novelty_rate": 1.0,
+                "roi_area_ratio": 0.51,
+                "context_events_total": 93,
+                "roi_context_complete": 1,
                 "alert_rate": 0.55,
                 "red_rate": 0.12,
                 "unexpected_red_rate": 0.44,
@@ -96,6 +101,10 @@ def test_api_metrics_exposes_drift_metrics(monkeypatch) -> None:
     assert "iqa_drift_degradation_score" in body
     assert "iqa_drift_domain_score" in body
     assert "iqa_drift_unexpected_red_rate" in body
+    assert "iqa_drift_roi_mask_nn_distance" in body
+    assert "iqa_drift_roi_mask_novelty_rate" in body
+    assert "iqa_drift_roi_area_ratio" in body
+    assert "iqa_drift_context_events_total" in body
     assert "iqa_drift_status" in body
     assert 'status="confirmed"' in body
     assert "iqa_drift_window_events" in body
@@ -108,3 +117,80 @@ def test_api_metrics_exposes_drift_metrics(monkeypatch) -> None:
     assert 'runtime_contract_status="loaded"' in body
     assert "aaaaaaaa" not in body
     assert list(text_string_to_metric_families(body))
+
+
+def test_first_drift_window_resets_previous_observation(monkeypatch) -> None:
+    _reset_drift_state()
+    monkeypatch.setenv("IQA_SERVICE_TOKEN", "service-secret")
+
+    record_drift_metric_event(
+        DriftEventRequest(
+            event_type="window_evaluated",
+            scenario_id="production_replay_natural_piece_b_to_piece_a_p4_drift",
+            status="confirmed",
+            source_domain="piece_a_p4",
+            window_index=3,
+            trigger_lifecycle=True,
+            metrics={"roi_mask_novelty_rate": 1.0, "context_events_total": 10},
+        ),
+        x_iqa_service_token="service-secret",
+    )
+
+    assert 'status="confirmed"' in metrics()
+    assert "iqa_drift_trigger_lifecycle" in metrics()
+
+    record_drift_metric_event(
+        DriftEventRequest(
+            event_type="window_evaluated",
+            scenario_id="production_replay_natural_piece_b_to_piece_a_p4_drift",
+            status="clear",
+            source_domain="piece_a_p4",
+            window_index=1,
+            trigger_lifecycle=False,
+            metrics={"roi_mask_novelty_rate": 0.0, "context_events_total": 0},
+        ),
+        x_iqa_service_token="service-secret",
+    )
+
+    body = metrics()
+    assert 'status="confirmed"' in body
+    assert 'status="confirmed"} 0' in body
+    assert 'status="clear"} 1' in body
+    assert "iqa_drift_trigger_lifecycle" in body
+    assert "iqa_drift_trigger_lifecycle{" in body
+    assert " 0" in body
+
+
+def test_drift_observation_completed_clears_live_metrics(monkeypatch) -> None:
+    _reset_drift_state()
+    monkeypatch.setenv("IQA_SERVICE_TOKEN", "service-secret")
+
+    record_drift_metric_event(
+        DriftEventRequest(
+            event_type="window_evaluated",
+            scenario_id="production_replay_natural_piece_b_to_piece_a_p4_drift",
+            status="confirmed",
+            source_domain="piece_a_p4",
+            window_index=2,
+            trigger_lifecycle=True,
+            metrics={"roi_mask_novelty_rate": 1.0, "context_events_total": 10},
+        ),
+        x_iqa_service_token="service-secret",
+    )
+
+    assert "iqa_drift_roi_mask_novelty_rate" in metrics()
+
+    record_drift_metric_event(
+        DriftEventRequest(
+            event_type="observation_completed",
+            scenario_id="production_replay_natural_piece_b_to_piece_a_p4_drift",
+            status="confirmed",
+            source_domain="piece_a_p4",
+        ),
+        x_iqa_service_token="service-secret",
+    )
+
+    body = metrics()
+    assert "iqa_drift_roi_mask_novelty_rate{" not in body
+    assert "iqa_drift_trigger_lifecycle{" not in body
+    assert 'status="confirmed"} 1' not in body

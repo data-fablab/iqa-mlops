@@ -1191,12 +1191,12 @@ def test_piece_a_p4_demo_gate_promotes_on_p4_panel_and_reports_piece_b_regressio
                 "good_red_count": 0,
             }
         elif panel_name in {"piece_a_p4_correction_classification", "classification_selection_checkpoint_best_image"}:
-            false_negatives = 6 if is_candidate else 5
+            false_negatives = 5
             metrics = {
                 "pixel_aupimo_1e-5_1e-3": 0.3,
                 "pixel_ap": 0.1,
                 "false_negatives": false_negatives,
-                "image_recall": 0.70 if is_candidate else 0.75,
+                "image_recall": 0.85 if is_candidate else 0.75,
                 "image_ap": 0.90 if is_candidate else 0.40,
                 "good_red_count": 0,
             }
@@ -1278,8 +1278,8 @@ def test_piece_a_p4_demo_gate_promotes_on_p4_panel_and_reports_piece_b_regressio
     assert cycle["localization_promotion_status"] == "promoted"
     assert cycle["classification_promotion_status"] == "promoted"
     assert cycle["dual_promotion_outcome"] == "localization_promoted__classification_promoted"
-    assert cycle["classification_gate"]["selected_metric"] == "image_ap"
-    assert cycle["classification_gate"]["fn_delta"] == 1
+    assert cycle["classification_gate"]["selected_metric"] == "image_recall"
+    assert cycle["classification_gate"]["fn_delta"] == 0
     assert cycle["classification_gate"]["metric_ok"] is True
     assert cycle["piece_b_non_regression_localization_metric_delta"] < 0
     assert cycle["piece_b_non_regression_classification_metric_delta"] < 0
@@ -1287,6 +1287,96 @@ def test_piece_a_p4_demo_gate_promotes_on_p4_panel_and_reports_piece_b_regressio
         runner.LOCALIZATION_MODEL_NAME_BASE,
         runner.CLASSIFICATION_MODEL_NAME_BASE,
     ]
+
+
+def test_piece_a_p4_demo_gate_rejects_classifier_when_fn_equal_and_ap_drops(tmp_path: Path, monkeypatch) -> None:
+    args = _args(tmp_path, scenario_id=runner.PIECE_B_TO_PIECE_A_P4_DRIFT_SCENARIO_ID, mode="progressive-train")
+    args.dual_promotion = True
+    args.classification_selection_manifest = tmp_path / "classification_selection.csv"
+    args.classification_selection_manifest.write_text("image_id,relative_path,label,is_defective\n", encoding="utf-8")
+    cycle_dir = tmp_path / "cycle_001"
+    cycle_dir.mkdir(parents=True, exist_ok=True)
+    active_checkpoint = tmp_path / "active.pt"
+    candidate_checkpoint = tmp_path / "candidate.pt"
+    _write_fake_checkpoint(active_checkpoint)
+    _write_fake_checkpoint(candidate_checkpoint)
+    active_runtime = runner.ActiveRuntimeModel(
+        version=runner.DEFAULT_FEATURE_AE_MODEL_VERSION,
+        checkpoint=active_checkpoint,
+        decision_thresholds={"threshold_source": "test", "threshold_orange": 0.5, "threshold_red": 0.9},
+        registry_model_name="",
+        registry_stage="test",
+    )
+    state = runner.CycleState(
+        scenario_id=runner.PIECE_B_TO_PIECE_A_P4_DRIFT_SCENARIO_ID,
+        mode="progressive-train",
+        run_id="run",
+        output_dir=tmp_path,
+    )
+    artifacts = runner.LifecycleArtifacts(
+        events_path=tmp_path / "events.jsonl",
+        lots_path=tmp_path / "lots.jsonl",
+        cycles_path=tmp_path / "cycles.jsonl",
+        summary_path=tmp_path / "summary.json",
+        progress_path=tmp_path / "progress.json",
+        lifecycle_events_path=tmp_path / "lifecycle_events.jsonl",
+        timings_path=tmp_path / "timings.jsonl",
+    )
+
+    def fake_pair(*_args, panel_name: str, **_kwargs):
+        if panel_name.endswith("_localization"):
+            active = {"pixel_aupimo_1e-5_1e-3": 0.2, "false_negatives": 2, "pixel_ap": 0.1}
+            candidate = {"pixel_aupimo_1e-5_1e-3": 0.4, "false_negatives": 1, "pixel_ap": 0.2}
+            return {
+                "selected_metric": "pixel_aupimo_1e-5_1e-3",
+                "active_metric_value": 0.2,
+                "candidate_metric_value": 0.4,
+                "metric_delta": 0.2,
+                "active_metrics_on_eval_set": active,
+                "candidate_metrics_on_eval_set": candidate,
+                "active_decision_thresholds": {"threshold_source": "test"},
+                "candidate_decision_thresholds": {"threshold_source": "test"},
+                "active_eval_metrics_path": "",
+                "candidate_eval_metrics_path": "",
+            }
+        active = {"false_negatives": 1, "image_recall": 0.75, "image_ap": 0.80, "good_red_count": 1}
+        candidate = {"false_negatives": 1, "image_recall": 0.75, "image_ap": 0.70, "good_red_count": 1}
+        return {
+            "selected_metric": "image_ap",
+            "active_metric_value": 0.80,
+            "candidate_metric_value": 0.70,
+            "metric_delta": -0.10,
+            "active_metrics_on_eval_set": active,
+            "candidate_metrics_on_eval_set": candidate,
+            "active_decision_thresholds": {"threshold_source": "test"},
+            "candidate_decision_thresholds": {"threshold_source": "test"},
+            "active_eval_metrics_path": "",
+            "candidate_eval_metrics_path": "",
+        }
+
+    monkeypatch.setattr(runner, "evaluate_model_pair_on_panel", fake_pair)
+
+    result = runner.evaluate_dual_reference_promotion_comparison(
+        args,
+        cycle_dir=cycle_dir,
+        reference_evaluation_set_path=args.reference_eval_manifest,
+        reference_evaluation_set_id=args.reference_eval_manifest.stem,
+        active_model_version=active_runtime.version,
+        active_checkpoint_path=active_checkpoint,
+        active_localization_runtime=active_runtime,
+        candidate_version="rd_feature_ae_gated_natural_cycle_001",
+        localization_candidate_checkpoint_path=candidate_checkpoint,
+        classification_candidate_checkpoint_path=candidate_checkpoint,
+        artifacts=artifacts,
+        state=state,
+        active_runtime=active_runtime,
+        started_at=runner.datetime.now(runner.UTC),
+    )
+
+    assert result["localization_promotion_status"] == "promoted"
+    assert result["classification_promotion_status"] == "rejected_no_classification_improvement"
+    assert result["classification_gate"]["fn_non_regression"] is True
+    assert result["classification_gate"]["image_ap_delta"] == pytest.approx(-0.1)
 
 
 def test_dual_promotion_good_red_guard_blocks_classifier_not_localizer(tmp_path: Path, monkeypatch) -> None:
@@ -1776,7 +1866,7 @@ def test_piece_a_p4_lifecycle_does_not_trigger_from_phase_without_external_confi
     assert lot["trigger_reason"] == "drift_not_confirmed"
 
 
-def test_piece_a_p4_lifecycle_external_confirmation_waits_for_correction_replay(
+def test_piece_a_p4_lifecycle_external_confirmation_triggers_after_corrective_window(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1794,6 +1884,7 @@ def test_piece_a_p4_lifecycle_external_confirmation_waits_for_correction_replay(
     _mock_runtime(monkeypatch)
     args = _args(tmp_path, scenario_id=runner.PIECE_B_TO_PIECE_A_P4_DRIFT_SCENARIO_ID, mode="decision-only")
     args.external_drift_confirmed = True
+    args.lifecycle_interval = 2
 
     summary = runner.run_cycle(args)
 

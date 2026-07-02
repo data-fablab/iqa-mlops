@@ -11,7 +11,7 @@ def _conf_for_phase(phase: builder.Phase) -> dict:
     return builder.build_conf(
         phase=phase,
         rows=rows,
-        epochs=16,
+        epochs=6,
         max_events=None,
         lifecycle_interval=50,
         ml_image="iqa-ml:local",
@@ -104,5 +104,5 @@ def test_piece_a_p4_trigger_conf_uses_stable_piece_b_models_for_correction() -> 
     assert conf["require_mlflow_registry"] is True
     assert conf["reference_eval_manifest"] == "data/validation/validation_set_piece_b_to_piece_a_p4_drift_v001.csv"
     assert conf["classification_selection_manifest"] == "data/validation/classification_selection_piece_b_to_piece_a_p4_drift_v001.csv"
-    assert conf["epochs"] == 16
+    assert conf["epochs"] == 6
     assert conf["scenario_validation"]["plan_summary"]["p4_event_count"] == 93

@@ -60,6 +60,34 @@ def test_export_lifecycle_promotion_selection_openmetrics_with_historical_timest
                 "classification_candidate_checkpoint": str(candidate_dir / "checkpoint_best_image.pt"),
                 "classification_selected_metric": "false_negatives",
                 "classification_candidate_metric_value": 1,
+                "classification_gate": {
+                    "active_false_negatives": 1,
+                    "candidate_false_negatives": 0,
+                    "active_good_red_count": 1,
+                    "candidate_good_red_count": 1,
+                    "good_red_delta": 0,
+                },
+                "localization_gate": {
+                    "active_value": 0.18,
+                    "candidate_value": 0.23,
+                    "metric": "pixel_aupimo_1e-5_1e-3",
+                },
+                "localization_active_metrics_on_eval_set": {
+                    "pixel_aupimo_1e-5_1e-3": 0.18,
+                    "pixel_ap": 0.15,
+                },
+                "localization_candidate_metrics_on_eval_set": {
+                    "pixel_aupimo_1e-5_1e-3": 0.23,
+                    "pixel_ap": 0.19,
+                },
+                "piece_b_non_regression_classification_active_metrics": {
+                    "false_negatives": 5,
+                    "image_ap": 0.74,
+                },
+                "piece_b_non_regression_classification_candidate_metrics": {
+                    "false_negatives": 6,
+                    "image_ap": 0.7,
+                },
                 "training_manifest_stats": {
                     "anchor_good_count": 2,
                     "seen_conforming_count": 72,
@@ -84,4 +112,8 @@ def test_export_lifecycle_promotion_selection_openmetrics_with_historical_timest
     assert 'kind="seen_conforming"' in body
     assert " 72 1782510000" in body
     assert 'kind="anchor_good"' in body
+    assert 'metric="good_red_count"' in body
+    assert 'metric="pixel_ap"' in body
+    assert 'metric="piece_b_false_negatives"' in body
+    assert 'metric="piece_b_image_ap"' in body
     assert body.endswith("# EOF\n")

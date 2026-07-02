@@ -102,18 +102,30 @@ def test_backfill_lifecycle_artifacts_pushes_epoch_and_gate_events(tmp_path) -> 
     events = backfill.build_lifecycle_events(run_dir)
 
     assert [event["event_type"] for event in events] == [
+        "run_started",
         "epoch_completed",
+        "phase_evaluation_gate",
         "promotion_decision",
+        "phase_promotion",
         "run_completed",
     ]
-    epoch_event = events[0]
+    epoch_event = events[1]
     assert epoch_event["metrics"] == {
         "pixel_aupimo": 0.11,
         "pixel_ap": 0.22,
         "image_ap": 0.33,
         "false_negatives": 2,
+        "phase_training_active": 1,
+        "phase_evaluation_gate_active": 0,
+        "phase_promotion_active": 0,
     }
-    promotion_event = events[1]
+    evaluation_event = events[2]
+    assert evaluation_event["metrics"] == {
+        "phase_training_active": 0,
+        "phase_evaluation_gate_active": 1,
+        "phase_promotion_active": 0,
+    }
+    promotion_event = events[3]
     assert promotion_event["metrics"]["gate_localization_active_pixel_aupimo"] == 0.1
     assert promotion_event["metrics"]["gate_classification_candidate_false_negatives"] == 1
     assert promotion_event["localization_promotion_status"] == "promoted"
@@ -121,6 +133,13 @@ def test_backfill_lifecycle_artifacts_pushes_epoch_and_gate_events(tmp_path) -> 
     assert promotion_event["localization_selected_metric"] == "pixel_aupimo_1e-5_1e-3"
     assert promotion_event["localization_selected_metric_value"] == 0.3
     assert promotion_event["classification_selected_epoch"] == 2
+    promotion_phase = events[4]
+    assert promotion_phase["metrics"] == {
+        "phase_training_active": 0,
+        "phase_evaluation_gate_active": 0,
+        "phase_promotion_active": 1,
+    }
+    assert events[-1]["metrics"]["phase_promotion_active"] == 0
     assert "candidate_run_dir" not in json.dumps(events)
     assert "checkpoint" not in json.dumps(events).lower()
 

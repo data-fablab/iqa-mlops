@@ -313,6 +313,7 @@ class LifecycleEventRequest(IQABaseModel):
     cycle_id: str | None = None
     epoch: int | None = None
     candidate_version: str | None = None
+    mlflow_run_id: str | None = None
     candidate_init_policy: str | None = None
     candidate_initial_model_version: str | None = None
     active_classification_model_version: str | None = None

@@ -1,4 +1,4 @@
-"""Shared IQA API helpers for the Streamlit Sophie/Marc views."""
+"""Shared IQA API helpers for the Streamlit role-based views."""
 
 from __future__ import annotations
 
