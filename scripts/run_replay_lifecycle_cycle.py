@@ -409,6 +409,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--classification-require-fn-improvement", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--classification-min-image-recall-delta", type=float, default=0.0)
     parser.add_argument("--classification-min-image-ap-delta", type=float, default=0.0)
+    parser.add_argument(
+        "--skip-report-only-reference-eval",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Skip non-blocking Piece B report-only evaluations in the short drift-correction demo.",
+    )
     parser.add_argument("--require-mlflow-registry", action="store_true")
     parser.add_argument("--anchor-good-manifest", type=Path, default=DEFAULT_ANCHOR_GOOD_MANIFEST)
     parser.add_argument("--anchor-good-max-per-class", type=int, default=256)
@@ -419,6 +425,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-init-policy", choices=["stable_base", "active", "fresh"], default="stable_base")
     parser.add_argument("--initial-classification-registered-model", default="")
     parser.add_argument("--initial-localization-registered-model", default="")
+    parser.add_argument("--initial-classification-registered-version", default="")
+    parser.add_argument("--initial-localization-registered-version", default="")
+    parser.add_argument(
+        "--drift-context-path",
+        type=Path,
+        help="Use the targeted correction manifest produced by the drift observation replay.",
+    )
     parser.add_argument(
         "--external-drift-confirmed",
         action="store_true",
@@ -459,8 +472,9 @@ def main() -> None:
             with gpu_lock(owner="iqa-replay-lifecycle", blocking=args.wait_for_gpu):
                 result = run_cycle(args)
     except Exception:
-        if getattr(args, "lifecycle_run_id", ""):
-            emit_lifecycle_api_event(args, "run_failed")
+        if not getattr(args, "lifecycle_run_id", ""):
+            setattr(args, "lifecycle_run_id", "failed_before_lifecycle_run_id")
+        emit_lifecycle_api_event(args, "run_failed")
         raise
     print(json.dumps(result, indent=2, sort_keys=True))
 
@@ -534,6 +548,7 @@ def summary_with_runtime(
             "lifecycle_events_path": str(artifacts.lifecycle_events_path),
             "cycles_path": str(artifacts.cycles_path),
             "timings_path": str(artifacts.timings_path),
+            "last_cycle": state.cycles[-1] if state.cycles else None,
         }
     )
     return payload
@@ -608,10 +623,15 @@ def _lifecycle_api_payload(
         "cycle_id",
         "epoch",
         "candidate_version",
+        "mlflow_run_id",
         "candidate_init_policy",
         "candidate_initial_model_version",
         "active_classification_model_version",
         "active_localization_model_version",
+        "active_classification_registered_model_name",
+        "active_classification_registered_model_version",
+        "active_localization_registered_model_name",
+        "active_localization_registered_model_version",
         "candidate_initial_checkpoint_sha256",
         "localization_checkpoint_sha256",
         "classification_checkpoint_sha256",
@@ -641,17 +661,108 @@ def _lifecycle_api_payload(
             "pixel_aupimo_1e-5_1e-3",
             "pixel_ap",
             "image_ap",
+            "false_negatives",
             "localization_metric_delta",
             "classification_metric_delta",
             "classification_fn_delta",
             "gate_metric_delta",
             "gate_fn_delta",
+            "gate_localization_active_pixel_aupimo",
+            "gate_localization_candidate_pixel_aupimo",
+            "gate_delta_localization_pixel_aupimo",
+            "gate_localization_active_pixel_ap",
+            "gate_localization_candidate_pixel_ap",
+            "gate_delta_localization_pixel_ap",
+            "gate_localization_active_false_negatives",
+            "gate_localization_candidate_false_negatives",
+            "gate_delta_localization_false_negatives",
+            "gate_classification_active_false_negatives",
+            "gate_classification_candidate_false_negatives",
+            "gate_delta_classification_false_negatives",
+            "gate_classification_active_image_ap",
+            "gate_classification_candidate_image_ap",
+            "gate_delta_classification_image_ap",
+            "gate_classification_active_image_recall",
+            "gate_classification_candidate_image_recall",
+            "train_set_total_count",
+            "train_set_seen_conforming_count",
+            "train_set_anchor_good_count",
+            "phase_training_active",
+            "phase_evaluation_gate_active",
+            "phase_promotion_active",
         }
         and _finite_float(value) is not None
     }
     if sanitized_metrics:
         body["metrics"] = sanitized_metrics
     return body
+
+
+def emit_lifecycle_phase(
+    args: argparse.Namespace,
+    phase: Literal["training", "evaluation_gate", "promotion", "idle"],
+    *,
+    cycle_id: str = "",
+    candidate_version: str = "",
+) -> None:
+    emit_lifecycle_api_event(
+        args,
+        f"phase_{phase}",
+        cycle_id=cycle_id,
+        candidate_version=candidate_version,
+        metrics={
+            "phase_training_active": phase == "training",
+            "phase_evaluation_gate_active": phase == "evaluation_gate",
+            "phase_promotion_active": phase == "promotion",
+        },
+    )
+
+
+def _metric(cycle: dict[str, Any], section: str, metric_name: str) -> Any:
+    metrics = cycle.get(section) or {}
+    return metrics.get(metric_name) if isinstance(metrics, dict) else None
+
+
+def _cycle_gate_metrics_payload(cycle: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "localization_metric_delta": cycle.get("localization_metric_delta"),
+        "classification_metric_delta": cycle.get("classification_metric_delta"),
+        "classification_fn_delta": cycle.get("fn_delta"),
+        "gate_localization_active_pixel_aupimo": _metric(cycle, "localization_active_metrics_on_eval_set", "pixel_aupimo_1e-5_1e-3"),
+        "gate_localization_candidate_pixel_aupimo": _metric(cycle, "localization_candidate_metrics_on_eval_set", "pixel_aupimo_1e-5_1e-3"),
+        "gate_delta_localization_pixel_aupimo": cycle.get("localization_metric_delta"),
+        "gate_localization_active_pixel_ap": _metric(cycle, "localization_active_metrics_on_eval_set", "pixel_ap"),
+        "gate_localization_candidate_pixel_ap": _metric(cycle, "localization_candidate_metrics_on_eval_set", "pixel_ap"),
+        "gate_delta_localization_pixel_ap": _delta(
+            _metric(cycle, "localization_candidate_metrics_on_eval_set", "pixel_ap"),
+            _metric(cycle, "localization_active_metrics_on_eval_set", "pixel_ap"),
+        ),
+        "gate_localization_active_false_negatives": _metric(cycle, "localization_active_metrics_on_eval_set", "false_negatives"),
+        "gate_localization_candidate_false_negatives": _metric(cycle, "localization_candidate_metrics_on_eval_set", "false_negatives"),
+        "gate_delta_localization_false_negatives": cycle.get("localization_fn_delta"),
+        "gate_classification_active_false_negatives": _metric(cycle, "classification_active_metrics_on_eval_set", "false_negatives"),
+        "gate_classification_candidate_false_negatives": _metric(cycle, "classification_candidate_metrics_on_eval_set", "false_negatives"),
+        "gate_delta_classification_false_negatives": cycle.get("classification_metric_delta"),
+        "gate_classification_active_image_ap": _metric(cycle, "classification_active_metrics_on_eval_set", "image_ap"),
+        "gate_classification_candidate_image_ap": _metric(cycle, "classification_candidate_metrics_on_eval_set", "image_ap"),
+        "gate_delta_classification_image_ap": _delta(
+            _metric(cycle, "classification_candidate_metrics_on_eval_set", "image_ap"),
+            _metric(cycle, "classification_active_metrics_on_eval_set", "image_ap"),
+        ),
+        "gate_classification_active_image_recall": _metric(cycle, "classification_active_metrics_on_eval_set", "image_recall"),
+        "gate_classification_candidate_image_recall": _metric(cycle, "classification_candidate_metrics_on_eval_set", "image_recall"),
+        "train_set_total_count": _metric(cycle, "training_manifest_stats", "total_count"),
+        "train_set_seen_conforming_count": _metric(cycle, "training_manifest_stats", "seen_conforming_count"),
+        "train_set_anchor_good_count": _metric(cycle, "training_manifest_stats", "anchor_good_count"),
+    }
+
+
+def _delta(candidate: Any, active: Any) -> float | None:
+    candidate_value = _finite_float(candidate)
+    active_value = _finite_float(active)
+    if candidate_value is None or active_value is None:
+        return None
+    return candidate_value - active_value
 
 
 def record_timing(artifacts: LifecycleArtifacts, phase: str, *, duration_seconds: float, **payload: Any) -> None:
@@ -693,7 +804,13 @@ def resolve_registered_initial_runtime(
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
         client = mlflow.tracking.MlflowClient(tracking_uri=tracking_uri)
-        model_version = client.get_model_version_by_alias(model_name, args.target_stage)
+        requested_version = str(
+            getattr(args, f"initial_{role}_registered_version", "") or ""
+        ).strip()
+        if requested_version:
+            model_version = client.get_model_version(model_name, requested_version)
+        else:
+            model_version = client.get_model_version_by_alias(model_name, args.target_stage)
         run_id = str(getattr(model_version, "run_id", "") or "")
         if not run_id:
             raise ValueError(f"registry model {model_name!r} alias {args.target_stage!r} has no source run")
@@ -844,6 +961,7 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     state.localization_promotion_chain = [state.active_localization_runtime.version]
     visual_store = create_visual_object_store()
     rows = load_replay_rows(args.scenario_id)
+    rows = _rows_from_drift_context(args, rows)
     if should_preflight_lifecycle_assets(args):
         preflight_lifecycle_assets(args, replay_rows=rows)
     events_path = state.output_dir / "events.jsonl"
@@ -936,13 +1054,50 @@ def run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     write_json(artifacts.summary_path, summary)
     write_progress(artifacts, state, active_runtime, phase="completed")
     record_lifecycle_event(artifacts, state, active_runtime, "run_completed", summary=summary)
+    last_cycle = state.cycles[-1] if state.cycles else {}
     emit_lifecycle_api_event(
         args,
         "run_completed",
-        cycle_id=state.cycles[-1].get("cycle_id") if state.cycles else None,
-        candidate_version=state.cycles[-1].get("candidate_version") if state.cycles else None,
-        localization_promotion_status=state.cycles[-1].get("localization_promotion_status") if state.cycles else None,
-        classification_promotion_status=state.cycles[-1].get("classification_promotion_status") if state.cycles else None,
+        cycle_id=last_cycle.get("cycle_id"),
+        candidate_version=last_cycle.get("candidate_version"),
+        active_classification_model_version=active_runtime.version,
+        active_localization_model_version=(
+            state.active_localization_runtime.version
+            if state.active_localization_runtime is not None
+            else active_runtime.version
+        ),
+        active_classification_registered_model_name=(
+            active_runtime.registry_model_name or last_cycle.get("classification_registered_model_name")
+        ),
+        active_classification_registered_model_version=(
+            active_runtime.registered_model_version or last_cycle.get("classification_registered_model_version")
+        ),
+        active_localization_registered_model_name=(
+            state.active_localization_runtime.registry_model_name
+            if state.active_localization_runtime is not None
+            else last_cycle.get("localization_registered_model_name")
+        ),
+        active_localization_registered_model_version=(
+            state.active_localization_runtime.registered_model_version
+            if state.active_localization_runtime is not None
+            else last_cycle.get("localization_registered_model_version")
+        ),
+        localization_promotion_status=last_cycle.get("localization_promotion_status"),
+        classification_promotion_status=last_cycle.get("classification_promotion_status"),
+        localization_gate_reason=last_cycle.get("localization_gate_reason"),
+        classification_gate_reason=last_cycle.get("classification_gate_reason"),
+        localization_selected_epoch=last_cycle.get("selected_epoch"),
+        localization_selected_metric=last_cycle.get("localization_selected_metric"),
+        localization_selected_metric_value=last_cycle.get("localization_candidate_metric_value"),
+        classification_selected_epoch=last_cycle.get("classification_selected_epoch"),
+        classification_selected_metric=last_cycle.get("classification_selected_metric"),
+        classification_selected_metric_value=last_cycle.get("classification_candidate_metric_value"),
+        metrics={
+            **_cycle_gate_metrics_payload(last_cycle),
+            "phase_training_active": 0,
+            "phase_evaluation_gate_active": 0,
+            "phase_promotion_active": 0,
+        },
     )
     return summary
 
@@ -953,6 +1108,24 @@ def load_replay_rows(scenario_id: str) -> list[dict[str, str]]:
         rows = [row for row in csv.DictReader(file) if row.get("scenario_id") == scenario_id]
     if not rows:
         raise ValueError(f"replay plan has no rows for scenario_id={scenario_id}: {plan}")
+    return rows
+
+
+def _rows_from_drift_context(args: argparse.Namespace, fallback_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    context_path = getattr(args, "drift_context_path", None)
+    if not context_path:
+        return fallback_rows
+    context_path = Path(context_path)
+    if not context_path.is_file():
+        raise FileNotFoundError(f"drift context not found: {context_path}")
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    manifest_path = Path(str(context.get("correction_manifest_path") or ""))
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"drift correction manifest not found: {manifest_path}")
+    with manifest_path.open(newline="", encoding="utf-8") as file:
+        rows = [row for row in csv.DictReader(file) if row.get("scenario_id") == args.scenario_id]
+    if not rows:
+        raise ValueError(f"drift correction manifest has no rows for scenario_id={args.scenario_id}: {manifest_path}")
     return rows
 
 
@@ -1186,7 +1359,7 @@ def lifecycle_decision_for_lot(
     piece_a_p4_correction_ready = (
         state.scenario_id == PIECE_B_TO_PIECE_A_P4_DRIFT_SCENARIO_ID
         and external_drift_confirmed
-        and "correction_replay" in lot.scenario_phases
+        and state.events_processed >= int(interval)
     )
     signal = LifecycleSignal(
         scenario_id=state.scenario_id,
@@ -1536,6 +1709,7 @@ def handle_lifecycle_decision(
         "promotion_decision",
         cycle_id=cycle_id,
         candidate_version=cycle_result.get("candidate_version"),
+        mlflow_run_id=cycle_result.get("mlflow_run_id"),
         candidate_initial_model_version=cycle_result.get("candidate_initial_model_version"),
         candidate_initial_checkpoint_sha256=cycle_result.get("candidate_initial_checkpoint_sha256"),
         localization_checkpoint_sha256=cycle_result.get("localization_checkpoint_sha256"),
@@ -1550,11 +1724,11 @@ def handle_lifecycle_decision(
         classification_selected_epoch=cycle_result.get("classification_selected_epoch"),
         classification_selected_metric=cycle_result.get("classification_selected_metric"),
         classification_selected_metric_value=cycle_result.get("classification_candidate_metric_value"),
-        metrics={
-            "localization_metric_delta": cycle_result.get("localization_metric_delta"),
-            "classification_metric_delta": cycle_result.get("classification_metric_delta"),
-            "classification_fn_delta": cycle_result.get("fn_delta"),
-        },
+        active_classification_registered_model_name=cycle_result.get("classification_registered_model_name"),
+        active_classification_registered_model_version=cycle_result.get("classification_registered_model_version"),
+        active_localization_registered_model_name=cycle_result.get("localization_registered_model_name"),
+        active_localization_registered_model_version=cycle_result.get("localization_registered_model_version"),
+        metrics=_cycle_gate_metrics_payload(cycle_result),
     )
     print(
         "lifecycle cycle "
@@ -1665,6 +1839,20 @@ def build_progressive_cycle(
         "active_thresholds_after": active_runtime.decision_thresholds,
         "operational_alerts": [],
     }
+    emit_lifecycle_api_event(
+        args,
+        "training_manifest_ready",
+        cycle_id=f"cycle_{cycle_number:03d}",
+        candidate_version=candidate_version,
+        candidate_initial_model_version=active_model_before,
+        active_classification_model_version=active_model_before,
+        active_localization_model_version=active_localization_runtime.version,
+        metrics={
+            "train_set_total_count": training_manifest_stats.get("total_count"),
+            "train_set_seen_conforming_count": training_manifest_stats.get("seen_conforming_count"),
+            "train_set_anchor_good_count": training_manifest_stats.get("anchor_good_count"),
+        },
+    )
     if args.mode == "progressive-train":
         train_started = datetime.now(UTC)
         initial_checkpoint_path = resolve_candidate_initial_checkpoint(
@@ -1674,6 +1862,12 @@ def build_progressive_cycle(
         initial_checkpoint_reference = safe_checkpoint_reference(initial_checkpoint_path)
         initial_checkpoint_sha256 = sha256_file(initial_checkpoint_path) if initial_checkpoint_path else ""
         initial_model_version = resolve_candidate_initial_model_version(args, active_runtime=active_runtime)
+        emit_lifecycle_phase(
+            args,
+            "training",
+            cycle_id=f"cycle_{cycle_number:03d}",
+            candidate_version=candidate_version,
+        )
         train_result = train_progressive_candidate(
             args,
             candidate_version,
@@ -1716,6 +1910,12 @@ def build_progressive_cycle(
         result["classification_selection_image_ap"] = classification_selection.get("selected_image_ap")
         result["localization_candidate_checkpoint"] = str(specialized["localization"])
         result["classification_candidate_checkpoint"] = str(specialized["classification"])
+        emit_lifecycle_phase(
+            args,
+            "evaluation_gate",
+            cycle_id=f"cycle_{cycle_number:03d}",
+            candidate_version=candidate_version,
+        )
         checkpoint_evidence = validate_cycle_checkpoints(
             candidate_checkpoint=Path(str(result["candidate_checkpoint"])),
             localization_checkpoint=specialized["localization"],
@@ -1803,6 +2003,12 @@ def build_progressive_cycle(
             state=state,
             active_runtime=active_runtime,
         )
+        emit_lifecycle_phase(
+            args,
+            "promotion",
+            cycle_id=f"cycle_{cycle_number:03d}",
+            candidate_version=candidate_version,
+        )
         result.update(comparison)
         result["promotion_status"] = comparison["promotion_status"]
         result["gate_decision"] = comparison["gate_decision"]
@@ -1830,6 +2036,7 @@ def build_progressive_cycle(
             "gate_decision",
             cycle_id=f"cycle_{cycle_number:03d}",
             candidate_version=candidate_version,
+            mlflow_run_id=result.get("mlflow_run_id"),
             candidate_initial_model_version=result.get("candidate_initial_model_version"),
             candidate_initial_checkpoint_sha256=result.get("candidate_initial_checkpoint_sha256"),
             localization_checkpoint_sha256=result.get("localization_checkpoint_sha256"),
@@ -2311,7 +2518,10 @@ def evaluate_dual_reference_promotion_comparison(
         gt_masks_manifest=args.reference_gt_masks_manifest,
         metric_priority=CLASSIFICATION_METRIC_PRIORITY,
     )
-    if piece_b_non_regression_policy == PIECE_B_NON_REGRESSION_REPORT_ONLY:
+    if (
+        piece_b_non_regression_policy == PIECE_B_NON_REGRESSION_REPORT_ONLY
+        and not bool(getattr(args, "skip_report_only_reference_eval", False))
+    ):
         report_reference_localization = evaluate_model_pair_on_panel(
             args,
             cycle_dir=cycle_dir,
@@ -2346,19 +2556,51 @@ def evaluate_dual_reference_promotion_comparison(
             gt_masks_manifest=args.reference_gt_masks_manifest,
             metric_priority=CLASSIFICATION_METRIC_PRIORITY,
         )
+    elif piece_b_non_regression_policy == PIECE_B_NON_REGRESSION_REPORT_ONLY:
+        report_reference_localization = {
+            "skipped": True,
+            "reason": "report_only_reference_eval_skipped_for_live_demo",
+        }
+        report_reference_classification = {
+            "skipped": True,
+            "reason": "report_only_reference_eval_skipped_for_live_demo",
+        }
     completed_at = datetime.now(UTC)
 
+    localization_active_metrics = localization.get("active_metrics_on_eval_set") or {}
+    localization_candidate_metrics = localization.get("candidate_metrics_on_eval_set") or {}
     localization_delta = _finite_float(localization.get("metric_delta"))
+    localization_active_fn = int(localization_active_metrics.get("false_negatives") or 0)
+    localization_candidate_fn = int(localization_candidate_metrics.get("false_negatives") or 0)
+    localization_fn_delta = localization_candidate_fn - localization_active_fn
+    localization_pixel_ap_delta = _delta(
+        localization_candidate_metrics.get("pixel_ap"),
+        localization_active_metrics.get("pixel_ap"),
+    )
     localization_metric_ok = (
         localization.get("selected_metric") is not None
         and localization_delta is not None
         and localization_delta > float(args.localization_promotion_min_delta)
     )
+    localization_selected_metric = localization.get("selected_metric")
+    localization_active_metric_value = localization.get("active_metric_value")
+    localization_candidate_metric_value = localization.get("candidate_metric_value")
+    localization_decision_delta = localization.get("metric_delta")
+    if promotion_objective == PIECE_A_P4_DEMO_PROMOTION_OBJECTIVE and localization_fn_delta < 0:
+        localization_metric_ok = True
+        localization_selected_metric = "false_negatives"
+        localization_active_metric_value = localization_active_fn
+        localization_candidate_metric_value = localization_candidate_fn
+        localization_decision_delta = -localization_fn_delta
     localization_gate = {
-        "metric": localization.get("selected_metric"),
-        "active_value": localization.get("active_metric_value"),
-        "candidate_value": localization.get("candidate_metric_value"),
-        "delta": localization.get("metric_delta"),
+        "metric": localization_selected_metric,
+        "active_value": localization_active_metric_value,
+        "candidate_value": localization_candidate_metric_value,
+        "delta": localization_decision_delta,
+        "active_false_negatives": localization_active_fn,
+        "candidate_false_negatives": localization_candidate_fn,
+        "fn_delta": localization_fn_delta,
+        "pixel_ap_delta": localization_pixel_ap_delta,
         "min_delta": float(args.localization_promotion_min_delta),
         "passed": bool(localization_metric_ok),
     }
@@ -2387,7 +2629,7 @@ def evaluate_dual_reference_promotion_comparison(
     recall_improved = image_recall_delta is not None and image_recall_delta > float(args.classification_min_image_recall_delta)
     ap_improved = image_ap_delta is not None and image_ap_delta > float(args.classification_min_image_ap_delta)
     if promotion_objective == PIECE_A_P4_DEMO_PROMOTION_OBJECTIVE:
-        classification_metric_ok = bool(fn_non_regression or recall_improved or ap_improved)
+        classification_metric_ok = bool(fn_improved or (fn_non_regression and (recall_improved or ap_improved)))
     else:
         classification_metric_ok = fn_improved if args.classification_require_fn_improvement else bool(fn_improved or recall_improved or ap_improved)
     thresholds_ok = classification.get("candidate_decision_thresholds") is not None and classification.get("active_decision_thresholds") is not None
@@ -2477,10 +2719,11 @@ def evaluate_dual_reference_promotion_comparison(
         "active_metric_value": active_metrics.get(classification_selected_metric) if classification_selected_metric else None,
         "candidate_metric_value": candidate_metrics.get(classification_selected_metric) if classification_selected_metric else None,
         "metric_delta": -fn_delta if classification_selected_metric == "false_negatives" else classification.get("metric_delta"),
-        "localization_selected_metric": localization.get("selected_metric"),
-        "localization_active_metric_value": localization.get("active_metric_value"),
-        "localization_candidate_metric_value": localization.get("candidate_metric_value"),
-        "localization_metric_delta": localization.get("metric_delta"),
+        "localization_selected_metric": localization_selected_metric,
+        "localization_active_metric_value": localization_active_metric_value,
+        "localization_candidate_metric_value": localization_candidate_metric_value,
+        "localization_metric_delta": localization_decision_delta,
+        "localization_fn_delta": localization_fn_delta,
         "classification_selected_metric": classification_selected_metric,
         "classification_active_metric_value": active_metrics.get(classification_selected_metric) if classification_selected_metric else None,
         "classification_candidate_metric_value": candidate_metrics.get(classification_selected_metric) if classification_selected_metric else None,

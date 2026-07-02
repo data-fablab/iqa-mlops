@@ -9,39 +9,10 @@
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
-      },
-      {
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "enable": true,
-        "expr": "iqa_drift_domain_ratio{source_domain=\"piece_a_p4\"}",
-        "iconColor": "rgba(242, 166, 59, 1)",
-        "name": "Arrivee P4",
-        "tagKeys": "source_domain",
-        "textFormat": "Piece A/P4 detectee",
-        "titleFormat": "Arrivee P4"
-      },
-      {
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "enable": true,
-        "expr": "iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}",
-        "iconColor": "rgba(255, 91, 115, 1)",
-        "name": "Drift confirme",
-        "tagKeys": "status",
-        "textFormat": "Drift confirme",
-        "titleFormat": "Drift confirme"
-      },
-      {
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "enable": true,
-        "expr": "iqa_drift_trigger_lifecycle{source_domain=\"piece_a_p4\"}",
-        "iconColor": "rgba(121, 211, 107, 1)",
-        "name": "Correction declenchee",
-        "tagKeys": "source_domain",
-        "textFormat": "Lifecycle correctif declenche",
-        "titleFormat": "Correction"
       }
     ]
   },
+  "description": "Scenario Drift P4: Piece B stable, P4 hors referentiel ROI, DAG correctif, entrainement court, gate, promotions.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -49,233 +20,289 @@
   "links": [
     { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue Executive MLOps", "type": "link", "url": "/d/iqa-executive-mlops" },
     { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Lifecycle MLOps", "type": "link", "url": "/d/iqa-lifecycle" },
-    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue d'ensemble", "type": "link", "url": "/d/iqa-overview" }
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue d'ensemble", "type": "link", "url": "/d/iqa-overview" },
+    { "icon": "external link", "includeVars": false, "keepTime": false, "targetBlank": true, "title": "MLflow", "type": "link", "url": "http://localhost:5000" }
   ],
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
       "id": 1,
       "options": {
-        "content": "## La realite terrain change\n\nEn regime etabli, le systeme observe d'abord sans reentrainer. Quand Piece A/P4 apparait, le drift passe suspected puis confirme. Airflow declenche alors une correction ciblee et la gate decide si les nouveaux modeles peuvent etre promus.",
+        "content": "## Drift P4 puis entrainement correctif\n\nPiece B reste stable. P4 arrive progressivement avec des ROI hors referentiel. Le drift est confirme sur une fenetre P4 complete, Airflow lance un DAG correctif cible, plusieurs epochs courtes sont entrainees, puis classification et localisation sont promues si la gate valide la correction.",
         "mode": "markdown"
       },
-      "title": "Drift P4 - observation puis correction",
+      "title": "Drift P4 puis entrainement correctif",
       "type": "text"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "mappings": [
-            { "options": { "0": { "color": "green", "text": "clear" }, "1": { "color": "red", "text": "confirmed" } }, "type": "value" }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 4 },
-      "id": 2,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}[$__range])", "instant": true, "legendFormat": "confirmed", "refId": "A" }
-      ],
-      "title": "Etat drift",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 2,
+          "custom": { "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "stepAfter", "lineWidth": 2, "showPoints": "auto", "spanNulls": true },
           "max": 1,
           "min": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 0.8 }] },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.8 }, { "color": "red", "value": 1 }] },
           "unit": "percentunit"
         },
-        "overrides": []
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Drift confirme" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "DAG correctif" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Promotion classification" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Promotion localisation" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
       },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 4 },
-      "id": 3,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_score{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "score", "refId": "A" }
-      ],
-      "title": "Score drift",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 1,
-          "max": 1,
-          "min": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 0.8 }] },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 4 },
-      "id": 4,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_domain_ratio{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "ratio P4", "refId": "A" }
-      ],
-      "title": "Domaine Piece A/P4",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 4 },
-      "id": 5,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_window_index{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "window", "refId": "A" }
-      ],
-      "title": "Fenetre observee",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            { "options": { "0": { "color": "green", "text": "non" }, "1": { "color": "orange", "text": "triggered" } }, "type": "value" }
-          ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 4 },
-      "id": 6,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_trigger_lifecycle{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "trigger", "refId": "A" }
-      ],
-      "title": "Correction",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "decimals": 0, "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 4 },
-      "id": 7,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_first_confirmed_window{source_domain=\"piece_a_p4\"}[$__range])", "instant": true, "legendFormat": "first confirmed", "refId": "A" }
-      ],
-      "title": "Premiere fenetre confirmee",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "max": 1,
-          "min": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 0.8 }] },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
       "id": 8,
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_domain_ratio{source_domain=\"piece_a_p4\"}", "legendFormat": "ratio Piece A/P4", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_score{source_domain=\"piece_a_p4\"}", "legendFormat": "score drift", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}", "legendFormat": "drift confirme", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_status{source_domain=\"piece_a_p4\",status=\"confirmed\"}", "legendFormat": "Drift confirme", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_trigger_lifecycle{source_domain=\"piece_a_p4\"}", "legendFormat": "DAG correctif", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_promotion_total{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"classification\",status=\"promoted\"}", "legendFormat": "Promotion classification", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_promotion_total{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"localization\",status=\"promoted\"}", "legendFormat": "Promotion localisation", "refId": "D" }
       ],
-      "title": "Trajectoire drift avec seuils suspected / confirmed",
+      "title": "Chronologie scenario - drift puis correction",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "max": 1, "min": 0, "unit": "percentunit" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "stepAfter", "lineWidth": 2, "showPoints": "auto", "spanNulls": true }, "max": 1, "min": 0, "unit": "percentunit" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Distance ROI" }, "properties": [{ "id": "unit", "value": "none" }, { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Seuil confirmation" }, "properties": [{ "id": "custom.lineStyle", "value": { "fill": "dash" } }, { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 12 },
       "id": 9,
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_alert_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "alert rate", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_red_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "red rate", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_unexpected_red_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "unexpected red rate", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_roi_mask_novelty_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "Novelty ROI", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_roi_mask_nn_distance{source_domain=\"piece_a_p4\"}", "legendFormat": "Distance ROI", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "vector(0.8)", "legendFormat": "Seuil confirmation", "refId": "C" }
       ],
-      "title": "Signaux terrain - alertes et rouges",
+      "title": "Preuve ROI - Piece B stable puis P4",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "max": 1, "min": 0, "unit": "percentunit" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 14, "lineInterpolation": "stepAfter", "lineWidth": 2, "showPoints": "auto", "spanNulls": true }, "decimals": 0, "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Contexte P4" }, "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Contexte P1/P2/P3" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 18 },
       "id": 10,
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_roi_fail_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "ROI fail", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_oracle_fn_rate{source_domain=\"piece_a_p4\"}", "legendFormat": "oracle FN", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_drift_context_events_total{source_domain=\"piece_a_p4\"}", "legendFormat": "Contexte P4", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "clamp_min(iqa_drift_window_events{source_domain=\"piece_a_p4\"} - iqa_drift_context_events_total{source_domain=\"piece_a_p4\"}, 0)", "legendFormat": "Contexte P1/P2/P3", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_run_events_processed{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}", "legendFormat": "Events correction", "refId": "C" }
       ],
-      "title": "Signaux critiques - ROI et FN oracle",
+      "title": "Correction ciblee - contexte et train set",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 23 },
-      "id": 11,
-      "options": { "showHeader": true },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_drift_active_model_info{source_domain=\"piece_a_p4\"}[$__range])", "format": "table", "instant": true, "legendFormat": "active model", "refId": "A" }
-      ],
-      "title": "Modeles utilises par l'observation",
-      "type": "table"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 23 },
-      "id": 12,
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}", "legendFormat": "{{role}} {{kind}} {{metric}}", "refId": "A" }
-      ],
-      "title": "Correction - gate active/candidate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
-      "id": 13,
-      "options": { "showHeader": true },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_promotion_decision_info{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}[$__range])", "format": "table", "instant": true, "legendFormat": "decision", "refId": "A" }
-      ],
-      "title": "Correction - decisions de promotion",
-      "type": "table"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 58, "lineInterpolation": "stepAfter", "lineWidth": 3, "showPoints": "never", "spanNulls": true }, "max": 1, "min": 0, "unit": "percentunit" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Entrainement" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Gate" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Promotion" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 24 },
       "id": 14,
-      "options": { "showHeader": true },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_final_model_info{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}[$__range])", "format": "table", "instant": true, "legendFormat": "final model", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (scenario_id,lifecycle_run_id,cycle_id) (iqa_lifecycle_phase_active{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",phase=\"training\"})", "legendFormat": "Entrainement", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (scenario_id,lifecycle_run_id,cycle_id) (iqa_lifecycle_phase_active{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",phase=\"evaluation_gate\"})", "legendFormat": "Gate", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (scenario_id,lifecycle_run_id,cycle_id) (iqa_lifecycle_phase_active{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",phase=\"promotion\"})", "legendFormat": "Promotion", "refId": "C" }
+      ],
+      "title": "Phase DAG correctif - entrainement gate promotion",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 18, "lineInterpolation": "stepAfter", "lineWidth": 2, "showPoints": "auto", "spanNulls": true }, "decimals": 0, "min": 0, "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "epoch" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 29 },
+      "id": 11,
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "iqa_lifecycle_epoch_current{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\"}", "legendFormat": "epoch", "refId": "A" }
+      ],
+      "title": "Epochs correction - progression",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "decimals": 3, "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".* active$" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".* candidat$" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 33 },
+      "id": 12,
+      "options": { "displayMode": "gradient", "maxVizHeight": 300, "minVizHeight": 16, "minVizWidth": 8, "namePlacement": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "color" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"classification\",model=\"active\",metric=\"false_negatives\"}[45s])", "instant": true, "legendFormat": "FN active", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"classification\",model=\"candidate\",metric=\"false_negatives\"}[45s])", "instant": true, "legendFormat": "FN candidat", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"classification\",model=\"active\",metric=\"image_ap\"}[45s])", "instant": true, "legendFormat": "Image AP active", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"classification\",model=\"candidate\",metric=\"image_ap\"}[45s])", "instant": true, "legendFormat": "Image AP candidat", "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"classification\",model=\"active\",metric=\"image_recall\"}[45s])", "instant": true, "legendFormat": "Recall active", "refId": "E" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"classification\",model=\"candidate\",metric=\"image_recall\"}[45s])", "instant": true, "legendFormat": "Recall candidat", "refId": "F" }
+      ],
+      "title": "Gate classification - avant apres",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "decimals": 3, "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".* active$" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".* candidat$" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 33 },
+      "id": 13,
+      "options": { "displayMode": "gradient", "maxVizHeight": 300, "minVizHeight": 16, "minVizWidth": 8, "namePlacement": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "color" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"localization\",model=\"active\",metric=\"false_negatives\"}[45s])", "instant": true, "legendFormat": "FN active", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"localization\",model=\"candidate\",metric=\"false_negatives\"}[45s])", "instant": true, "legendFormat": "FN candidat", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"localization\",model=\"active\",metric=\"pixel_ap\"}[45s])", "instant": true, "legendFormat": "Pixel AP active", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"localization\",model=\"candidate\",metric=\"pixel_ap\"}[45s])", "instant": true, "legendFormat": "Pixel AP candidat", "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"localization\",model=\"active\",metric=\"pixel_aupimo\"}[45s])", "instant": true, "legendFormat": "AUPIMO active", "refId": "E" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_gate_value{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"localization\",model=\"candidate\",metric=\"pixel_aupimo\"}[45s])", "instant": true, "legendFormat": "AUPIMO candidat", "refId": "F" }
+      ],
+      "title": "Gate localisation - avant apres",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "1": { "text": "promoted - epoch 1" },
+                "2": { "text": "promoted - epoch 2" },
+                "3": { "text": "promoted - epoch 3" },
+                "4": { "text": "promoted - epoch 4" },
+                "5": { "text": "promoted - epoch 5" },
+                "6": { "text": "promoted - epoch 6" },
+                "7": { "text": "promoted - epoch 7" },
+                "8": { "text": "promoted - epoch 8" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 1 }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 40 },
+      "id": 15,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(last_over_time(iqa_lifecycle_promotion_selected_epoch{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"classification\",status=\"promoted\"}[45s]))", "instant": true, "legendFormat": "classification", "refId": "A" }
+      ],
+      "title": "Classification promue",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "1": { "text": "promoted - epoch 1" },
+                "2": { "text": "promoted - epoch 2" },
+                "3": { "text": "promoted - epoch 3" },
+                "4": { "text": "promoted - epoch 4" },
+                "5": { "text": "promoted - epoch 5" },
+                "6": { "text": "promoted - epoch 6" },
+                "7": { "text": "promoted - epoch 7" },
+                "8": { "text": "promoted - epoch 8" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 1 }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 40 },
+      "id": 16,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(last_over_time(iqa_lifecycle_promotion_selected_epoch{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",role=\"localization\",status=\"promoted\"}[45s]))", "instant": true, "legendFormat": "localisation", "refId": "A" }
+      ],
+      "title": "Localisation promue",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }, "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 44 },
+      "id": 19,
+      "options": { "cellHeight": "sm", "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false }, "showHeader": true },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "scenario_id": true,
+              "Value": true
+            },
+            "indexByName": {
+              "role": 0,
+              "version": 1,
+              "registered_model_name": 2,
+              "registered_model_version": 3,
+              "lifecycle_run_id": 4
+            },
+            "renameByName": {
+              "registered_model_name": "model",
+              "registered_model_version": "registry_version",
+              "lifecycle_run_id": "run_correctif"
+            }
+          }
+        }
+      ],
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "last_over_time(iqa_lifecycle_final_model_info{scenario_id=\"production_replay_natural_piece_b_to_piece_a_p4_drift\",registered_model_name=~\".+\",registered_model_name!=\"unknown\",registered_model_version=~\".+\",registered_model_version!=\"unknown\"}[45s])", "format": "table", "instant": true, "legendFormat": "{{role}} {{version}}", "refId": "A" }
       ],
       "title": "Registry correction - modeles promus",
       "type": "table"
     }
   ],
-  "refresh": "15s",
+  "refresh": "5s",
   "schemaVersion": 40,
-  "tags": ["iqa", "drift", "piece-a-p4", "storytelling"],
+  "tags": ["iqa", "mlops", "drift", "p4", "storytelling"],
   "templating": { "list": [] },
-  "time": { "from": "now-6h", "to": "now" },
+  "time": { "from": "now-20m", "to": "now" },
+  "timepicker": {},
   "timezone": "browser",
   "title": "IQA - Drift P4",
   "uid": "iqa-drift-p4",
-  "version": 5,
+  "version": 43,
   "weekStart": ""
 }

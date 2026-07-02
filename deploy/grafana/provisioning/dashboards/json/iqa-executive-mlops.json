@@ -19,7 +19,8 @@
   "links": [
     { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Lifecycle MLOps", "type": "link", "url": "/d/iqa-lifecycle" },
     { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Drift P4", "type": "link", "url": "/d/iqa-drift-p4" },
-    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue d'ensemble", "type": "link", "url": "/d/iqa-overview" }
+    { "icon": "dashboard", "includeVars": false, "keepTime": true, "targetBlank": false, "title": "Vue d'ensemble", "type": "link", "url": "/d/iqa-overview" },
+    { "icon": "external link", "includeVars": false, "keepTime": false, "targetBlank": true, "title": "MLflow", "type": "link", "url": "http://localhost:5000" }
   ],
   "panels": [
     {

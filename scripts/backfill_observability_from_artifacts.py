@@ -19,12 +19,28 @@ LIFECYCLE_SCENARIO_DEFAULT = "production_replay_natural_piece_b_full"
 DRIFT_SCENARIO_DEFAULT = "production_replay_natural_piece_b_to_piece_a_p4_drift"
 
 
+def _env_value(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value is not None:
+        return value
+    env_path = Path(".env")
+    if not env_path.is_file():
+        return default
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        if not line or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        if key.strip() == name:
+            return raw_value.strip().strip('"').strip("'")
+    return default
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lifecycle-run-dir", type=Path)
     parser.add_argument("--drift-observation-dir", type=Path)
-    parser.add_argument("--api-url", default=os.getenv("IQA_API_URL", "http://localhost:8002"))
-    parser.add_argument("--service-token", default=os.getenv("IQA_SERVICE_TOKEN", ""))
+    parser.add_argument("--api-url", default=_env_value("IQA_API_URL", "http://localhost:8002"))
+    parser.add_argument("--service-token", default=_env_value("IQA_SERVICE_TOKEN", ""))
     parser.add_argument("--pace-seconds", type=float, default=6.0)
     parser.add_argument("--progress-every", type=int, default=1)
     parser.add_argument("--quiet", action="store_true")
@@ -57,13 +73,34 @@ def build_lifecycle_events(run_dir: Path) -> list[dict[str, Any]]:
     scenario_id = str(progress.get("scenario_id") or summary.get("scenario_id") or LIFECYCLE_SCENARIO_DEFAULT)
     lifecycle_run_id = str(progress.get("run_id") or summary.get("run_id") or run_dir.name)
     events: list[dict[str, Any]] = []
+    events.append(_run_started_event(progress, summary, scenario_id=scenario_id, lifecycle_run_id=lifecycle_run_id))
 
     for cycle in cycles:
         cycle_id = str(cycle.get("cycle_id") or "cycle_000")
         candidate_version = str(cycle.get("candidate_version") or "")
         candidate_init_policy = str(cycle.get("candidate_init_policy") or progress.get("candidate_init_policy") or "")
-        events.extend(
-            _epoch_events(
+        epoch_events = _epoch_events(
+            cycle,
+            scenario_id=scenario_id,
+            lifecycle_run_id=lifecycle_run_id,
+            cycle_id=cycle_id,
+            candidate_version=candidate_version,
+            candidate_init_policy=candidate_init_policy,
+        )
+        events.extend(epoch_events)
+        if epoch_events:
+            events.append(
+                _phase_event(
+                    "evaluation_gate",
+                    scenario_id=scenario_id,
+                    lifecycle_run_id=lifecycle_run_id,
+                    cycle_id=cycle_id,
+                    candidate_version=candidate_version,
+                    candidate_init_policy=candidate_init_policy,
+                )
+            )
+        events.append(
+            _promotion_event(
                 cycle,
                 scenario_id=scenario_id,
                 lifecycle_run_id=lifecycle_run_id,
@@ -73,8 +110,8 @@ def build_lifecycle_events(run_dir: Path) -> list[dict[str, Any]]:
             )
         )
         events.append(
-            _promotion_event(
-                cycle,
+            _phase_event(
+                "promotion",
                 scenario_id=scenario_id,
                 lifecycle_run_id=lifecycle_run_id,
                 cycle_id=cycle_id,
@@ -201,7 +238,57 @@ def _epoch_events(
                 "metrics": _finite_metrics(payload_metrics),
             }
         )
+        events[-1]["metrics"].update(_phase_metrics("training"))
     return events
+
+
+def _run_started_event(
+    progress: dict[str, Any],
+    summary: dict[str, Any],
+    *,
+    scenario_id: str,
+    lifecycle_run_id: str,
+) -> dict[str, Any]:
+    classification_runtime = summary.get("active_classification_runtime_final") or {}
+    localization_runtime = summary.get("active_localization_runtime_final") or {}
+    return {
+        "event_type": "run_started",
+        "scenario_id": scenario_id,
+        "lifecycle_run_id": lifecycle_run_id,
+        "cycle_id": _last_cycle_id(progress),
+        "candidate_version": str(progress.get("active_classification_model_version") or ""),
+        "active_classification_model_version": _runtime_version(classification_runtime),
+        "active_localization_model_version": _runtime_version(localization_runtime),
+        "metrics": _phase_metrics("idle"),
+    }
+
+
+def _phase_event(
+    phase: str,
+    *,
+    scenario_id: str,
+    lifecycle_run_id: str,
+    cycle_id: str,
+    candidate_version: str,
+    candidate_init_policy: str,
+) -> dict[str, Any]:
+    return {
+        "event_type": f"phase_{phase}",
+        "scenario_id": scenario_id,
+        "lifecycle_run_id": lifecycle_run_id,
+        "cycle_id": cycle_id,
+        "candidate_version": candidate_version,
+        "candidate_init_policy": candidate_init_policy,
+        "metrics": _phase_metrics(phase),
+    }
+
+
+def _phase_metrics(phase: str) -> dict[str, int]:
+    return {
+        "phase_training_active": 1 if phase == "training" else 0,
+        "phase_evaluation_gate_active": 1 if phase == "evaluation_gate" else 0,
+        "phase_promotion_active": 1 if phase == "promotion" else 0,
+    }
 
 
 def _promotion_event(
@@ -241,6 +328,7 @@ def _promotion_event(
         "lifecycle_run_id": lifecycle_run_id,
         "cycle_id": cycle_id,
         "candidate_version": candidate_version,
+        "mlflow_run_id": str(cycle.get("mlflow_run_id") or ""),
         "candidate_init_policy": candidate_init_policy,
         "localization_promotion_status": cycle.get("localization_promotion_status"),
         "classification_promotion_status": cycle.get("classification_promotion_status"),
@@ -313,6 +401,7 @@ def _run_completed_event(
             {
                 "events_processed": progress.get("events_processed") or summary.get("events_processed"),
                 "cycles_completed": progress.get("cycles_completed") or summary.get("cycles_completed"),
+                **_phase_metrics("idle"),
             }
         ),
     }

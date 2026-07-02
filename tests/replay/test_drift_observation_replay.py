@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 
@@ -50,7 +51,14 @@ def _thresholds(tmp_path: Path) -> Path:
     return path
 
 
-def _row(index: int, *, phase: str, decision: str, defective: bool = False) -> dict[str, str]:
+def _row(
+    index: int,
+    *,
+    phase: str,
+    decision: str,
+    defective: bool = False,
+    view_pairs: str = "Casting_class1:2_3",
+) -> dict[str, str]:
     return {
         "event_id": f"event_{index:03d}",
         "piece_event_id": f"piece_{index:03d}",
@@ -60,6 +68,7 @@ def _row(index: int, *, phase: str, decision: str, defective: bool = False) -> d
         "source_class": "Casting_class1",
         "dataset_version": observer.SCENARIO_ID,
         "relative_paths": f"Casting_class1/train/good/part_{index:03d}.jpg",
+        "view_pairs": view_pairs,
         "image_ids": f"img_{index:03d}",
         "is_defective": str(defective).lower(),
         "has_mask": str(defective).lower(),
@@ -142,6 +151,53 @@ def test_drift_observation_confirms_only_after_observed_degradation(
     assert windows[1]["degradation_signals"]["unexpected_red_rate"] is True
     assert windows[0]["metrics"]["drift_score"] == 0.0
     assert windows[1]["metrics"]["drift_score"] == 1.0
+
+
+def test_confirmed_short_observation_keeps_correction_manifest_domain_balanced(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stable_rows = []
+    for bucket_index, view_pairs in enumerate(["Casting_class1:1_2", "Casting_class1:1_3", "Casting_class1:2_3"]):
+        stable_rows.extend(
+            _row(index + bucket_index * 100, phase="stable_baseline_piece_b", decision="green", view_pairs=view_pairs)
+            for index in range(1, 13)
+        )
+    rows = [
+        *stable_rows,
+        _row(13, phase="drift_piece_a_p4_suspected", decision="red"),
+        _row(14, phase="drift_piece_a_p4_suspected", decision="red"),
+        _row(15, phase="drift_piece_a_p4_confirmed", decision="red"),
+        _row(16, phase="drift_piece_a_p4_confirmed", decision="red"),
+        _row(17, phase="drift_piece_a_p4_confirmed", decision="red"),
+        _row(18, phase="drift_piece_a_p4_confirmed", decision="red"),
+    ]
+    _patch_runtime(monkeypatch, rows)
+
+    summary = observer.run_observation(_args(tmp_path, thresholds=_thresholds(tmp_path)))
+
+    assert summary["trigger_lifecycle"] is True
+    assert summary["context_events_total"] == 6
+    assert summary["manifest_balance"]["train_p4_good_count"] == 6
+    assert summary["manifest_balance"]["train_piece_b_anchor_count"] == 18
+    assert summary["manifest_balance"]["train_p1_anchor_count"] == 6
+    assert summary["manifest_balance"]["train_p2_anchor_count"] == 6
+    assert summary["manifest_balance"]["train_p3_anchor_count"] == 6
+    assert summary["manifest_balance"]["eval_p4_count"] == 6
+    assert summary["manifest_balance"]["eval_piece_b_count"] == 18
+    assert summary["manifest_balance"]["eval_p1_count"] == 6
+    assert summary["manifest_balance"]["eval_p2_count"] == 6
+    assert summary["manifest_balance"]["eval_p3_count"] == 6
+
+    with Path(str(summary["correction_manifest_path"])).open(newline="", encoding="utf-8") as file:
+        correction_rows = list(csv.DictReader(file))
+    with Path(str(summary["correction_anchor_manifest_path"])).open(newline="", encoding="utf-8") as file:
+        anchor_rows = list(csv.DictReader(file))
+
+    assert len(correction_rows) == 6
+    assert len(anchor_rows) == 18
+    assert all(row["scenario_phase"] != "stable_baseline_piece_b" for row in correction_rows)
+    assert all(row["scenario_phase"] == "stable_baseline_piece_b" for row in anchor_rows)
 
 
 def test_drift_observation_does_not_confirm_domain_only_p4(

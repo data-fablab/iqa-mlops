@@ -8,6 +8,7 @@ services:
     env_file: ../.env
     environment:
       IQA_INFERENCE_URL: http://iqa-inference:8100
+      IQA_OBSERVABILITY_TRANSIENT_TTL_SECONDS: ${IQA_OBSERVABILITY_TRANSIENT_TTL_SECONDS:-900}
     ports: ["${IQA_API_HOST_PORT:-8000}:8000"]
     depends_on: [iqa-inference, postgres]
 
@@ -127,8 +128,6 @@ services:
       MLFLOW_TRACKING_URI: ${IQA_MLFLOW_TRACKING_URI:-http://mlflow:5000}
       # Expose iqa.dags.operators (factory) without installing the metier runtime.
       PYTHONPATH: /opt/iqa/src
-      IQA_AIRFLOW_REPO_MOUNT_SOURCE: ${IQA_AIRFLOW_REPO_MOUNT_SOURCE:-/opt/iqa/iqa-mlops}
-      IQA_AIRFLOW_REPO_MOUNT_TARGET: ${IQA_AIRFLOW_REPO_MOUNT_TARGET:-/opt/iqa/iqa-mlops}
     ports: ["${IQA_AIRFLOW_HOST_PORT:-8080}:8080"]
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
@@ -156,8 +155,6 @@ services:
       AIRFLOW__METRICS__STATSD_PORT: "9125"
       AIRFLOW__METRICS__STATSD_PREFIX: airflow
       PYTHONPATH: /opt/iqa/src
-      IQA_AIRFLOW_REPO_MOUNT_SOURCE: ${IQA_AIRFLOW_REPO_MOUNT_SOURCE:-/opt/iqa/iqa-mlops}
-      IQA_AIRFLOW_REPO_MOUNT_TARGET: ${IQA_AIRFLOW_REPO_MOUNT_TARGET:-/opt/iqa/iqa-mlops}
       # Containerised-task backend (ADR 0008): task containers join iqa_net so
       # they resolve postgres/minio/mlflow/iqa-inference by name.
       IQA_AIRFLOW_BACKEND: docker

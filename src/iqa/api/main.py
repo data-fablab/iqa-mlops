@@ -80,11 +80,13 @@ LIFECYCLE_STATE: dict[str, Any] = {
     "active_models": {},
     "final_models": {},
     "summary_metrics": {},
+    "train_set_sizes": {},
     "promotion_decisions": {},
     "promotion_selected_epochs": {},
     "promotion_selected_metric_values": {},
     "promotion_seen": set(),
     "promotion_counters": {},
+    "phase_active": {},
 }
 LIFECYCLE_EPOCH_METRIC_ALIASES = {
     "pixel_aupimo_1e-5_1e-3": "pixel_aupimo",
@@ -100,6 +102,11 @@ LIFECYCLE_GATE_VALUE_METRICS = {
     "image_recall",
     "false_negatives",
 }
+LIFECYCLE_ALLOWED_PHASES = {
+    "training",
+    "evaluation_gate",
+    "promotion",
+}
 LIFECYCLE_ALLOWED_METRICS = {
     "pixel_aupimo_1e-5_1e-3",
     "pixel_aupimo",
@@ -113,6 +120,26 @@ LIFECYCLE_ALLOWED_METRICS = {
     "classification_fn_delta",
     "gate_metric_delta",
     "gate_fn_delta",
+    "train_set_total_count",
+    "train_set_seen_conforming_count",
+    "train_set_anchor_good_count",
+    "gate_localization_active_pixel_aupimo",
+    "gate_localization_candidate_pixel_aupimo",
+    "gate_delta_localization_pixel_aupimo",
+    "gate_localization_active_pixel_ap",
+    "gate_localization_candidate_pixel_ap",
+    "gate_delta_localization_pixel_ap",
+    "gate_localization_active_false_negatives",
+    "gate_localization_candidate_false_negatives",
+    "gate_delta_localization_false_negatives",
+    "gate_classification_active_false_negatives",
+    "gate_classification_candidate_false_negatives",
+    "gate_delta_classification_false_negatives",
+    "gate_classification_active_image_ap",
+    "gate_classification_candidate_image_ap",
+    "gate_delta_classification_image_ap",
+    "gate_classification_active_image_recall",
+    "gate_classification_candidate_image_recall",
 }
 LIFECYCLE_SENSITIVE_KEYS = (
     "image",
@@ -144,6 +171,14 @@ DRIFT_ALLOWED_METRICS = {
     "unexpected_red_rate",
     "roi_fail_rate",
     "oracle_fn_rate",
+    "roi_mask_nn_distance",
+    "roi_mask_novelty_rate",
+    "roi_area_ratio",
+    "context_events_total",
+    "roi_context_complete",
+    "roi_novelty_score",
+    "roi_distance_score",
+    "roi_area_score",
     "domain_ratio",
     "domain_score",
     "degradation_score",
@@ -1560,11 +1595,22 @@ def _lifecycle_base_labels(current: dict[str, Any]) -> tuple[tuple[str, Any], ..
 def _is_allowed_lifecycle_metric_name(name: str) -> bool:
     if name in LIFECYCLE_ALLOWED_METRICS:
         return True
+    if _parse_lifecycle_phase_metric_name(name) is not None:
+        return True
     if _parse_gate_value_metric_name(name) is not None:
         return True
     if _parse_gate_delta_metric_name(name) is not None:
         return True
     return False
+
+
+def _parse_lifecycle_phase_metric_name(name: str) -> str | None:
+    prefix = "phase_"
+    suffix = "_active"
+    if not name.startswith(prefix) or not name.endswith(suffix):
+        return None
+    phase = name[len(prefix) : -len(suffix)]
+    return phase if phase in LIFECYCLE_ALLOWED_PHASES else None
 
 
 def _parse_gate_value_metric_name(name: str) -> tuple[str, str, str] | None:
@@ -1653,6 +1699,8 @@ def _reject_sensitive_lifecycle_payload(payload: dict[str, Any]) -> None:
 def _record_lifecycle_observation(event: LifecycleEventRequest) -> None:
     payload = event.model_dump(mode="json", exclude_none=True)
     _reject_sensitive_lifecycle_payload(payload)
+    if event.event_type == "run_started":
+        _reset_lifecycle_observability_state()
     current = LIFECYCLE_STATE["current"]
     now = time.time()
     current["_updated_at"] = now
@@ -1672,6 +1720,17 @@ def _record_lifecycle_observation(event: LifecycleEventRequest) -> None:
         for key, value in (payload.get("metrics") or {}).items()
         if _is_allowed_lifecycle_metric_name(str(key)) and _finite_metric(value) is not None
     }
+    phase_active = LIFECYCLE_STATE["phase_active"]
+    for name, value in metrics_payload.items():
+        phase = _parse_lifecycle_phase_metric_name(str(name))
+        if phase is None:
+            continue
+        labels = _lifecycle_base_labels(current) + (("phase", phase),)
+        phase_active[labels] = value
+    if event.event_type == "phase_evaluation_gate":
+        current.pop("epoch", None)
+        LIFECYCLE_STATE["epoch_metrics"].clear()
+        LIFECYCLE_STATE["epoch_updated_at"] = 0.0
     if event.event_type == "epoch_completed":
         epoch_metrics = LIFECYCLE_STATE["epoch_metrics"]
         epoch_metrics.clear()
@@ -1705,6 +1764,17 @@ def _record_lifecycle_observation(event: LifecycleEventRequest) -> None:
     for name in ("events_processed", "cycles_completed"):
         if name in metrics_payload:
             summary_metrics[name] = metrics_payload[name]
+    train_set_sizes = LIFECYCLE_STATE["train_set_sizes"]
+    for source_name, kind in (
+        ("train_set_total_count", "total"),
+        ("train_set_seen_conforming_count", "seen_conforming"),
+        ("train_set_anchor_good_count", "anchor_good"),
+    ):
+        value = _finite_metric(metrics_payload.get(source_name))
+        if value is None:
+            continue
+        labels = _lifecycle_base_labels(current) + (("kind", kind),)
+        train_set_sizes[labels] = value
     active_models = LIFECYCLE_STATE["active_models"]
     if event.active_classification_model_version:
         active_models["classification"] = event.active_classification_model_version
@@ -1714,6 +1784,38 @@ def _record_lifecycle_observation(event: LifecycleEventRequest) -> None:
         active_models.setdefault("classification", event.candidate_initial_model_version)
         active_models.setdefault("localization", event.candidate_initial_model_version)
     _record_lifecycle_final_models(event)
+    if event.event_type == "run_completed":
+        _reset_lifecycle_live_progress_state()
+    elif event.event_type == "run_failed":
+        _reset_lifecycle_observability_state()
+
+
+def _reset_lifecycle_observability_state() -> None:
+    LIFECYCLE_STATE["current"].clear()
+    LIFECYCLE_STATE["epoch_metrics"].clear()
+    LIFECYCLE_STATE["epoch_updated_at"] = 0.0
+    LIFECYCLE_STATE["gate_metrics"].clear()
+    LIFECYCLE_STATE["gate_values"].clear()
+    LIFECYCLE_STATE["gate_deltas"].clear()
+    LIFECYCLE_STATE["active_models"].clear()
+    LIFECYCLE_STATE["final_models"].clear()
+    LIFECYCLE_STATE["summary_metrics"].clear()
+    LIFECYCLE_STATE["train_set_sizes"].clear()
+    LIFECYCLE_STATE["promotion_decisions"].clear()
+    LIFECYCLE_STATE["promotion_selected_epochs"].clear()
+    LIFECYCLE_STATE["promotion_selected_metric_values"].clear()
+    LIFECYCLE_STATE["promotion_seen"].clear()
+    LIFECYCLE_STATE["promotion_counters"].clear()
+    LIFECYCLE_STATE["phase_active"].clear()
+
+
+def _reset_lifecycle_live_progress_state() -> None:
+    LIFECYCLE_STATE["current"].pop("epoch", None)
+    LIFECYCLE_STATE["epoch_metrics"].clear()
+    LIFECYCLE_STATE["epoch_updated_at"] = 0.0
+    LIFECYCLE_STATE["active_models"].clear()
+    for labels in list(LIFECYCLE_STATE["phase_active"]):
+        LIFECYCLE_STATE["phase_active"][labels] = 0
 
 
 def _lifecycle_gate_labels(
@@ -1803,6 +1905,7 @@ def _record_lifecycle_promotion_status(event: LifecycleEventRequest) -> None:
             ("role", role),
             ("status", status),
             ("candidate_version", event.candidate_version or ""),
+            ("mlflow_run_id", event.mlflow_run_id or ""),
         )
         LIFECYCLE_STATE["promotion_decisions"][decision_labels] = 1
         if status == "promoted":
@@ -1829,6 +1932,7 @@ def _record_lifecycle_promotion_selection(
         ("status", status),
         ("candidate_version", event.candidate_version or ""),
         ("selected_metric", selected_metric or ""),
+        ("mlflow_run_id", event.mlflow_run_id or ""),
     )
     LIFECYCLE_STATE["promotion_selected_epochs"][labels] = int(finite_epoch)
     finite_metric_value = _finite_metric(selected_metric_value)
@@ -1887,6 +1991,11 @@ def _reject_sensitive_drift_payload(payload: dict[str, Any]) -> None:
 def _record_drift_observation(event: DriftEventRequest) -> None:
     payload = event.model_dump(mode="json", exclude_none=True)
     _reject_sensitive_drift_payload(payload)
+    if event.event_type in {"run_started", "observation_started"} or event.window_index == 1:
+        _reset_drift_observability_state()
+    if event.event_type in {"run_completed", "run_failed", "observation_completed", "observation_failed"}:
+        _reset_drift_observability_state()
+        return
     status = event.status if event.status in DRIFT_ALLOWED_STATUSES else "clear"
     metrics_payload = {
         key: float(value)
@@ -1920,6 +2029,10 @@ def _record_drift_observation(event: DriftEventRequest) -> None:
         "active_models": active_models,
         "metrics": metrics_payload,
     }
+
+
+def _reset_drift_observability_state() -> None:
+    DRIFT_STATE["current"].clear()
 
 
 @app.post("/internal/lifecycle/events")
@@ -1991,14 +2104,17 @@ def _lifecycle_metrics_lines() -> list[str]:
         "# TYPE iqa_lifecycle_run_events_processed gauge",
         "# HELP iqa_lifecycle_run_cycles_completed Lifecycle run cycles completed",
         "# TYPE iqa_lifecycle_run_cycles_completed gauge",
+        "# HELP iqa_lifecycle_train_set_size Lifecycle train set size by source kind",
+        "# TYPE iqa_lifecycle_train_set_size gauge",
+        "# HELP iqa_lifecycle_phase_active Lifecycle live phase marker, 1 when the phase is active",
+        "# TYPE iqa_lifecycle_phase_active gauge",
     ]
     if current:
         base_labels = _lifecycle_base_labels(current)
         lines.append(f"iqa_lifecycle_cycle_current{{{_metric_labels(base_labels)}}} {_cycle_number(current.get('cycle_id'))}")
-        epoch_recent = _observability_is_recent(LIFECYCLE_STATE.get("epoch_updated_at"))
-        if current.get("epoch") is not None and epoch_recent:
+        if current.get("epoch") is not None:
             lines.append(f"iqa_lifecycle_epoch_current{{{_metric_labels(base_labels)}}} {int(current['epoch'])}")
-        epoch_metrics = LIFECYCLE_STATE["epoch_metrics"] if epoch_recent else {}
+        epoch_metrics = LIFECYCLE_STATE["epoch_metrics"]
         for metric_name, value in sorted(epoch_metrics.items()):
             finite_value = _finite_metric(value)
             if finite_value is not None:
@@ -2055,6 +2171,14 @@ def _lifecycle_metrics_lines() -> list[str]:
         cycles_completed = _finite_metric(summary_metrics.get("cycles_completed"))
         if cycles_completed is not None:
             lines.append(f"iqa_lifecycle_run_cycles_completed{{{_metric_labels(base_labels)}}} {cycles_completed}")
+        for labels, value in sorted(LIFECYCLE_STATE["train_set_sizes"].items(), key=lambda item: str(item[0])):
+            finite_value = _finite_metric(value)
+            if finite_value is not None:
+                lines.append(f"iqa_lifecycle_train_set_size{{{_metric_labels(labels)}}} {finite_value}")
+        for labels, value in sorted(LIFECYCLE_STATE["phase_active"].items(), key=lambda item: str(item[0])):
+            finite_value = _finite_metric(value)
+            if finite_value is not None:
+                lines.append(f"iqa_lifecycle_phase_active{{{_metric_labels(labels)}}} {finite_value}")
     for labels, value in sorted(LIFECYCLE_STATE["promotion_counters"].items(), key=lambda item: str(item[0])):
         lines.append(f"iqa_lifecycle_promotion_total{{{_metric_labels(labels)}}} {value}")
     for labels, value in sorted(LIFECYCLE_STATE["promotion_decisions"].items(), key=lambda item: str(item[0])):
@@ -2088,6 +2212,14 @@ def _drift_metrics_lines() -> list[str]:
         "# TYPE iqa_drift_red_rate gauge",
         "# HELP iqa_drift_unexpected_red_rate Red decision rate on conforming pieces in the current drift window",
         "# TYPE iqa_drift_unexpected_red_rate gauge",
+        "# HELP iqa_drift_roi_mask_nn_distance Nearest-neighbor Jaccard distance from Piece B ROI mask reference",
+        "# TYPE iqa_drift_roi_mask_nn_distance gauge",
+        "# HELP iqa_drift_roi_mask_novelty_rate Share of ROI masks outside the Piece B nearest-neighbor distance threshold",
+        "# TYPE iqa_drift_roi_mask_novelty_rate gauge",
+        "# HELP iqa_drift_roi_area_ratio Median ROI area ratio in the current drift window",
+        "# TYPE iqa_drift_roi_area_ratio gauge",
+        "# HELP iqa_drift_context_events_total Number of events retained in the drift correction context",
+        "# TYPE iqa_drift_context_events_total gauge",
         "# HELP iqa_drift_roi_fail_rate ROI failure rate in the current drift window",
         "# TYPE iqa_drift_roi_fail_rate gauge",
         "# HELP iqa_drift_oracle_fn_rate Oracle false-negative rate in the current drift window",
@@ -2128,6 +2260,10 @@ def _drift_metrics_lines() -> list[str]:
         ("alert_rate", "iqa_drift_alert_rate"),
         ("red_rate", "iqa_drift_red_rate"),
         ("unexpected_red_rate", "iqa_drift_unexpected_red_rate"),
+        ("roi_mask_nn_distance", "iqa_drift_roi_mask_nn_distance"),
+        ("roi_mask_novelty_rate", "iqa_drift_roi_mask_novelty_rate"),
+        ("roi_area_ratio", "iqa_drift_roi_area_ratio"),
+        ("context_events_total", "iqa_drift_context_events_total"),
         ("roi_fail_rate", "iqa_drift_roi_fail_rate"),
         ("oracle_fn_rate", "iqa_drift_oracle_fn_rate"),
         ("domain_ratio", "iqa_drift_domain_ratio"),
