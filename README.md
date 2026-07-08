@@ -271,8 +271,8 @@ The source dataset and ingested runtime images are intentionally separate:
 PostgreSQL stores metadata facts, statuses, timestamps, versions, URIs, and JSONB
 payloads — never binary artifacts. Runtime PostgreSQL write-through is explicit
 and opt-in via `IQA_METADATA_BACKEND=postgres`. Model checkpoints are restored
-from MinIO manifests into `.cache/iqa/models/`; the `models/` tree stores
-manifests only.
+from MinIO manifests into `.cache/iqa/models/` with
+`iqa-restore-model-artifacts`; the `models/` tree stores manifests only.
 
 **Tracked by Git:** source code, tests, docs, configs, lightweight CSV/model
 manifests, DVC metadata and reproducibility contracts. No PyTorch checkpoints, no

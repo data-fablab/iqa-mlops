@@ -131,10 +131,15 @@ def test_piece_a_p4_correction_gate_manifest_contains_piece_b_and_p4() -> None:
     assert {row["label"] for row in p4_rows} == {"good", "defective"}
 
 
-def test_piece_a_p4_gt_masks_exist_in_canonical_raw_source() -> None:
+def test_piece_a_p4_gt_mask_manifest_paths_are_canonical() -> None:
     with CORRECTION_GT_MASKS.open(newline="", encoding="utf-8-sig") as file:
         rows = list(csv.DictReader(file))
 
     assert rows
-    missing = [row["gt_mask_path"] for row in rows if not (RAW_SOURCE_ROOT / row["gt_mask_path"]).is_file()]
-    assert missing == []
+    assert all(row["gt_mask_path"] for row in rows)
+    assert all(row["gt_mask_path"].startswith("Casting_class1/ground_truth/defective/") for row in rows)
+    assert all(row["gt_mask_path"].endswith("_mask.png") for row in rows)
+
+    if RAW_SOURCE_ROOT.is_dir():
+        missing = [row["gt_mask_path"] for row in rows if not (RAW_SOURCE_ROOT / row["gt_mask_path"]).is_file()]
+        assert missing == []

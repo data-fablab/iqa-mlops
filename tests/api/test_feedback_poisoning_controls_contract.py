@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -11,11 +13,15 @@ from iqa.api.main import (
     DISPLAY_FEEDBACK_STORE,
     FEEDBACK_STORE,
     PREDICTION_STORE,
-    feedback,
+    feedback as _feedback,
     metrics,
     predict,
 )
 from iqa.api.schemas import FeedbackRequest, PredictRequest
+
+
+def feedback(request: FeedbackRequest):
+    return _feedback(request, x_iqa_service_token=os.getenv("IQA_SERVICE_TOKEN"))
 
 
 @pytest.fixture(autouse=True)
