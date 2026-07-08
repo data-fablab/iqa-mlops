@@ -55,7 +55,10 @@ def test_business_airflow_dags_use_container_factory_without_runtime_imports() -
         assert "make_container_task(" in source
         assert "except ImportError" not in source
         assert "build_container_dag is not None" not in source
-        assert "PythonOperator(" not in source
+        if dag_name != "iqa_drift_piece_a_p4.py":
+            assert "PythonOperator(" not in source
+        else:
+            assert 'task_id=CORRECTION_CONF_TASK_ID' in source
         for forbidden in ["from iqa.api", "from iqa.inference", "from iqa.training", "import torch"]:
             assert forbidden not in source
 

@@ -136,7 +136,8 @@ def test_lifecycle_dag_runs_reference_application_pipeline_via_factory() -> None
     assert "make_container_task(" in source
     assert "iqa-run-replay-lifecycle-cycle" in source
     assert "{{ params.scenario_id }}" in source
-    assert "{{ params.repo_root }}/data/raw/hss-iad" in source
+    assert "--image-root {{ params.image_root }}" in source
+    assert '"/opt/iqa/iqa-mlops/data/raw/hss-iad"' in source
     assert "{{ params.mode }}" in source
     assert "pipeline" in source.lower()
 

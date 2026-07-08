@@ -8,56 +8,66 @@ sys.path.insert(0, str(Path("deploy/streamlit").resolve()))
 from marc_lifecycle import aggregate_lots, classification_quality_rows, lifecycle_rows, production_alerts
 
 
-def test_marc_dashboard_exposes_lifecycle_run_and_api_history() -> None:
-    page = Path("deploy/streamlit/pages/1_Dashboard_Marc.py").read_text(encoding="utf-8")
+PRODUCTION_PAGE = Path("deploy/streamlit/pages/1_Dashboard_Responsable_Production.py")
+LINEAGE_PAGE = Path("deploy/streamlit/pages/3_Data_Lineage.py")
+
+
+def test_production_dashboard_exposes_operational_lot_view() -> None:
+    page = PRODUCTION_PAGE.read_text(encoding="utf-8")
 
     for expected in [
         "IQA_MARC_REPLAY_RUN_DIR",
         "events.jsonl",
-        "lots.jsonl",
-        "cycles.jsonl",
-        "summary.json",
-        "progress.json",
-        "lifecycle_events.jsonl",
-        "Run lifecycle",
-        "Historique API",
-        "/lots/summary",
+        "Dossier de run production",
+        "Tableau De Bord Production",
+        "Situation Des Lots",
+        "Decisions Par Lot",
+        "Lecture Qualite",
+        "Actions Prioritaires",
+        "Lots liberables",
+        "Lots a isoler",
+        "Lots en attente",
+        "controle qualite",
     ]:
         assert expected in page
 
+    for technical in ["Registry", "MLflow", "Gate classification", "Lifecycle Feature-AE"]:
+        assert technical not in page
 
-def test_marc_dashboard_exposes_production_and_lineage_terms() -> None:
-    page = Path("deploy/streamlit/pages/1_Dashboard_Marc.py").read_text(encoding="utf-8")
+
+def test_production_and_lineage_responsibilities_are_separated() -> None:
+    production = PRODUCTION_PAGE.read_text(encoding="utf-8")
+    lineage = LINEAGE_PAGE.read_text(encoding="utf-8")
     runbook = Path("docs/runbook-phase1-iqa.md").read_text(encoding="utf-8")
-    combined = page + "\n" + runbook
 
     for expected in [
-        "Conformite des lots",
-        "Distribution Conforme / A verifier / Non conforme",
+        "Liberer",
+        "Isoler",
+        "En attente",
         "scale=alt.Scale",
-        "domain=[LABEL_CONFORME, LABEL_A_VERIFIER, LABEL_NON_CONFORME]",
-        "Performance classification modele vs oracle Sophie",
-        "Recall defauts",
-        "Precision alertes",
-        "Faux negatifs",
-        "Faux positifs",
-        "Detail modele vs oracle par lot",
-        "Lifecycle Feature-AE",
-        "Modele actif courant",
-        "Journal lifecycle live",
+        "Etat controle qualite",
+    ]:
+        assert expected in production
+
+    for expected in [
+        "Data Lineage",
+        "Tracabilite technique",
+        "Modeles actifs et finaux",
+        "Cycles, gates et promotions",
         "Actif avant",
         "Delta",
         "Registry",
-        "Conforme",
-        "A verifier",
-        "Non conforme",
+        "MLflow",
         "pixel_aupimo_1e-5_1e-3",
         "pixel_ap",
         "Gate localisation",
         "Gate classification",
-        "Classification progresse",
-        "Synthese classification",
         "Recall candidat",
+    ]:
+        assert expected in lineage
+
+    combined = production + "\n" + lineage + "\n" + runbook
+    for expected in [
         "MLflow",
         "MinIO",
         "DVC",
@@ -82,8 +92,9 @@ def test_marc_lot_aggregation_counts_conformity_and_alerts() -> None:
     assert lots[0]["rouge"] == 1
     assert lots[0]["statut_lot"] == "Non conforme"
     assert lots[1]["orange"] == 1
-    assert lots[1]["roi_fail_rate"] == 100.0
-    assert "LOT-001 contient 1 defaut(s) GT." in production_alerts(lots, [])
+    assert "roi_fail_rate" not in lots[1]
+    assert "LOT-001 contient 1 defaut(s) confirmes." in production_alerts(lots, [])
+    assert not any("ROI fail" in alert for alert in production_alerts(lots, []))
 
 
 def test_marc_classification_quality_compares_model_to_oracle() -> None:

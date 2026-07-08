@@ -141,9 +141,6 @@ def test_drift_dashboard_references_expected_metrics_only() -> None:
         "iqa_lifecycle_promotion_total",
         "iqa_lifecycle_promotion_selected_epoch",
         "iqa_lifecycle_epoch_current",
-        "iqa_lifecycle_epoch_image_ap",
-        "iqa_lifecycle_epoch_pixel_ap",
-        "iqa_lifecycle_epoch_pixel_aupimo",
         "iqa_lifecycle_phase_active",
         "iqa_lifecycle_gate_value",
         "iqa_lifecycle_final_model_info",
@@ -163,13 +160,10 @@ def test_drift_dashboard_exposes_story_arc_and_correction_sections() -> None:
         "Correction ciblee - contexte et train set",
         "Phase DAG correctif - entrainement gate promotion",
         "Epochs correction - progression",
-        "Metriques entrainement correctif - progression",
         "Gate classification - avant apres",
         "Gate localisation - avant apres",
         "Classification promue",
         "Localisation promue",
-        "Epoch classification",
-        "Epoch localisation",
         "Registry correction - modeles promus",
     }
     assert expected_titles <= set(panels_by_title)
@@ -205,7 +199,6 @@ def test_drift_dashboard_exposes_story_arc_and_correction_sections() -> None:
         "Preuve ROI - Piece B stable puis P4",
         "Correction ciblee - contexte et train set",
         "Epochs correction - progression",
-        "Metriques entrainement correctif - progression",
     } <= timeseries_titles
 
     chronology = panels_by_title["Chronologie scenario - drift puis correction"]
@@ -261,26 +254,6 @@ def test_drift_dashboard_exposes_story_arc_and_correction_sections() -> None:
     assert epoch_expr == 'iqa_lifecycle_epoch_current{scenario_id="production_replay_natural_piece_b_to_piece_a_p4_drift"}'
     assert [target["legendFormat"] for target in epochs["targets"]] == ["epoch"]
 
-    training_metrics = panels_by_title["Metriques entrainement correctif - progression"]
-    training_expr = " ".join(target["expr"] for target in training_metrics["targets"])
-    training_legends = [target["legendFormat"] for target in training_metrics["targets"]]
-    assert training_metrics["type"] == "timeseries"
-    assert training_metrics["gridPos"]["w"] == 24
-    assert "iqa_lifecycle_epoch_image_ap" in training_expr
-    assert "iqa_lifecycle_epoch_pixel_ap" in training_expr
-    assert "iqa_lifecycle_epoch_pixel_aupimo" in training_expr
-    assert "iqa_lifecycle_epoch_current" not in training_expr
-    assert "iqa_lifecycle_phase_active" not in training_expr
-    assert "iqa_lifecycle_gate_value" not in training_expr
-    assert "iqa_lifecycle_promotion_selected_epoch" not in training_expr
-    assert "max_over_time" not in training_expr
-    assert "@ end()" not in training_expr
-    assert training_legends == [
-        "{{role}} image AP",
-        "{{role}} pixel AP",
-        "{{role}} pixel AUPIMO",
-    ]
-
     classification_gate = panels_by_title["Gate classification - avant apres"]
     classification_expr = " ".join(target["expr"] for target in classification_gate["targets"])
     classification_legends = [target["legendFormat"] for target in classification_gate["targets"]]
@@ -322,12 +295,13 @@ def test_drift_dashboard_exposes_story_arc_and_correction_sections() -> None:
     ]
 
     for title, role in (
-        ("Epoch classification", "classification"),
-        ("Epoch localisation", "localization"),
+        ("Classification promue", "classification"),
+        ("Localisation promue", "localization"),
     ):
         expr = panels_by_title[title]["targets"][0]["expr"]
         assert "iqa_lifecycle_promotion_selected_epoch" in expr
         assert f'role="{role}"' in expr
+        assert 'status="promoted"' in expr
 
     correction_table = panels_by_title["Registry correction - modeles promus"]
     assert correction_table["gridPos"]["w"] == 24

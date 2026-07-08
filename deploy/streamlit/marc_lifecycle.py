@@ -33,7 +33,6 @@ def aggregate_lots(events: list[dict[str, Any]], *, active_model: str = "") -> l
                 "vert": 0,
                 "orange": 0,
                 "rouge": 0,
-                "roi_fail_count": 0,
                 "model_actif": active_model or "-",
             },
         )
@@ -46,8 +45,6 @@ def aggregate_lots(events: list[dict[str, Any]], *, active_model: str = "") -> l
 
         decision = _decision_bucket(event.get("decision"))
         lot[decision] += 1
-        if str(event.get("roi_quality_status") or "").lower() not in {"", "ok"}:
-            lot["roi_fail_count"] += 1
         event_model = str(event.get("active_model_version") or "")
         if event_model:
             lot["model_actif"] = event_model
@@ -56,7 +53,6 @@ def aggregate_lots(events: list[dict[str, Any]], *, active_model: str = "") -> l
     for lot in lots.values():
         pieces = max(int(lot["pieces"]), 1)
         lot["taux_conformite"] = round(100 * int(lot["conformes_gt"]) / pieces, 1)
-        lot["roi_fail_rate"] = round(100 * int(lot["roi_fail_count"]) / pieces, 2)
         lot["statut_lot"] = _lot_status(lot)
         rows.append(lot)
     return sorted(rows, key=lambda row: row["lot_id"])
@@ -193,8 +189,6 @@ def production_alerts(lots: list[dict[str, Any]], cycles: list[dict[str, Any]]) 
             alerts.append(f"{lot['lot_id']} contient {lot['defauts_gt']} defaut(s) confirmes.")
         if int(lot.get("rouge") or 0) > 0 or int(lot.get("orange") or 0) > 0:
             alerts.append(f"{lot['lot_id']} contient des decisions a verifier/non conformes.")
-        if float(lot.get("roi_fail_rate") or 0) > 0:
-            alerts.append(f"{lot['lot_id']} a un ROI fail rate de {lot['roi_fail_rate']} %.")
     for cycle in cycles:
         promotion_status = str(cycle.get("promotion_status") or "")
         if promotion_status.startswith("rejected") or cycle.get("gate_decision") == "rejected":
@@ -218,6 +212,6 @@ def _is_oracle_defective(value: Any) -> bool:
 def _lot_status(lot: dict[str, Any]) -> str:
     if int(lot.get("rouge") or 0) > 0 or int(lot.get("defauts_gt") or 0) > 0:
         return "Non conforme"
-    if int(lot.get("orange") or 0) > 0 or int(lot.get("roi_fail_count") or 0) > 0:
+    if int(lot.get("orange") or 0) > 0:
         return "A verifier"
     return "Conforme"
