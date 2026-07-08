@@ -161,7 +161,7 @@ not replace the lifecycle decision rules.
 
 ## Demo Reading
 
-For Marc, the evidence shows which lots and scenarios produced the decision and
+For the production manager, the evidence shows which lots and scenarios produced the decision and
 which oracle/data versions were used.
 
 For Laurent, the evidence shows separation of duties: API and metadata carry

@@ -24,8 +24,9 @@ def test_phase3_final_lineage_runbook_covers_final_demo_evidence() -> None:
         "MinIO",
         "DVC",
         "PostgreSQL",
-        "Sophie",
-        "Marc",
+        "Inspecteur Qualite",
+        "Responsable Production",
+        "Data Lineage",
         "Laurent",
     ]:
         assert expected in content

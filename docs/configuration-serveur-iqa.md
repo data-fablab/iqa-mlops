@@ -5,7 +5,7 @@ Ce document decrit la configuration materielle et logicielle recommandee pour he
 
 Le serveur doit couvrir :
 - l'API d'inference ;
-- l'interface Sophie/Marc ;
+- les interfaces Streamlit Inspecteur Qualite, Responsable Production et Data Lineage ;
 - le replay des lots ;
 - l'inference GPU ROI + Feature-AE ;
 - le reentrainement controle du Feature-AE ;
@@ -43,7 +43,7 @@ Le serveur doit couvrir :
 | MLflow tracking + registry | SSD + volume persistant | OK avec retention |
 | MinIO local | stockage objet S3-compatible | OK avec retention |
 | Prometheus/Grafana | Services legers | OK |
-| Streamlit Sophie | Service leger | OK |
+| Streamlit interfaces metier | Service leger | OK |
 | API FastAPI | Service leger | OK |
 | Kubernetes | Hors perimetre MVP | Non requis |
 
@@ -80,7 +80,7 @@ DAGs courts et idempotents
 | Brique | Role |
 |---|---|
 | FastAPI | API applicative et contrats `/predict`, `/feedback`, `/health`, `/metrics`, `/admin/reload-model` |
-| Streamlit | Interface Sophie/Marc et vitrine du workflow qualite |
+| Streamlit | Interfaces Inspecteur Qualite, Responsable Production et Data Lineage |
 | PyTorch CUDA | ROI segmenter fige, teacher ResNet18 fige, Feature-AE |
 | MLflow | Tracking experiments, registry modele, comparaison candidats |
 | PostgreSQL | Une instance avec bases separees `iqa_metadata`, `mlflow`, `airflow` |
@@ -272,7 +272,7 @@ Le serveur IQA GPU RTX 3060, base sur la station HP Z420 avec Xeon E5-1680 v2 et
 Elle permet de faire tourner :
 - le replay des scenarios ;
 - l'API d'inference ;
-- l'interface Sophie ;
+- les interfaces Streamlit metier ;
 - l'inference GPU ;
 - le reentrainement controle du Feature-AE ;
 - MLflow ;

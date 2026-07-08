@@ -81,7 +81,8 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml ex
 Expected proof:
 
 - `iqa_dvc_reproducibility`, `iqa_ingestion`, `iqa_replay`,
-  `iqa_monitoring`, `iqa_lifecycle` and `iqa_lifecycle_trigger` are listed.
+  `iqa_monitoring`, `iqa_lifecycle`, `iqa_lifecycle_trigger`,
+  `iqa_drift_piece_a_p4` and `iqa_drift_correction_lifecycle` are listed.
 - import errors are empty.
 - pool `iqa_gpu` exists.
 
@@ -174,10 +175,12 @@ Expected proof:
 
 ## 6. Demo Reading
 
-- **Sophie** sees the quality review surface and prediction/feedback path. In the
-  MVP, oracle GT remains the sovereign feedback source for training.
-- **Marc** follows lots, scenarios, lifecycle triggers, decision thresholds and
-  lineage summaries to explain industrial quality decisions.
+- **Inspecteur Qualite** sees the visual quality review surface.
+- **Responsable Production** follows lots, conformity status and operational
+  actions without model jargon.
+- **Data Lineage** follows scenarios, lifecycle triggers, decision thresholds,
+  MLflow/MinIO evidence and lineage summaries to explain industrial quality
+  decisions.
 - **Laurent** verifies authentication boundaries, auditability, Docker Hub image
   provenance, Airflow container isolation, and separation between API,
   PostgreSQL metadata, DVC/MinIO data artifacts, MinIO checkpoints and MLflow

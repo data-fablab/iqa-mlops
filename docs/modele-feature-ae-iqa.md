@@ -93,7 +93,7 @@ image entiere. Le contrat reference reconstruit une score map pleine resolution
 par tuiles 384 avec contexte 768, fusionne `layer2/layer3`, applique le ROI
 soft-map puis calcule le score `topk_mean` sur la surface fonctionnelle. Tout
 chemin letterbox restant est un chemin legacy de test et ne doit pas alimenter
-Replay, API, Sophie, Marc ou le lifecycle progressif.
+Replay, API, les interfaces Streamlit ou le lifecycle progressif.
 
 ## 4. Separation ROI et GT defaut
 
@@ -419,5 +419,5 @@ Hors perimetre MVP :
 - API `/train` exposee au metier ;
 - retour humain reel obligatoire.
 
-Le retour humain Sophie reste une vitrine. Le workflow operationnel MVP est automatise par l'oracle GT apres prediction.
-
+Le retour inspecteur qualite reste une vitrine de revue. Le workflow
+operationnel MVP est automatise par l'oracle GT apres prediction.

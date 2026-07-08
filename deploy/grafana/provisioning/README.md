@@ -29,7 +29,8 @@ The provisioned dashboards are split by audience and demo moment:
 - **IQA - Lifecycle MLOps** (`iqa-lifecycle`) supports scenario 1, the first
   week of controlled learning on Piece B.
 - **IQA - Drift P4** (`iqa-drift-p4`) supports scenario 2, Piece A/P4 drift
-  detection and targeted correction.
+  detection by ROI novelty and targeted correction through the dedicated
+  `iqa_drift_correction_lifecycle` DAG.
 
 The `iqa-overview` dashboard gives the minimal MVP view:
 
@@ -45,8 +46,8 @@ The `iqa-overview` dashboard gives the minimal MVP view:
 
 The narrative dashboards use only already exposed API/inference `/metrics`
 series scraped by Prometheus (`deploy/prometheus/prometheus.yml`): lifecycle
-run summaries, epoch metrics, gate decisions, final model info, drift status,
-window indexes, domain ratios, and correction triggers. They expose
-operational signals and model registry labels, not industrial image paths,
-masks, local files, or cache artifacts. The runtime source of truth is the JSON
-in this provisioning directory.
+run summaries, epoch counters, train-set sizes, phase markers, gate decisions,
+promotions, final model info, ROI novelty drift status, drift context size, and
+correction triggers. They expose operational signals and model registry labels,
+not industrial image paths, masks, local files, or cache artifacts. The runtime
+source of truth is the JSON in this provisioning directory.

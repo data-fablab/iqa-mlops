@@ -4,7 +4,8 @@
 
 Le controle visuel des pieces `Casting` depend de la fatigue, de l'eclairage et de la subjectivite de l'inspection humaine. Les defauts sont tres petits, parfois autour de 0,3 % a 0,6 % de l'image, et les decisions qualite ne sont pas reliees de facon exploitable aux images, modeles, versions de donnees et feedbacks.
 
-Le MVP doit demontrer une boucle MLOps complete, gouvernee et tracable, sans remplacer Sophie.
+Le MVP doit demontrer une boucle MLOps complete, gouvernee et tracable, sans
+remplacer l'inspecteur qualite.
 
 ## 2. Solution
 
@@ -28,13 +29,14 @@ image
 -> Feature-AE good-only
 -> score + heatmap
 -> aggregation multi-vues
--> feedback oracle GT puis vitrine Sophie
+-> feedback oracle GT puis vitrine inspecteur qualite
 ```
 
 ## 3. Decisions produit
 
-- Sophie reste decisionnaire.
-- L'oracle GT automatise le workflow MVP ; l'interface Sophie montre le parcours cible.
+- L'inspecteur qualite reste decisionnaire dans le parcours metier cible.
+- L'oracle GT automatise le workflow MVP ; l'interface Inspecteur Qualite montre
+  le parcours cible.
 - Le ROI segmenter et le teacher ResNet18 restent figes.
 - Le Feature-AE est le seul modele vivant.
 - Les scenarios de replay sont isoles par `scenario_id`.
@@ -45,9 +47,12 @@ image
 
 ## 4. User stories principales
 
-1. Sophie veut voir une decision Vert / Orange / Rouge avec score et heatmap pour concentrer sa revue.
-2. Sophie veut saisir un verdict humain pour corriger ou confirmer le systeme.
-3. Marc veut suivre par lot les volumes, le taux Orange, les Rouges et le temps de controle.
+1. L'inspecteur qualite veut voir une decision Vert / Orange / Rouge avec score
+   et heatmap pour concentrer sa revue.
+2. L'inspecteur qualite veut saisir un verdict humain pour corriger ou confirmer
+   le systeme cible.
+3. Le responsable production veut suivre par lot les volumes, les non-conformites
+   et les actions atelier.
 4. Laurent veut auditer chaque prediction de bout en bout.
 5. L'ingenieur MLOps veut rejouer deux scenarios : production naturelle et drift controle.
 6. L'ingenieur MLOps veut declencher un reentrainement Feature-AE sur evenement donnees, pas sur commit.
@@ -71,7 +76,7 @@ Un faux negatif bloque toujours la promotion.
 
 Inclus :
 - FastAPI ;
-- Streamlit Sophie/Marc ;
+- Streamlit Inspecteur Qualite, Responsable Production et Data Lineage ;
 - Airflow ;
 - PostgreSQL ;
 - MLflow ;
@@ -96,7 +101,7 @@ Hors scope :
 ```text
 J7  -> tracer bullet cible : une piece traverse API, feedback, PostgreSQL, MLflow
 J14 -> replay naturel + premiere boucle de promotion
-J21 -> drift, dashboards, review Sophie, incidents
+J21 -> drift, dashboards, revue inspecteur, incidents
 J24 -> feature freeze + deploiement serveur IQA GPU RTX 3060 + runbook
 J28 -> soutenance
 ```

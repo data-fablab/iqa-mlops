@@ -39,7 +39,7 @@ The system is not legally classified as a high risk AI system in this phase. The
 | Data and data governance | Prediction, feedback and scenario contracts reduce unsafe or untraceable data flow | schemas.py and feedback tests |
 | Technical documentation | Threat model report, governance matrix, Phase 1 report and recipe report document the controls | Word reports and docs folder |
 | Record keeping | Prediction audit, feedback lifecycle and admin reload log provide MVP level records | API response audit and ADMIN_RELOAD_LOG |
-| Human oversight | Sophie is display priority only and cannot override GT for train eligibility | human feedback display tests |
+| Human oversight | Quality inspector feedback is display-only and cannot override GT for train eligibility | human feedback display tests |
 | Accuracy, robustness and cybersecurity | Invalid feedback, reload abuse and unsafe train candidates are blocked or counted | security tests and /metrics |
 
 ## GDPR alignment

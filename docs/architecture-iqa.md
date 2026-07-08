@@ -13,7 +13,8 @@ Cette architecture reprend l'esprit du template `ssime-git/mlops-project-templat
 
 Elle integre les decisions de la proposition Ken retenues par l'equipe :
 - `validation_set_v001` fige avant tout replay, hors calibration ;
-- interface Sophie vitrine pour le MVP, avec feedback automatise par oracle GT ;
+- interfaces Streamlit par role : Inspecteur Qualite, Responsable Production et
+  Data Lineage ;
 - PostgreSQL comme metadata store cible ;
 - PostgreSQL stocke les faits, statuts et URI, jamais les fichiers lourds ;
 - scenarios isoles par `scenario_id` ;
@@ -33,9 +34,10 @@ Le repo contient aujourd'hui :
   artefact officiel dans MinIO ;
 - un smoke test Feature-AE GPU valide avec les masques ROI bootstrap ;
 - des schemas API, feedback MVP, metriques securite et contrats de tests ;
-- des DAGs Airflow importables, mais encore limites a des frontieres batch qui
-  appellent des commandes dont le statut est `planned` ;
-- une UI Streamlit Phase 1, sans historique applicatif PostgreSQL complet.
+- des DAGs Airflow importables et executes en conteneurs pour le lifecycle, le
+  drift P4 et la correction ciblee ;
+- une UI Streamlit multipage : Responsable Production, Inspecteur Qualite et
+  Data Lineage.
 
 Les sections suivantes decrivent donc l'architecture cible MVP. Quand une brique
 n'est pas encore totalement cablee dans le code, elle est signalee comme cible
@@ -44,7 +46,7 @@ ou ecart planifie.
 ## 3. Architecture logique cible MVP
 
 ```text
-Sophie / Marc
+Inspecteur Qualite / Responsable Production / Data Lineage
     |
     v
 Streamlit
@@ -354,7 +356,7 @@ replay/      -> lots, cadence, scenarios
 roi/         -> ROI segmenter fige, controle qualite ROI
 models/      -> code PyTorch teacher + Feature-AE
 inference/   -> pipeline prediction image/piece
-feedback/    -> oracle GT MVP, vitrine Sophie, regles de priorite futures
+feedback/    -> oracle GT MVP, revue inspecteur display-only, regles futures
 datasets/    -> datasets candidats good-only
 training/    -> train/eval/calibration/gates Feature-AE
 monitoring/  -> drift, metriques, alertes
@@ -419,16 +421,18 @@ Tests presents et attendus :
 - MinIO integration : round-trip ecriture/lecture ;
 - model loading : manifest Git + artefact MinIO cible ; la CLI ROI utilise
   encore une copie locale/cache du checkpoint ;
-- feedback : oracle GT automatise le MVP ; Sophie reste une vitrine de revue ;
+- feedback : oracle GT automatise le MVP ; l'interface Inspecteur Qualite reste
+  une vitrine de revue ;
 - aggregation piece : Rouge/Orange/Vert ;
 - incidents rejouables : faux negatif, pic ROI fail, rollback.
 
 ## 12. Phases d'implementation
 
-Etat courant : le socle Phase 1 est en place, le bootstrap ROI est operationnel,
-les tests de contrats passent, et le serveur GPU execute les smoke tests. Les
-points PostgreSQL applicatif, lifecycle MLflow complet et promotion restent des
-cibles de Phase 2.
+Etat courant : le socle MVP est en place, le bootstrap ROI est operationnel,
+les tests de contrats passent, les dashboards Grafana narratifs sont
+provisionnes, et le serveur GPU execute les smoke tests. Le lifecycle progressif
+et le scenario Drift P4 utilisent MLflow/MinIO/Grafana pour demontrer la
+promotion controlee et la correction ciblee.
 
 1. Squelette repo, configs, CI, PostgreSQL infra, MinIO, API `/health`.
 2. Tracer bullet cible : une piece traverse predict -> feedback -> PostgreSQL -> MLflow.
@@ -440,7 +444,7 @@ cibles de Phase 2.
 8. Boucle modele Airflow.
 9. Scenario drift + isolation/reset par `scenario_id`.
 10. Monitoring Prometheus/Grafana.
-11. Streamlit dashboard Marc + review Sophie.
+11. Streamlit Responsable Production + Inspecteur Qualite + Data Lineage.
 12. Incidents rejouables, dont rollback via MLflow Registry.
 13. Deploiement serveur IQA GPU RTX 3060 + runbook.
 
@@ -457,7 +461,8 @@ cibles de Phase 2.
 - Le validation set est fige avant replay et hors calibration.
 - Le calibration set est good-only et exclu de bootstrap, replay, train et validation.
 - Les scenarios sont isoles par `scenario_id`.
-- L'interface Sophie est une vitrine MVP ; le feedback operationnel est l'oracle GT.
+- L'interface Inspecteur Qualite est une vitrine de revue ; le feedback
+  operationnel MVP reste l'oracle GT.
 - MLflow Registry est la source de verite cible de la promotion et du rollback.
 - Seul le Feature-AE est destine au reentrainement automatique.
 - Kubernetes et reentrainement ROI sont hors MVP.
@@ -486,10 +491,10 @@ Decisions adoptees :
 - `event_time` represente le temps simule du replay ; `recorded_at` represente
   l'horloge systeme ; `is_simulated` est derive de la source.
 - MLflow Registry est la source de verite cible ; MinIO stocke les artefacts.
-- Registered models par scenario : `feature_ae__production_replay_natural` et
-  `feature_ae__drift_domain_extension`.
+- Registered models par scenario : `feature_ae_classifier__...` et
+  `feature_ae_localization__...`, avec suffixe par scenario de replay.
 - API et inference restent deux services separes : `iqa-api` et `iqa-inference`.
 - Le pyproject.toml racine est conserve en phase initiale ; la migration vers
   un dossier `services/` est reportee.
-- Sophie reste une vitrine MVP ; `human_sophie` est futur, `oracle_gt` pilote le
-  workflow operationnel.
+- L'interface Inspecteur Qualite reste une vitrine MVP ; le feedback humain
+  operationnel est futur, `oracle_gt` pilote le workflow operationnel.

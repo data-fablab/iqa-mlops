@@ -6,8 +6,9 @@
 
 Industrial Quality Assistant (IQA) is a completed MLOps MVP for visual quality
 control on `Casting` parts. It packages a FastAPI application (`iqa-api`), a
-separate inference service (`iqa-inference`), Streamlit review views for the Marc
-and Sophie personas, replay runs, Airflow orchestration, DVC/MinIO data
+separate inference service (`iqa-inference`), role-based Streamlit interfaces
+for the quality inspector, the production manager and data lineage, replay
+runs, Airflow orchestration, DVC/MinIO data
 reproducibility and lineage, MLflow tracking and registry, opt-in PostgreSQL
 metadata persistence, Prometheus/Alertmanager/Grafana observability, and a
 Kong/Nginx edge.
@@ -85,8 +86,8 @@ sha256 -> piece_event -> scenario -> lot -> dataset_version -> model_version -> 
 | Model registry as source of truth | MLflow Registry decides the active model; promotion and rollback go through it, MinIO only stores artifacts | [mlflow-registry.md](docs/mlflow-registry.md), [ADR 0006](docs/adr/0006-mlflow-registry-source-verite.md) |
 | Promotion gates & rollback | Config-driven gates (`iqa-run-gates`, `iqa-run-promotion`); model rollback via Registry, app rollback by immutable image tag | [gates.md](docs/gates.md), [rollback.md](docs/rollback.md), [rollback-server.md](docs/rollback-server.md) |
 | CI/CD | 4-job GitHub Actions: lint+test, API/DAG contracts (zero-broken-DAG check), docker build + compose validate, opt-in image publish with immutable tags (git SHA + `v*`, never `latest`) | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
-| Automated testing | 764 tests across 107 files, including API/data/contract tests and Airflow DAG unit checks | [tests/](tests/) |
-| Orchestration | 9 Airflow DAGs (ingestion, replay, monitoring, lifecycle, drift, DVC reproducibility) run as containerised tasks | [ADR 0002](docs/adr/0002-airflow-comme-orchestrateur.md), [ADR 0008](docs/adr/0008-taches-airflow-comme-conteneurs.md) |
+| Automated testing | Broad pytest suite including API/data/contract tests, Airflow DAG checks, dashboards, replay scenarios and Streamlit contracts | [tests/](tests/) |
+| Orchestration | 9 Airflow DAGs (ingestion, replay, monitoring, lifecycle, drift observation, drift correction, DVC reproducibility) run as containerised tasks | [ADR 0002](docs/adr/0002-airflow-comme-orchestrateur.md), [ADR 0008](docs/adr/0008-taches-airflow-comme-conteneurs.md) |
 | Observability & monitoring | Prometheus scraping every service, Alertmanager drift rules, 4 provisioned Grafana dashboards | [Observability & monitoring](#observability--monitoring), [deploy/prometheus](deploy/prometheus), [deploy/grafana](deploy/grafana) |
 | Reproducible environments | `uv` lockfile with role/CUDA extras, multi-stage Dockerfile, per-role images | [pyproject.toml](pyproject.toml), [Dockerfile](Dockerfile) |
 | API gateway & edge | Kong gateway (Phase 3) in front of the services | [api-gateway.md](docs/api-gateway.md), [ADR 0009](docs/adr/0009-kong-api-gateway-phase3.md) |
@@ -110,10 +111,13 @@ Alertmanager fires on drift/incident conditions and Grafana renders the story.
 
 - Service health — `iqa_api_up`, `iqa_inference_up`, `iqa_active_model_info`,
   `iqa_inference_gpu_lock_held`.
-- Drift — `iqa_drift_score`, `iqa_drift_status`, `iqa_drift_degradation_score`,
-  `iqa_drift_oracle_fn_rate`, `iqa_drift_red_rate`, `iqa_drift_trigger_lifecycle`.
-- Lifecycle — `iqa_lifecycle_cycle_current`, `iqa_lifecycle_epoch_image_ap`,
-  `iqa_lifecycle_epoch_pixel_aupimo`, `iqa_lifecycle_active_model_info`.
+- Drift — `iqa_drift_roi_mask_novelty_rate`,
+  `iqa_drift_roi_mask_nn_distance`, `iqa_drift_context_events_total`,
+  `iqa_drift_status`, `iqa_drift_trigger_lifecycle`.
+- Lifecycle — `iqa_lifecycle_cycle_current`, `iqa_lifecycle_epoch_current`,
+  `iqa_lifecycle_train_set_size`, `iqa_lifecycle_phase_active`,
+  `iqa_lifecycle_gate_value`, `iqa_lifecycle_promotion_total`,
+  `iqa_lifecycle_final_model_info`.
 - Quality & feedback — `iqa_feedback_conflict_total`, `iqa_invalid_feedback_total`,
   `iqa_divergence_filtered_total`.
 - Security — `iqa_ai_security_incident_total`.
@@ -131,7 +135,7 @@ scenario ([deploy/prometheus/rules/](deploy/prometheus/rules/), rules
 | `iqa-overview` | Service health, prediction latency, V/O/R decision mix, incidents |
 | `iqa-lifecycle` | The industrial MLOps "red thread": scenario cycles, retrain epochs, promotions |
 | `iqa-executive-mlops` | High-level MLOps posture for a non-technical audience |
-| `iqa-drift-p4` | Drift regime for the `piece_a → P4` scenario and lifecycle triggers |
+| `iqa-drift-p4` | ROI-based P4 drift detection, targeted correction DAG and final promotions |
 
 Bring the observability stack up and operate it via
 [docs/exploitation-runbook.md](docs/exploitation-runbook.md); drift regimes are
@@ -171,6 +175,7 @@ uv sync --extra cpu                                   # install (CPU torch)
 uv run --extra cpu pytest -q                          # run the test suite
 uv run --extra cpu ruff check src scripts tests       # lint
 uv run --extra cpu iqa-api                             # run the API locally
+uv run --extra cpu iqa-init-metadata-db                # initialize metadata DB
 docker compose --env-file ../.env up -d               # run the stack (from deploy/)
 uv run --extra cpu iqa-demo-phase2                     # end-to-end demo
 ```
@@ -203,8 +208,10 @@ Public endpoints:
 Internal-only routes (`/internal/drift/events`, `/internal/lifecycle/events`) are
 called by orchestration and are not part of the public surface. Critical
 scenario-scoped routes keep `scenario_id` mandatory to preserve isolation between
-`production_replay_natural`, `drift_domain_extension`, and future production
-scenarios. Full contracts: [docs/api_contracts.md](docs/api_contracts.md).
+`production_replay_natural`, `production_replay_natural_train_v004`,
+`production_replay_natural_piece_b_full`, and
+`production_replay_natural_piece_b_to_piece_a_p4_drift`. Full contracts:
+[docs/api_contracts.md](docs/api_contracts.md).
 
 ## Data & lineage
 
@@ -226,20 +233,25 @@ and each stage has a producer and a store:
 Reproduce and audit the full chain with
 [docs/lineage-evidence.md](docs/lineage-evidence.md) and the
 [docs/phase3-final-lineage-runbook.md](docs/phase3-final-lineage-runbook.md);
-`iqa-lineage-summary` renders it on demand.
+`iqa-lineage-summary` renders it on demand. `iqa-check-dvc-reproducibility`
+is the explicit DVC/MinIO gate for operator and CI evidence.
 
 `piece_event` is the atomic split, replay, validation, feedback, and training
 eligibility unit. Supported replay scenarios:
 
 - `production_replay_natural`
+- `production_replay_natural_train_v004`
 - `drift_domain_extension`
+- `production_replay_natural_piece_b_minimal`
+- `production_replay_natural_piece_b_full`
+- `production_replay_natural_piece_b_to_piece_a_p4_drift`
 
 `bootstrap`, `calibration_good_reference_v001`, replay manifests, and
 `validation_set_replay_representative_v001` remain disjoint. `oracle_gt` is the
-sovereign feedback source for training eligibility; Sophie remains a
-display/review persona in this phase. Feature-AE MVP training uses one stable good
-anchor, `feature_ae_good_mvp_v001`, disjoint from validation, calibration and
-replay.
+sovereign feedback source for training eligibility. The Streamlit quality
+inspector interface is display/review only; model and data traceability live in
+the Data Lineage page. Feature-AE MVP training uses one stable good anchor,
+`feature_ae_good_mvp_v001`, disjoint from validation, calibration and replay.
 
 Model lifecycle decisions are triggered by data events (e.g. 50 new
 oracle-validated conforming pieces, or confirmed drift). CI validates contracts

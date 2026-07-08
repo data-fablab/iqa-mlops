@@ -19,7 +19,7 @@ human_sophie is a display feedback source only.
 | oracle_gt | Yes | Yes | Yes, if safe | Automated MVP ground truth |
 | human_sophie | Yes | No | No | Display and review workflow |
 
-## Human Sophie rule
+## Inspector display feedback rule
 
 human_sophie feedback is accepted only for display.
 
