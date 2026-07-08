@@ -29,6 +29,24 @@ REPLAY_SCENARIOS = (
         purpose="Scenario controle pour drift, dataset candidat et promotion/rejet.",
         is_representative=False,
     ),
+    ReplayScenario(
+        scenario_id="production_replay_natural_piece_b_minimal",
+        scenario_type="production",
+        purpose="Replay natural minimal piece B class1 pour smoke MLOps local.",
+        is_representative=False,
+    ),
+    ReplayScenario(
+        scenario_id="production_replay_natural_piece_b_full",
+        scenario_type="production",
+        purpose="Replay natural complet Piece B class1 pour validation des promotions candidates.",
+        is_representative=False,
+    ),
+    ReplayScenario(
+        scenario_id="production_replay_natural_piece_b_to_piece_a_p4_drift",
+        scenario_type="production_drift",
+        purpose="Replay natural Piece B stable puis apparition progressive Piece A/P4 pour detection drift et correction.",
+        is_representative=False,
+    ),
 )
 
 

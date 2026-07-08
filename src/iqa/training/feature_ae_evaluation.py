@@ -9,7 +9,7 @@ import csv
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -38,7 +38,6 @@ METRIC_BEST_FILES = {
     "image_ap": "checkpoint_best_image_ap.pt",
     "image_auroc": "checkpoint_best_image_auroc.pt",
 }
-PREDICTION_SCHEMA_VERSION = "feature_ae_predictions_v2"
 
 
 @dataclass(frozen=True)
@@ -49,7 +48,7 @@ class FeatureAEEvaluationConfig:
     output_dir: Path
     roi_predictions_dirs: tuple[Path, ...] = ()
     gt_masks_manifest: Path | None = None
-    validation_set_id: str = "validation_set_v001"
+    validation_set_id: str = "validation_set_replay_representative_v001"
     image_size: int = FEATURE_AE_TILE_SIZE
     context_size: int = FEATURE_AE_CONTEXT_SIZE
     tile_stride: int = FEATURE_AE_TILE_SIZE // 2
@@ -73,6 +72,7 @@ class FeatureAEEvaluationConfig:
     cosine_weight: float = 0.5
     threshold_orange: float = 0.02
     threshold_red: float = 0.05
+    metric_profile: Literal["fast", "full"] = "full"
     save_score_maps: bool = False
     save_previews: bool = False
     max_previews: int = 31
@@ -167,7 +167,10 @@ def compute_binary_metrics(
     pixel_scores: list[np.ndarray],
     *,
     timings: dict[str, float] | None = None,
+    metric_profile: Literal["fast", "full"] = "full",
 ) -> dict[str, float | None]:
+    if metric_profile not in {"fast", "full"}:
+        raise ValueError(f"Unsupported metric profile: {metric_profile}")
     metrics: dict[str, float | None] = {
         "image_auroc": None,
         "image_ap": None,
@@ -182,14 +185,15 @@ def compute_binary_metrics(
         metrics["image_ap"] = float(average_precision_score(y_true, y_score))
 
     if pixel_labels:
-        rank_started = time.perf_counter()
-        p_true = np.concatenate([labels.reshape(-1) for labels in pixel_labels]).astype(np.int32)
-        p_score = np.concatenate([scores.reshape(-1) for scores in pixel_scores]).astype(np.float32)
-        if p_true.sum() > 0 and np.unique(p_true).size == 2:
-            metrics["pixel_auroc"] = float(roc_auc_score(p_true, p_score))
-            metrics["pixel_ap"] = float(average_precision_score(p_true, p_score))
-        if timings is not None:
-            timings["pixel_rank_metrics_seconds"] = time.perf_counter() - rank_started
+        if metric_profile == "full":
+            rank_started = time.perf_counter()
+            p_true = np.concatenate([labels.reshape(-1) for labels in pixel_labels]).astype(np.int32)
+            p_score = np.concatenate([scores.reshape(-1) for scores in pixel_scores]).astype(np.float32)
+            if p_true.sum() > 0 and np.unique(p_true).size == 2:
+                metrics["pixel_auroc"] = float(roc_auc_score(p_true, p_score))
+                metrics["pixel_ap"] = float(average_precision_score(p_true, p_score))
+            if timings is not None:
+                timings["pixel_rank_metrics_seconds"] = time.perf_counter() - rank_started
         aupimo_started = time.perf_counter()
         aupimo = _normalized_low_fpr_aupimo(
             np.asarray(image_labels, dtype=np.int64),
@@ -202,68 +206,6 @@ def compute_binary_metrics(
             timings["aupimo_compute_seconds"] = time.perf_counter() - aupimo_started
         metrics["pixel_aupimo_1e-5_1e-3"] = aupimo
     return metrics
-
-
-def compute_per_class_metrics(
-    records: list[dict[str, Any]],
-    pixel_labels_by_image: dict[str, np.ndarray],
-    pixel_scores_by_image: dict[str, np.ndarray],
-) -> dict[str, dict[str, float | None]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for record in records:
-        grouped.setdefault(str(record.get("source_class") or "unknown"), []).append(record)
-    result: dict[str, dict[str, float | None]] = {}
-    for source_class, class_records in grouped.items():
-        image_labels = [bool(record["is_defective"]) for record in class_records]
-        image_scores = [float(record["score"]) for record in class_records]
-        pixel_labels = [pixel_labels_by_image[str(record["image_id"])] for record in class_records]
-        pixel_scores = [pixel_scores_by_image[str(record["image_id"])] for record in class_records]
-        result[source_class] = compute_binary_metrics(image_labels, image_scores, pixel_labels, pixel_scores)
-    return result
-
-
-def compute_aupimo_stability(
-    records: list[dict[str, Any]],
-    pixel_scores_by_image: dict[str, np.ndarray],
-) -> dict[str, Any]:
-    good_scores = [
-        pixel_scores_by_image[str(record["image_id"])].reshape(-1)
-        for record in records
-        if not bool(record.get("is_defective"))
-    ]
-    defect_scores = [
-        pixel_scores_by_image[str(record["image_id"])].reshape(-1)
-        for record in records
-        if bool(record.get("is_defective"))
-    ]
-    good_count = sum(1 for record in records if not bool(record.get("is_defective")))
-    defective_count = sum(1 for record in records if bool(record.get("is_defective")))
-    source_distribution: dict[str, int] = {}
-    for record in records:
-        key = str(record.get("source_class") or "unknown")
-        source_distribution[key] = source_distribution.get(key, 0) + 1
-    good_values = np.concatenate(good_scores) if good_scores else np.asarray([], dtype=np.float32)
-    defect_values = np.concatenate(defect_scores) if defect_scores else np.asarray([], dtype=np.float32)
-    max_good = float(np.max(good_values)) if good_values.size else None
-    max_defect = float(np.max(defect_values)) if defect_values.size else None
-    low_fpr_good_outlier_count = 0
-    if good_values.size and max_defect is not None:
-        low_fpr_good_outlier_count = int((good_values >= max_defect).sum())
-    unstable_reasons: list[str] = []
-    if defective_count < 5:
-        unstable_reasons.append("defective_count_below_5")
-    if low_fpr_good_outlier_count > 0:
-        unstable_reasons.append("good_outliers_dominate_low_fpr")
-    return {
-        "defective_count": defective_count,
-        "good_count": good_count,
-        "source_class_distribution": source_distribution,
-        "low_fpr_good_outlier_count": low_fpr_good_outlier_count,
-        "max_good_score": max_good,
-        "max_defect_score": max_defect,
-        "aupimo_unstable": bool(unstable_reasons),
-        "unstable_reasons": unstable_reasons,
-    }
 
 
 def compute_decision_metrics(
@@ -397,7 +339,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         tile_stride=config.tile_stride,
         roi_masks=roi_lookup.masks,
         roi_status=roi_lookup.status,
-        gt_masks=_load_gt_mask_lookup(config.gt_masks_manifest),
+        gt_masks=_load_gt_mask_lookup(config.gt_masks_manifest, image_root=config.image_root),
         roi_threshold=config.roi_threshold,
         train_only_normal=False,
     )
@@ -491,9 +433,6 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
     image_latencies_ms: list[float] = []
     pixel_labels: list[np.ndarray] = []
     pixel_scores: list[np.ndarray] = []
-    pixel_labels_by_image: dict[str, np.ndarray] = {}
-    pixel_scores_by_image: dict[str, np.ndarray] = {}
-    roi_masks_by_image: dict[str, np.ndarray] = {}
     per_image: list[dict[str, Any]] = []
     maps_dir = config.output_dir / "score_maps"
     previews_dir = config.output_dir / "previews"
@@ -520,11 +459,12 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         image_labels.append(bool(entry["is_defective"]))
         image_scores.append(image_score)
         image_latencies_ms.append(float(entry["latency_ms"]))
-        pixel_labels.append(gt)
-        pixel_scores.append(score_map.astype(np.float32))
-        pixel_labels_by_image[image_id] = gt
-        pixel_scores_by_image[image_id] = score_map.astype(np.float32)
-        roi_masks_by_image[image_id] = entry["roi"].astype(np.float32)
+        if config.score_region == "functional_surface_prediction":
+            pixel_labels.append(gt[valid_roi])
+            pixel_scores.append(score_map.astype(np.float32)[valid_roi])
+        else:
+            pixel_labels.append(gt)
+            pixel_scores.append(score_map.astype(np.float32))
         per_image.append(
             {
                 "image_id": image_id,
@@ -533,6 +473,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
                 "is_defective": bool(entry["is_defective"]),
                 "score": image_score,
                 "gt_positive_pixels": int(gt.sum()),
+                "gt_positive_pixels_in_roi": int(gt[valid_roi].sum()) if valid_roi.size else 0,
                 "score_map_shape": list(score_map.shape),
                 "roi_coverage": roi_coverage,
             }
@@ -543,7 +484,14 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             _save_preview(previews_dir / f"{image_id}.png", score_map)
 
     metric_timings: dict[str, float] = {}
-    metrics = compute_binary_metrics(image_labels, image_scores, pixel_labels, pixel_scores, timings=metric_timings)
+    metrics = compute_binary_metrics(
+        image_labels,
+        image_scores,
+        pixel_labels,
+        pixel_scores,
+        timings=metric_timings,
+        metric_profile=config.metric_profile,
+    )
     decision = compute_decision_metrics(
         image_labels,
         image_scores,
@@ -576,9 +524,6 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         record["decision"] = "red" if is_red else ("orange" if is_alert else "green")
         record["is_false_positive"] = bool((not is_defective) and is_alert)
         record["is_false_negative"] = bool(is_defective and not is_alert)
-    per_class_metrics = compute_per_class_metrics(per_image, pixel_labels_by_image, pixel_scores_by_image)
-    aupimo_stability = compute_aupimo_stability(per_image, pixel_scores_by_image)
-    predictions_path = config.output_dir / "predictions.npz"
     result = {
         "checkpoint": str(config.checkpoint_path),
         "validation_set_id": config.validation_set_id,
@@ -593,6 +538,7 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
             "roi_threshold": config.roi_threshold,
             "score_image": config.score_image,
             "topk_fraction": config.topk_fraction,
+            "metric_profile": config.metric_profile,
         },
         "calibration": {
             "enabled": config.calibrate_normal,
@@ -603,31 +549,24 @@ def evaluate_feature_ae_checkpoint(config: FeatureAEEvaluationConfig) -> dict[st
         },
         "metrics": metrics,
         "metric_timings": metric_timings,
-        "per_class_metrics": per_class_metrics,
-        "aupimo_stability": aupimo_stability,
-        "predictions_path": str(predictions_path),
         "images": per_image,
     }
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    materialize_evaluation_predictions(
-        predictions_path,
-        per_image,
-        pixel_labels_by_image=pixel_labels_by_image,
-        pixel_scores_by_image=pixel_scores_by_image,
-        roi_masks_by_image=roi_masks_by_image,
-        layer_score_maps_by_image=raw_layer_maps,
-        score_contract=result["score_contract"],
-    )
     params = {
         "checkpoint": str(config.checkpoint_path),
         "checkpoint_sha256": sha256_file(config.checkpoint_path),
+        "manifest": str(config.manifest_path),
+        "manifest_sha256": sha256_file(config.manifest_path),
+        "gt_masks_manifest": str(config.gt_masks_manifest) if config.gt_masks_manifest else None,
+        "gt_masks_manifest_sha256": sha256_file(config.gt_masks_manifest) if config.gt_masks_manifest else None,
+        "image_root": str(config.image_root),
         "validation_set_id": config.validation_set_id,
         "score_contract": result["score_contract"],
         "threshold_orange": config.threshold_orange,
         "threshold_red": config.threshold_red,
         "duration_seconds": time.perf_counter() - evaluation_started,
         "metric_timings": metric_timings,
-        "prediction_schema_version": PREDICTION_SCHEMA_VERSION,
+        "metric_profile": config.metric_profile,
     }
     (config.output_dir / "params.json").write_text(json.dumps(params, indent=2, sort_keys=True), encoding="utf-8")
     (config.output_dir / "metrics.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
@@ -666,167 +605,6 @@ def update_metric_best_checkpoints(
     return best
 
 
-def materialize_evaluation_predictions(
-    path: Path,
-    records: list[dict[str, Any]],
-    *,
-    pixel_labels_by_image: dict[str, np.ndarray] | None = None,
-    pixel_scores_by_image: dict[str, np.ndarray] | None = None,
-    roi_masks_by_image: dict[str, np.ndarray] | None = None,
-    layer_score_maps_by_image: dict[str, dict[str, np.ndarray]] | None = None,
-    score_contract: dict[str, Any] | None = None,
-) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    labels = pixel_labels_by_image or {}
-    scores = pixel_scores_by_image or {}
-    roi_masks = roi_masks_by_image or {}
-    masks = []
-    score_maps = []
-    roi_maps = []
-    for record in records:
-        image_id = str(record["image_id"])
-        masks.append(np.asarray(labels.get(image_id, np.asarray([], dtype=np.uint8))).astype(np.uint8))
-        score_maps.append(np.asarray(scores.get(image_id, np.asarray([], dtype=np.float32))).astype(np.float32))
-        roi_maps.append(np.asarray(roi_masks.get(image_id, np.ones_like(masks[-1], dtype=np.float32))).astype(np.float32))
-    payload: dict[str, Any] = {
-        "schema_version": np.asarray(PREDICTION_SCHEMA_VERSION, dtype=object),
-        "piece_event_id": np.asarray([record["image_id"] for record in records], dtype=object),
-        "source_class": np.asarray([record.get("source_class") or "unknown" for record in records], dtype=object),
-        "oracle_verdict": np.asarray(
-            ["defective" if bool(record.get("is_defective")) else "good" for record in records],
-            dtype=object,
-        ),
-        "image_score": np.asarray([float(record.get("score") or 0.0) for record in records], dtype=np.float32),
-        "gt_positive_pixels": np.asarray([int(record.get("gt_positive_pixels") or 0) for record in records], dtype=np.int64),
-        "relative_path": np.asarray([record.get("relative_path") or "" for record in records], dtype=object),
-        "score_contract_version": np.asarray(
-            [str((score_contract or {}).get("score_contract_version") or "") for _ in records],
-            dtype=object,
-        ),
-        "score_map_shape": np.asarray([record.get("score_map_shape") or [] for record in records], dtype=object),
-        "roi_coverage": np.asarray([float(record.get("roi_coverage") or 0.0) for record in records], dtype=np.float32),
-        "y_true": np.asarray([bool(record.get("is_defective")) for record in records], dtype=np.bool_),
-        "masks": _stack_prediction_maps(masks, "masks").astype(np.uint8),
-        "score_maps": _stack_prediction_maps(score_maps, "score_maps").astype(np.float32),
-        "roi_masks": _stack_prediction_maps(roi_maps, "roi_masks").astype(np.float32),
-    }
-    if layer_score_maps_by_image:
-        for layer in sorted(next(iter(layer_score_maps_by_image.values())).keys()):
-            layer_maps = [
-                np.asarray(layer_score_maps_by_image[str(record["image_id"])][layer], dtype=np.float32)
-                for record in records
-            ]
-            payload[f"layer_score_maps_{layer}"] = _stack_prediction_maps(layer_maps, f"layer_score_maps_{layer}")
-    np.savez_compressed(path, **payload)
-
-
-def _stack_prediction_maps(maps: list[np.ndarray], name: str) -> np.ndarray:
-    if not maps:
-        return np.asarray([], dtype=np.float32)
-    shapes = {tuple(np.asarray(item).shape) for item in maps}
-    if len(shapes) != 1:
-        raise ValueError(f"{name} must have one dense shape for predictions schema {PREDICTION_SCHEMA_VERSION}: {sorted(shapes)}")
-    return np.stack(maps, axis=0)
-
-
-def evaluate_feature_ae_predictions(
-    predictions_path: Path,
-    *,
-    threshold_orange: float,
-    threshold_red: float,
-) -> dict[str, Any]:
-    with np.load(predictions_path, allow_pickle=True) as data:
-        schema_version = _npz_scalar(data, "schema_version")
-        if schema_version != PREDICTION_SCHEMA_VERSION or "score_maps" not in data.files or "masks" not in data.files:
-            raise ValueError(
-                "unsupported_prediction_schema: predictions.npz must contain "
-                f"schema_version={PREDICTION_SCHEMA_VERSION!r}, score_maps and masks"
-            )
-        records: list[dict[str, Any]] = []
-        pixel_labels_by_image: dict[str, np.ndarray] = {}
-        pixel_scores_by_image: dict[str, np.ndarray] = {}
-        image_labels: list[bool] = []
-        image_scores: list[float] = []
-        pixel_labels: list[np.ndarray] = []
-        pixel_scores: list[np.ndarray] = []
-        score_maps = np.asarray(data["score_maps"], dtype=np.float32)
-        masks = np.asarray(data["masks"], dtype=np.uint8)
-        for index, image_id_value in enumerate(data["piece_event_id"]):
-            image_id = str(image_id_value)
-            is_defective = str(data["oracle_verdict"][index]) == "defective"
-            image_score = float(data["image_score"][index])
-            label_array = masks[index]
-            score_array = score_maps[index]
-            record = {
-                "image_id": image_id,
-                "relative_path": str(data["relative_path"][index]),
-                "source_class": str(data["source_class"][index]),
-                "is_defective": is_defective,
-                "score": image_score,
-                "gt_positive_pixels": int(np.sum(label_array)),
-            }
-            records.append(record)
-            image_labels.append(is_defective)
-            image_scores.append(image_score)
-            pixel_labels.append(label_array)
-            pixel_scores.append(score_array)
-            pixel_labels_by_image[image_id] = label_array
-            pixel_scores_by_image[image_id] = score_array
-    metric_timings: dict[str, float] = {}
-    metrics = compute_binary_metrics(image_labels, image_scores, pixel_labels, pixel_scores, timings=metric_timings)
-    decision = compute_decision_metrics(
-        image_labels,
-        image_scores,
-        threshold_orange=threshold_orange,
-        threshold_red=threshold_red,
-        latencies_ms=[],
-    )
-    metrics["image_recall"] = decision["recall"]
-    metrics["false_negatives"] = decision["false_negatives"]
-    metrics["false_positive_count"] = decision["false_positive_count"]
-    metrics["good_alert_count"] = decision["good_alert_count"]
-    metrics["good_red_count"] = decision["good_red_count"]
-    metrics["alert_count"] = decision["alert_count"]
-    metrics["red_count"] = decision["red_count"]
-    metrics["orange_rate"] = decision["orange_rate"]
-    metrics["alert_rate"] = decision["alert_rate"]
-    metrics["red_rate"] = decision["red_rate"]
-    metrics["good_alert_rate"] = decision["good_alert_rate"]
-    metrics["good_red_rate"] = decision["good_red_rate"]
-    metrics["latency_ms"] = decision["latency_ms"]
-    for record in records:
-        score = float(record.get("score") or 0.0)
-        is_defective = bool(record.get("is_defective"))
-        is_alert = score >= threshold_orange
-        is_red = score >= threshold_red
-        record["threshold_orange"] = float(threshold_orange)
-        record["threshold_red"] = float(threshold_red)
-        record["is_alert"] = is_alert
-        record["is_red"] = is_red
-        record["decision"] = "red" if is_red else ("orange" if is_alert else "green")
-        record["is_false_positive"] = bool((not is_defective) and is_alert)
-        record["is_false_negative"] = bool(is_defective and not is_alert)
-    return {
-        "metrics": metrics,
-        "metric_timings": metric_timings,
-        "prediction_schema_version": PREDICTION_SCHEMA_VERSION,
-        "per_class_metrics": compute_per_class_metrics(records, pixel_labels_by_image, pixel_scores_by_image),
-        "aupimo_stability": compute_aupimo_stability(records, pixel_scores_by_image),
-        "images": records,
-    }
-
-
-def _npz_scalar(data: np.lib.npyio.NpzFile, key: str) -> str:
-    if key not in data.files:
-        return ""
-    value = data[key]
-    if value.shape == ():
-        return str(value.item())
-    if value.size == 1:
-        return str(value.reshape(-1)[0])
-    return str(value)
-
-
 def _source_class(relative_path: str) -> str:
     normalized = relative_path.replace("\\", "/")
     return normalized.split("/", 1)[0] if "/" in normalized else "unknown"
@@ -840,7 +618,7 @@ def _save_preview(path: Path, score_map: np.ndarray) -> None:
     Image.fromarray((normalized * 255.0).astype(np.uint8)).save(path)
 
 
-def _load_gt_mask_lookup(path: Path | None) -> dict[str, Path]:
+def _load_gt_mask_lookup(path: Path | None, *, image_root: Path | None = None) -> dict[str, Path]:
     if path is None:
         return {}
     masks: dict[str, Path] = {}
@@ -849,13 +627,36 @@ def _load_gt_mask_lookup(path: Path | None) -> dict[str, Path]:
             mask_value = row.get("gt_mask_path") or row.get("mask_path") or row.get("path") or ""
             if not mask_value:
                 continue
-            mask_path = Path(mask_value)
-            if not mask_path.is_absolute():
-                mask_path = path.parent / mask_path
+            mask_path = _resolve_gt_mask_lookup_path(mask_value, image_root=image_root, manifest_path=path)
             for key in (row.get("image_id") or "", row.get("relative_path") or ""):
                 if key:
                     masks[key] = mask_path
     return masks
+
+
+def _resolve_gt_mask_lookup_path(mask_value: str, *, image_root: Path | None, manifest_path: Path) -> Path:
+    raw_path = Path(mask_value.strip())
+    if raw_path.is_absolute():
+        if raw_path.is_file():
+            return raw_path
+        raise FileNotFoundError(f"GT mask declared in {manifest_path} does not exist: {raw_path}")
+    candidates: list[Path] = []
+    normalized = Path(str(raw_path).replace("\\", "/"))
+    if image_root is not None:
+        candidates.append(Path(image_root) / normalized)
+        parts = normalized.parts
+        if "hss-iad" in parts:
+            hss_index = parts.index("hss-iad")
+            candidates.append(Path(image_root) / Path(*parts[hss_index + 1 :]))
+    candidates.extend([manifest_path.parent / normalized, Path.cwd() / normalized])
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    searched = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(
+        f"GT mask declared in {manifest_path} could not be resolved from image_root={image_root}: "
+        f"{mask_value}. Searched: {searched}"
+    )
 
 
 def evaluate_on_validation_set_v001(
@@ -865,7 +666,7 @@ def evaluate_on_validation_set_v001(
     output_dir: Path | str,
     model_version: str = "candidate",
 ) -> EvaluationReport:
-    """Evaluate Feature AE model on frozen validation_set_v001.
+    """Evaluate Feature AE model on the frozen representative validation set.
 
     Args:
         checkpoint_path: Path to trained Feature AE checkpoint.
@@ -892,7 +693,7 @@ def evaluate_on_validation_set_v001(
         manifest_path=manifest_path,
         image_root=image_root,
         output_dir=output_dir,
-        validation_set_id="validation_set_v001",
+        validation_set_id="validation_set_replay_representative_v001",
         device="cpu",
     )
 
@@ -936,15 +737,12 @@ __all__ = [
     "EvaluationReport",
     "FeatureAEEvaluationConfig",
     "METRIC_BEST_FILES",
-    "PREDICTION_SCHEMA_VERSION",
     "apply_median_mad",
     "compute_binary_metrics",
     "compute_decision_metrics",
     "evaluate_feature_ae_checkpoint",
-    "evaluate_feature_ae_predictions",
     "evaluate_on_validation_set_v001",
     "median_mad_stats",
-    "materialize_evaluation_predictions",
     "parse_layer_loss_weights",
     "score_image_map",
     "smooth_score_map",

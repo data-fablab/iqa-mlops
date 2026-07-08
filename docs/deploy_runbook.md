@@ -105,11 +105,14 @@ Le pool `iqa_gpu` (1 slot) contraint les taches GPU a `max_active_tasks=1`.
 > Docker) via `IQA_DOCKER_URL=tcp://...`. La cible Kubernetes (`IQA_AIRFLOW_BACKEND=k8s`)
 > supprime ce privilege (l'orchestration passe par l'API server + RBAC).
 
-### 4.6 Vitrine Streamlit (Accueil + Marc + Sophie)
+### 4.6 Interfaces Streamlit
 
 ```bash
 docker compose up -d iqa-streamlit
 ```
+
+L'application expose trois vues de demonstration : le dashboard Responsable
+Production, l'Interface Inspecteur Qualite et la page Data Lineage.
 
 ## 5. Smoke tests post-deploiement
 
@@ -163,11 +166,15 @@ docker compose exec airflow-webserver airflow dags list-import-errors
 docker compose exec airflow-webserver airflow pools list
 docker compose exec airflow-webserver airflow dags unpause iqa_dvc_reproducibility
 docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle_trigger
+docker compose exec airflow-webserver airflow dags unpause iqa_drift_piece_a_p4
+docker compose exec airflow-webserver airflow dags unpause iqa_drift_correction_lifecycle
 docker compose exec airflow-webserver airflow dags unpause iqa_lifecycle
 docker compose exec airflow-webserver airflow dags trigger iqa_dvc_reproducibility \
   --conf '{"with_network": false,"skip_regeneration": true}'
 docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle_trigger \
   --conf '{"scenario_id":"production_replay_natural","conforming_validated_count":50,"drift_confirmed":false,"roi_fail_rate":0.0}'
+docker compose exec airflow-webserver airflow dags trigger iqa_drift_piece_a_p4
+docker compose exec airflow-webserver airflow dags list-runs -d iqa_drift_correction_lifecycle
 docker compose exec airflow-webserver airflow dags trigger iqa_lifecycle \
   --conf '{"mode":"progressive-train","max_events":260,"lifecycle_interval":50,"max_cycles":3,"epochs":10,"target_stage":"test","promotion_min_delta":0.0}'
 ```
@@ -192,8 +199,10 @@ Le service `reverse-proxy` (Nginx) expose tout derriere le port 80 :
 /airflow/    -> airflow-webserver:8080
 ```
 
-Dashboard Grafana : dossier "IQA" -> `IQA - Vue d'ensemble` (V/O/R, latence,
-erreurs, ROI fail, incidents IA, modele actif, verrou GPU).
+Dashboard Grafana : dossier "IQA" -> `IQA - Vue d'ensemble`,
+`IQA - Lifecycle MLOps`, `IQA - Drift P4` et `IQA - Vue Executive MLOps`.
+L'overview reste operationnel ; les dashboards narratifs portent les scenarios
+de soutenance.
 
 Kong est la cible Phase 3 pour la couche API Gateway / policies : protection de
 routes, extension d'authentification, rate limiting et gouvernance transversale.

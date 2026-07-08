@@ -1,4 +1,4 @@
-"""Helpers for Marc's production lifecycle dashboard."""
+"""Helpers for Streamlit production and lineage dashboards."""
 
 from __future__ import annotations
 
@@ -33,7 +33,6 @@ def aggregate_lots(events: list[dict[str, Any]], *, active_model: str = "") -> l
                 "vert": 0,
                 "orange": 0,
                 "rouge": 0,
-                "roi_fail_count": 0,
                 "model_actif": active_model or "-",
             },
         )
@@ -46,8 +45,6 @@ def aggregate_lots(events: list[dict[str, Any]], *, active_model: str = "") -> l
 
         decision = _decision_bucket(event.get("decision"))
         lot[decision] += 1
-        if str(event.get("roi_quality_status") or "").lower() not in {"", "ok"}:
-            lot["roi_fail_count"] += 1
         event_model = str(event.get("active_model_version") or "")
         if event_model:
             lot["model_actif"] = event_model
@@ -56,18 +53,71 @@ def aggregate_lots(events: list[dict[str, Any]], *, active_model: str = "") -> l
     for lot in lots.values():
         pieces = max(int(lot["pieces"]), 1)
         lot["taux_conformite"] = round(100 * int(lot["conformes_gt"]) / pieces, 1)
-        lot["roi_fail_rate"] = round(100 * int(lot["roi_fail_count"]) / pieces, 2)
         lot["statut_lot"] = _lot_status(lot)
         rows.append(lot)
     return sorted(rows, key=lambda row: row["lot_id"])
+
+
+def classification_quality_rows(events: list[dict[str, Any]], *, group_key: str = "active_model_version") -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for event in events:
+        group = str(event.get(group_key) or "-")
+        row = groups.setdefault(
+            group,
+            {
+                group_key: group,
+                "pieces": 0,
+                "oracle_conforme": 0,
+                "oracle_defective": 0,
+                "true_good": 0,
+                "defect_detected": 0,
+                "false_negative": 0,
+                "false_positive": 0,
+                "false_positive_orange": 0,
+                "false_positive_red": 0,
+            },
+        )
+        oracle_defective = _is_oracle_defective(event.get("oracle_verdict"))
+        predicted_alert = _decision_bucket(event.get("decision")) in {"orange", "rouge"}
+        predicted_red = _decision_bucket(event.get("decision")) == "rouge"
+
+        row["pieces"] += 1
+        if oracle_defective:
+            row["oracle_defective"] += 1
+            if predicted_alert:
+                row["defect_detected"] += 1
+            else:
+                row["false_negative"] += 1
+        else:
+            row["oracle_conforme"] += 1
+            if predicted_alert:
+                row["false_positive"] += 1
+                if predicted_red:
+                    row["false_positive_red"] += 1
+                else:
+                    row["false_positive_orange"] += 1
+            else:
+                row["true_good"] += 1
+
+    rows = []
+    for row in groups.values():
+        defects = max(int(row["oracle_defective"]), 1)
+        alerts = int(row["defect_detected"]) + int(row["false_positive"])
+        row["defect_recall"] = round(int(row["defect_detected"]) / defects, 3)
+        row["alert_precision"] = round(int(row["defect_detected"]) / max(alerts, 1), 3)
+        row["false_negative_rate"] = round(int(row["false_negative"]) / defects, 3)
+        row["false_positive_rate"] = round(int(row["false_positive"]) / max(int(row["oracle_conforme"]), 1), 3)
+        rows.append(row)
+    return sorted(rows, key=lambda item: item[group_key])
 
 
 def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for cycle in cycles:
         metrics = cycle.get("metrics") or {}
-        stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
-        per_class = cycle.get("candidate_per_class_metrics") or cycle.get("per_class_metrics") or {}
+        localization_gate = cycle.get("localization_gate") or {}
+        classification_gate = cycle.get("classification_gate") or {}
+        classification_progress = cycle.get("classification_progress") or {}
         rows.append(
             {
                 "cycle_id": cycle.get("cycle_id"),
@@ -82,21 +132,25 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "candidate_metric_value": cycle.get("candidate_metric_value"),
                 "metric_delta": cycle.get("metric_delta"),
                 "reference_metric_delta": cycle.get("reference_metric_delta"),
-                "progressive_metric_delta": cycle.get("progressive_metric_delta"),
                 "reference_candidate_metric_value": cycle.get("reference_candidate_metric_value"),
-                "progressive_candidate_metric_value": cycle.get("progressive_candidate_metric_value"),
                 "promotion_panel_decision": cycle.get("promotion_panel_decision"),
-                "per_class_regressions": cycle.get("per_class_regressions"),
+                "localization_gate": localization_gate.get("passed"),
+                "classification_gate": classification_gate.get("passed"),
+                "classification_progress_improved": classification_progress.get("improved"),
+                "classification_progress_summary": classification_progress.get("summary"),
                 "active_false_negatives": cycle.get("active_false_negatives"),
                 "candidate_false_negatives": cycle.get("candidate_false_negatives"),
                 "fn_delta": cycle.get("fn_delta"),
+                "active_image_recall": classification_gate.get("active_image_recall"),
+                "candidate_image_recall": classification_gate.get("candidate_image_recall", metrics.get("image_recall")),
+                "image_recall_delta": classification_gate.get("image_recall_delta"),
                 "active_good_red_count": cycle.get("active_good_red_count"),
                 "candidate_good_red_count": cycle.get("candidate_good_red_count"),
                 "good_red_delta": cycle.get("good_red_delta"),
                 "activated_for_next_events": cycle.get("activated_for_next_events"),
                 "activation_scope": cycle.get("activation_scope"),
-                "cache_status": cycle.get("cache_status"),
-                "cache_hit": cycle.get("cache_hit"),
+                "active_cache_status": cycle.get("active_cache_status"),
+                "candidate_cache_status": cycle.get("candidate_cache_status"),
                 "pixel_aupimo_1e-5_1e-3": metrics.get("pixel_aupimo_1e-5_1e-3"),
                 "pixel_ap": metrics.get("pixel_ap"),
                 "image_ap": metrics.get("image_ap"),
@@ -114,11 +168,6 @@ def lifecycle_rows(cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "candidate_good_alert_rate": cycle.get("candidate_good_alert_rate"),
                 "active_good_red_rate": cycle.get("active_good_red_rate"),
                 "candidate_good_red_rate": cycle.get("candidate_good_red_rate"),
-                "aupimo_unstable": stability.get("aupimo_unstable"),
-                "low_fpr_good_outlier_count": stability.get("low_fpr_good_outlier_count"),
-                "max_good_score": stability.get("max_good_score"),
-                "max_defect_score": stability.get("max_defect_score"),
-                "classes": ", ".join(sorted(per_class)) if isinstance(per_class, dict) else "",
                 "gate": cycle.get("gate_decision"),
                 "promotion": cycle.get("promotion_status"),
                 "stage": cycle.get("registry_stage"),
@@ -137,18 +186,13 @@ def production_alerts(lots: list[dict[str, Any]], cycles: list[dict[str, Any]]) 
     alerts: list[str] = []
     for lot in lots:
         if int(lot.get("defauts_gt") or 0) > 0:
-            alerts.append(f"{lot['lot_id']} contient {lot['defauts_gt']} defaut(s) GT.")
+            alerts.append(f"{lot['lot_id']} contient {lot['defauts_gt']} defaut(s) confirmes.")
         if int(lot.get("rouge") or 0) > 0 or int(lot.get("orange") or 0) > 0:
-            alerts.append(f"{lot['lot_id']} contient des decisions orange/rouge.")
-        if float(lot.get("roi_fail_rate") or 0) > 0:
-            alerts.append(f"{lot['lot_id']} a un ROI fail rate de {lot['roi_fail_rate']} %.")
+            alerts.append(f"{lot['lot_id']} contient des decisions a verifier/non conformes.")
     for cycle in cycles:
         promotion_status = str(cycle.get("promotion_status") or "")
         if promotion_status.startswith("rejected") or cycle.get("gate_decision") == "rejected":
             alerts.append(f"{cycle.get('candidate_version')} rejete par le gate modele.")
-        stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
-        if stability.get("aupimo_unstable"):
-            alerts.append(f"{cycle.get('cycle_id')} AUPIMO instable : {', '.join(stability.get('unstable_reasons') or [])}.")
     return alerts
 
 
@@ -161,9 +205,13 @@ def _decision_bucket(value: Any) -> str:
     return "orange"
 
 
+def _is_oracle_defective(value: Any) -> bool:
+    return str(value or "").lower() in {"defective", "defaut", "defectueux", "non_conforme", "non conforme"}
+
+
 def _lot_status(lot: dict[str, Any]) -> str:
     if int(lot.get("rouge") or 0) > 0 or int(lot.get("defauts_gt") or 0) > 0:
-        return "A revoir"
-    if int(lot.get("orange") or 0) > 0 or int(lot.get("roi_fail_count") or 0) > 0:
-        return "Sous surveillance"
+        return "Non conforme"
+    if int(lot.get("orange") or 0) > 0:
+        return "A verifier"
     return "Conforme"

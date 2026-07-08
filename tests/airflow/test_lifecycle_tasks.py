@@ -124,7 +124,7 @@ class TestDatasetTask:
 class TestLifecycleDecisionTask:
     """Evaluate data-event lifecycle decisions before training."""
 
-    def test_lifecycle_decision_task_triggers_natural_v002_at_50_conformes(self) -> None:
+    def test_lifecycle_decision_task_triggers_natural_mvp_at_50_conformes(self) -> None:
         result = task_lifecycle_decision(
             params={
                 "scenario_id": "production_replay_natural",
@@ -134,9 +134,9 @@ class TestLifecycleDecisionTask:
         )
 
         assert result["trigger_lifecycle"] is True
-        assert result["candidate_dataset_version"] == "feature_ae_good_v002"
+        assert result["candidate_dataset_version"] == "feature_ae_good_mvp_v001"
 
-    def test_lifecycle_decision_task_triggers_drift_v003_on_confirmed_drift(self) -> None:
+    def test_lifecycle_decision_task_triggers_drift_mvp_on_confirmed_drift(self) -> None:
         result = task_lifecycle_decision(
             params={
                 "scenario_id": "drift_domain_extension",
@@ -146,7 +146,7 @@ class TestLifecycleDecisionTask:
         )
 
         assert result["trigger_lifecycle"] is True
-        assert result["candidate_dataset_version"] == "feature_ae_good_v003"
+        assert result["candidate_dataset_version"] == "feature_ae_good_mvp_v001"
 
 
 class TestTrainTask:

@@ -93,7 +93,7 @@ image entiere. Le contrat reference reconstruit une score map pleine resolution
 par tuiles 384 avec contexte 768, fusionne `layer2/layer3`, applique le ROI
 soft-map puis calcule le score `topk_mean` sur la surface fonctionnelle. Tout
 chemin letterbox restant est un chemin legacy de test et ne doit pas alimenter
-Replay, API, Sophie, Marc ou le lifecycle progressif.
+Replay, API, les interfaces Streamlit ou le lifecycle progressif.
 
 ## 4. Separation ROI et GT defaut
 
@@ -283,7 +283,7 @@ Commande serveur :
 uv run --extra cu128 iqa-calibrate-feature-ae-reference \
   --model-version rd_feature_ae_gated_v001_bootstrap \
   --image-root /opt/iqa/iqa-mlops/data/raw/hss-iad \
-  --validation-manifest data/validation/validation_set_v001.csv \
+  --validation-manifest data/validation/validation_set_replay_representative_v001.csv \
   --gt-masks-manifest data/validation/validation_gt_masks_v001.csv \
   --roi-mode soft_map \
   --layer-weights layer2=0.65 layer3=0.35 \
@@ -293,7 +293,7 @@ uv run --extra cu128 iqa-calibrate-feature-ae-reference \
 ```
 
 La commande restaure le Feature-AE depuis MinIO, score les images avec le
-contrat reference, materialise `predictions.npz`, `calibration_matrix.csv` et
+contrat reference, materialise `calibration_matrix.csv` et
 `calibration_summary.json`, puis ecrit les seuils dans le manifest modele :
 
 ```text
@@ -419,6 +419,5 @@ Hors perimetre MVP :
 - API `/train` exposee au metier ;
 - retour humain reel obligatoire.
 
-Le retour humain Sophie reste une vitrine. Le workflow operationnel MVP est automatise par l'oracle GT apres prediction.
-
-
+Le retour inspecteur qualite reste une vitrine de revue. Le workflow
+operationnel MVP est automatise par l'oracle GT apres prediction.

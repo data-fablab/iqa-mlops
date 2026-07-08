@@ -193,7 +193,7 @@ def task_eval(**context: Any) -> dict[str, Any]:
         manifest_path=Path(params["manifest_path"]),
         image_root=Path(params["image_root"]),
         output_dir=output_dir,
-        validation_set_id=params.get("validation_set_id", "validation_set_v001"),
+        validation_set_id=params.get("validation_set_id", "validation_set_replay_representative_v001"),
     )
 
     result = evaluate_feature_ae_checkpoint(config)

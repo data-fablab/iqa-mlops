@@ -56,11 +56,10 @@ def test_casting_image_inventory_is_complete_and_linked_to_piece_events() -> Non
 
 def test_validation_calibration_bootstrap_and_replay_are_disjoint() -> None:
     bootstrap_ids = _ids(_read_csv(METADATA / "feature_ae_bootstrap_events.csv"))
-    validation_ids = _ids(_read_csv(VALIDATION / "validation_set_v001.csv"))
-    calibration_ids = _ids(_read_csv(METADATA / "calibration_set_v001.csv"))
-    natural_replay_ids = _ids(_read_csv(METADATA / "casting_flux_replay_plan_natural.csv"), "source_event_id")
-    drift_replay_ids = _ids(_read_csv(METADATA / "casting_flux_replay_plan_drift.csv"), "source_event_id")
-    replay_ids = natural_replay_ids | drift_replay_ids
+    validation_ids = _ids(_read_csv(VALIDATION / "validation_set_replay_representative_v001.csv"))
+    calibration_ids = _ids(_read_csv(VALIDATION / "calibration_good_reference_v001.csv"))
+    natural_replay_ids = _ids(_read_csv(METADATA / "casting_flux_replay_plan_natural_v003.csv"), "source_event_id")
+    replay_ids = natural_replay_ids
 
     assert bootstrap_ids.isdisjoint(validation_ids)
     assert bootstrap_ids.isdisjoint(calibration_ids)
@@ -71,26 +70,102 @@ def test_validation_calibration_bootstrap_and_replay_are_disjoint() -> None:
 
 
 def test_validation_and_calibration_roles_are_explicit() -> None:
-    validation = _read_csv(VALIDATION / "validation_set_v001.csv")
-    calibration = _read_csv(METADATA / "calibration_set_v001.csv")
+    validation = _read_csv(VALIDATION / "validation_set_replay_representative_v001.csv")
+    gate = _read_csv(VALIDATION / "validation_set_replay_gate_v001.csv")
+    gate_v2 = _read_csv(VALIDATION / "validation_set_replay_gate_v002.csv")
+    gate_v3 = _read_csv(VALIDATION / "validation_set_replay_gate_v003.csv")
+    calibration = _read_csv(VALIDATION / "calibration_good_reference_v001.csv")
 
-    assert {row["validation_set_id"] for row in validation} == {"validation_set_v001"}
-    assert len(validation) == 20
+    assert {row["validation_set_id"] for row in validation} == {"validation_set_replay_representative_v001"}
+    assert len(validation) == 74
     assert _counts(validation, "source_class") == {
-        "Casting_class1": 5,
-        "Casting_class2": 8,
-        "Casting_class3": 7,
+        "Casting_class1": 13,
+        "Casting_class2": 39,
+        "Casting_class3": 22,
     }
     assert any(row["is_defective"].lower() == "true" for row in validation)
-    assert {row["calibration_set_id"] for row in calibration} == {"calibration_set_v001"}
+    assert {row["validation_set_id"] for row in gate} == {"validation_set_replay_gate_v001"}
+    assert {row["validation_role"] for row in gate} == {"mvp_gate_aupimo_reference"}
+    assert len(gate) == 49
+    assert sum(row["is_defective"].lower() == "true" for row in gate) == 34
+    assert sum(row["is_defective"].lower() == "false" for row in gate) == 15
+    assert {row["n_images"] for row in gate} == {"1"}
+    assert _counts(gate, "source_class") == {
+        "Casting_class1": 13,
+        "Casting_class2": 25,
+        "Casting_class3": 11,
+    }
+    assert {row["validation_set_id"] for row in gate_v2} == {"validation_set_replay_gate_v002"}
+    assert {row["validation_role"] for row in gate_v2} == {"mvp_gate_piece_level_reference"}
+    assert len(gate_v2) == 134
+    assert sum(row["is_defective"].lower() == "true" for row in gate_v2) == 14
+    assert sum(row["is_defective"].lower() == "false" for row in gate_v2) == 120
+    assert any(int(row["n_images"]) > 1 for row in gate_v2)
+    assert _counts(gate_v2, "source_class") == {
+        "Casting_class1": 23,
+        "Casting_class2": 73,
+        "Casting_class3": 38,
+    }
+    assert {row["validation_set_id"] for row in gate_v3} == {"validation_set_replay_gate_v003"}
+    assert {row["validation_role"] for row in gate_v3} == {"mvp_gate_replay_holdout_reference"}
+    assert len(gate_v3) == 130
+    assert sum(row["is_defective"].lower() == "true" for row in gate_v3) == 10
+    assert sum(row["is_defective"].lower() == "false" for row in gate_v3) == 120
+    assert any(int(row["n_images"]) > 1 for row in gate_v3)
+    assert _counts(gate_v3, "source_class") == {
+        "Casting_class1": 23,
+        "Casting_class2": 71,
+        "Casting_class3": 36,
+    }
+    assert {row["validation_set_id"] for row in calibration} == {"calibration_good_reference_v001"}
     assert {row["label"] for row in calibration} == {"good"}
     assert {row["is_defective"].lower() for row in calibration} == {"false"}
 
 
+def test_validation_gate_v2_good_rows_do_not_overlap_replay_or_calibration() -> None:
+    gate_v2 = _read_csv(VALIDATION / "validation_set_replay_gate_v002.csv")
+    natural_replay_ids = _ids(_read_csv(METADATA / "casting_flux_replay_plan_natural_v003.csv"), "source_event_id")
+    calibration_ids = _ids(_read_csv(VALIDATION / "calibration_good_reference_v001.csv"))
+    bootstrap_ids = _ids(_read_csv(METADATA / "feature_ae_bootstrap_events.csv"))
+    good_ids = {row["event_id"] for row in gate_v2 if row["is_defective"].lower() == "false"}
+
+    assert good_ids.isdisjoint(natural_replay_ids)
+    assert good_ids.isdisjoint(calibration_ids)
+    assert good_ids.isdisjoint(bootstrap_ids)
+
+
+def test_scenario_b_replay_train_and_gate_holdout_are_disjoint_and_complete() -> None:
+    natural_replay = _read_csv(METADATA / "casting_flux_replay_plan_natural_v003.csv")
+    train_replay = _read_csv(METADATA / "casting_flux_replay_plan_natural_train_v004.csv")
+    gate_v3 = _read_csv(VALIDATION / "validation_set_replay_gate_v003.csv")
+
+    natural_ids = _ids(natural_replay, "source_event_id")
+    train_ids = _ids(train_replay, "source_event_id")
+    gate_ids = _ids(gate_v3)
+
+    assert len(natural_replay) == 562
+    assert len(train_replay) == 432
+    assert len(gate_v3) == 130
+    assert train_ids.isdisjoint(gate_ids)
+    assert train_ids | gate_ids == natural_ids
+    assert sum(row["is_defective"].lower() == "true" for row in train_replay) == 16
+    assert sum(row["is_defective"].lower() == "true" for row in gate_v3) == 10
+
+
 def test_replay_plans_carry_phase1_runtime_metadata() -> None:
     for path, scenario_id, dataset_version in [
-        (METADATA / "casting_flux_replay_plan_natural.csv", "production_replay_natural", "production_replay_natural_v001"),
+        (METADATA / "casting_flux_replay_plan_natural_v003.csv", "production_replay_natural", "production_replay_natural_v002"),
+        (
+            METADATA / "casting_flux_replay_plan_natural_train_v004.csv",
+            "production_replay_natural_train_v004",
+            "production_replay_natural_train_v004",
+        ),
         (METADATA / "casting_flux_replay_plan_drift.csv", "drift_domain_extension", "drift_domain_extension_v001"),
+        (
+            METADATA / "casting_flux_replay_plan_piece_b_minimal_v001.csv",
+            "production_replay_natural_piece_b_minimal",
+            "production_replay_natural_piece_b_minimal",
+        ),
     ]:
         rows = _read_csv(path)
         assert rows
@@ -101,6 +176,28 @@ def test_replay_plans_carry_phase1_runtime_metadata() -> None:
         assert {row["is_simulated"].lower() for row in rows} == {"true"}
         assert {row["roi_model_version"] for row in rows} == {"roi_segmenter_v001_fixed"}
         assert {row["feature_ae_version"] for row in rows} == {"rd_feature_ae_gated_v001_bootstrap"}
+
+
+def test_piece_b_minimal_scenario_is_tiny_complete_and_disjoint() -> None:
+    view_pairs = {"Casting_class1:1_2|Casting_class1:1_3|Casting_class1:2_3"}
+    bootstrap = _read_csv(METADATA / "feature_ae_bootstrap_piece_b_minimal_v001.csv")
+    validation = _read_csv(VALIDATION / "validation_set_piece_b_minimal_v001.csv")
+    replay = _read_csv(METADATA / "casting_flux_replay_plan_piece_b_minimal_v001.csv")
+
+    bootstrap_ids = _ids(bootstrap)
+    validation_ids = _ids(validation)
+    replay_source_ids = _ids(replay, "source_event_id")
+
+    assert len(bootstrap) == 2
+    assert len(validation) == 4
+    assert len(replay) == 8
+    assert bootstrap_ids.isdisjoint(validation_ids)
+    assert bootstrap_ids.isdisjoint(replay_source_ids)
+    assert validation_ids.isdisjoint(replay_source_ids)
+    assert {row["view_pairs"] for row in bootstrap + validation + replay} == view_pairs
+    assert {row["n_images"] for row in bootstrap + validation + replay} == {"3"}
+    assert sum(row["is_defective"].lower() == "true" for row in validation) == 2
+    assert sum(row["is_defective"].lower() == "true" for row in replay) == 2
 
 
 def test_dvc_remote_is_configured_for_phase1_data() -> None:

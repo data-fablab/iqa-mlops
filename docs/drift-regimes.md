@@ -1,233 +1,96 @@
-# Régimes de drift — Naturel vs Drift
+# Regimes de drift IQA
 
-## Concept
+Ce document resume les deux regimes utiles a la demo IQA actuelle. Il remplace
+les anciens regimes generiques par les scenarios reellement provisionnes dans le
+repo.
 
-Un **régime** est un scénario de réplay de données qui teste le modèle sous conditions différentes.
+## Regime 1 - Lifecycle Piece B
 
-Deux régimes sont activés pour le MVP :
+Scenario technique :
 
-1. **Naturel (`production_replay_natural`)** — Tester le modèle sur des données nominales
-2. **Drift (`drift_domain_extension`)** — Tester le modèle sur des données dégradées ou d'extension de domaine
-
----
-
-## Régime Naturel
-
-### Définition
-
-Rejoue le **cycle nominal** : les données du casting sont représentatives des conditions de production attendues.
-
-**Cas d'usage :**
-- Validation quotidienne de la stabilité du modèle
-- Rebaseline après mise à jour intentionnelle
-- Confiance opérationnelle
-
-### Plan de replay
-
-Fichier : `data/metadata/casting_flux_replay_plan_natural.csv`
-
-```
-simulated_event_id,scenario_id,scenario_type,scenario_phase,is_representative,sequence_number,...
-sim_event_ac08a67addc5,production_replay_natural,production,natural_replay,true,1,...
-sim_event_d699dedfade5,production_replay_natural,production,natural_replay,true,2,...
+```text
+production_replay_natural_piece_b_full
 ```
 
-**Caractéristiques :**
-- `scenario_id`: `production_replay_natural`
-- `scenario_phase`: `natural_replay`
-- `is_representative`: `true` (toutes les observations sont représentatives)
-- Défauts : distribués selon proportions attendues en production
+Objectif : montrer la mise en production controlee sur Piece B. Le modele part
+d'un bootstrap faible, apprend sur plusieurs cycles courts, puis les gates
+promeuvent uniquement les checkpoints utiles.
 
-### Registered Model
+Preuves attendues :
 
-**Nom :** `feature_ae__production_replay_natural`
+- cycles lifecycle progressifs ;
+- taille de train set croissante ;
+- epochs visibles par cycle ;
+- promotions localisation/classification separees ;
+- registry final dans MLflow.
 
-**Versions :**
-- v1, v2, v3, ... (une version par entraînement)
+Dashboard principal :
 
-**Stages :**
-- `candidate` — En évaluation après entraînement
-- `staging` — Candidat passé les gates, prêt pour test
-- `prod` — Actif en production
-- `archived` — Remplacé par une version plus récente
-
-### Seuils de promotion (naturel)
-
-Voir `configs/promotion_gates.yaml` section `feature_ae` :
-
-```yaml
-feature_ae:
-  recall_defect_min: 1.0  # Aucun faux négatif
-  false_negative_total_max: 0
-  image_ap_max_regression: 0.02  # Régression max vs prod
-  roi_fail_rate_max: 0.10
-  latency_p95_ms_max: 1000
-  defect_coverage:
-    min_coverage: 0.95  # Au moins 95 % des classes représentées
+```text
+IQA - Lifecycle MLOps
 ```
 
----
+## Regime 2 - Drift P4 et correction ciblee
 
-## Régime Drift
+Scenario technique :
 
-### Définition
-
-Teste le modèle sous **conditions dégradées** ou d'**extension de domaine** :
-- Classes visuelles nouvelles (éclairage, angle, contraste)
-- Défauts morphologiquement différents
-- Distribution décalée vs. production
-
-**Cas d'usage :**
-- Détection de drift en production
-- Robustesse aux extensions de domaine
-- Stress-testing du modèle
-- Baseline pour alerte MLOps
-
-### Plan de replay
-
-Fichier : `data/metadata/casting_flux_replay_plan_drift.csv`
-
-```
-simulated_event_id,scenario_id,scenario_type,scenario_phase,is_representative,sequence_number,...
-sim_event_0519ccea47d9,drift_domain_extension,mlops_stress_test,baseline_domain_class1,false,1,...
-sim_event_a115784cb7bd,drift_domain_extension,mlops_stress_test,baseline_domain_class1,false,2,...
+```text
+production_replay_natural_piece_b_to_piece_a_p4_drift
 ```
 
-**Caractéristiques :**
-- `scenario_id`: `drift_domain_extension`
-- `scenario_type`: `mlops_stress_test`
-- `scenario_phase`: `baseline_domain_class1`, `domain_extension_class2`, etc.
-- `is_representative`: `false` (données synthétiques ou de distribution décalée)
-- Défauts : augmentés, morphologiquement altérés ou hors-distribution
+Objectif : montrer le regime etabli. Piece B sert de reference, P4 arrive
+progressivement, la nouveaute ROI depasse le seuil, puis Airflow declenche une
+correction ciblee.
 
-### Registered Model
+Le drift n'est pas decide par le libelle du replay. La preuve principale est la
+rupture ROI :
 
-**Nom :** `feature_ae__drift_domain_extension`
+- `iqa_drift_roi_mask_novelty_rate`
+- `iqa_drift_roi_mask_nn_distance`
+- `iqa_drift_context_events_total`
+- `iqa_drift_status`
+- `iqa_drift_trigger_lifecycle`
 
-**Versions :**
-- v1, v2, v3, ... (une version par entraînement avec données drift)
+Le DAG `iqa_drift_piece_a_p4` produit un `drift_context.json`. Le DAG dedie
+`iqa_drift_correction_lifecycle` consomme ce contexte, entraine quelques epochs
+sur un train set cible et publie les metriques lifecycle habituelles :
 
-**Stages :**
-- `candidate`, `staging`, `prod`, `archived` (mêmes règles que naturel)
+- `iqa_lifecycle_train_set_size`
+- `iqa_lifecycle_epoch_current`
+- `iqa_lifecycle_phase_active`
+- `iqa_lifecycle_gate_value`
+- `iqa_lifecycle_promotion_total`
+- `iqa_lifecycle_promotion_selected_epoch`
+- `iqa_lifecycle_final_model_info`
 
-### Seuils de promotion (drift)
+Dashboard principal :
 
-**Décision :** Les seuils drift sont **plus relâchés** que ceux du régime naturel.
-
-```yaml
-feature_ae_drift:
-  recall_defect_min: 0.98  # Tolérance 2 % faux négatifs (vs 0 % naturel)
-  false_negative_total_max: 5  # Quelques faux négatifs acceptés
-  image_ap_max_regression: 0.10  # Régression plus acceptable
-  roi_fail_rate_max: 0.15  # Légèrement plus permissif
-  latency_p95_ms_max: 1200  # Latence un peu plus haute acceptable
-  defect_coverage:
-    min_coverage: 0.90  # 90 % des classes (vs 95 % naturel)
+```text
+IQA - Drift P4
 ```
 
-**Justification :** Le drift est par définition hors-domaine ; un modèle ne peut pas être aussi performant.
+## Pourquoi ne pas utiliser `domain_ratio` comme preuve principale ?
 
----
+`domain_ratio` decrit la composition du replay. Il est utile en trace, mais il ne
+prouve pas que la piece observee sort du referentiel metier. La distance entre
+masques ROI Piece B et P4 est plus credible pour la demo : elle mesure une
+rupture geometrique observable avant la correction.
 
-## Baseline drift
+## Commandes Airflow
 
-### Concept
-
-Une **baseline drift** est la première version du modèle entraîné sur données naturelles, **évaluée sur le plan drift**.
-
-**Objectif :**
-- Établir une référence de dégradation attendue sous drift
-- Détecter si une version nouvelle est significativement MIEUX ou PIRE que la baseline
-
-**Logique :**
-```
-v1_natural (entraîné sur naturel)
-    ↓
-évaluée sur validation_set_v001 → metrics_naturel ✓
-    ↓
-entraîné sur drift
-v1_drift ← (même architecture, données différentes)
-    ↓
-évaluée sur validation_set_v001 → metrics_drift_baseline
-```
-
-### Utilisation
-
-Lors de la promotion d'une nouvelle version drift :
-
-```python
-candidate_metrics_drift = evaluate(v_new_drift, validation_set_v001)
-baseline_metrics_drift = get_mlflow_metrics("feature_ae__drift_domain_extension", stage="prod")
-
-# Gate : régression acceptable ?
-regression = candidate_metrics_drift["ap"] - baseline_metrics_drift["ap"]
-assert regression < 0.05  # Max 5% régression AP
-```
-
----
-
-## Exécution des régimes
-
-### DAG Airflow avec paramètres
-
-Le DAG `iqa_lifecycle` accepte les paramètres :
+Depuis `deploy/` :
 
 ```bash
-# Régime naturel (défaut)
-airflow dags trigger iqa_lifecycle
-
-# Régime drift
-airflow dags trigger iqa_lifecycle \
-  --conf '{
-    "regime": "drift",
-    "scenario_id": "drift_domain_extension"
-  }'
+docker compose --env-file ../.env exec -T airflow-webserver airflow dags unpause iqa_drift_piece_a_p4
+docker compose --env-file ../.env exec -T airflow-webserver airflow dags unpause iqa_drift_correction_lifecycle
+docker compose --env-file ../.env exec -T airflow-webserver airflow dags trigger iqa_drift_piece_a_p4
+docker compose --env-file ../.env exec -T airflow-webserver airflow dags list-runs -d iqa_drift_correction_lifecycle
 ```
 
-### Context Airflow
+## Garde-fous
 
-Les tâches reçoivent les paramètres via le contexte :
-
-```python
-def task_dataset(**context):
-    regime = context.get("regime", "natural")
-    scenario_id = context.get("scenario_id", "production_replay_natural")
-
-    # Charger le bon plan
-    if regime == "natural":
-        plan_file = "casting_flux_replay_plan_natural.csv"
-    else:
-        plan_file = "casting_flux_replay_plan_drift.csv"
-
-    return build_candidate_dataset(plan_file=plan_file)
-```
-
----
-
-## Monitoring et alertes
-
-### Seuils d'alerte (drift)
-
-| Métrique | Naturel | Drift | Alerte si |
-|----------|---------|-------|-----------|
-| **Recall** | ≥ 1.0 | ≥ 0.98 | < seuil |
-| **AP** | ≥ 0.85 | ≥ 0.80 | < seuil |
-| **Orange rate** | ≤ 0.05 | ≤ 0.12 | > seuil |
-| **Latency p95** | ≤ 1000 ms | ≤ 1200 ms | > seuil |
-| **Defect coverage** | ≥ 0.95 | ≥ 0.90 | < seuil |
-
----
-
-## Évolution future
-
-**Phase 2 :** Ajouter des régimes supplémentaires :
-- `seasonal_variation` — données saisonnières
-- `tool_wear_simulation` — dégradation des outils
-- `camera_calibration_drift` — décalage de caméra
-- `environmental_extremes` — conditions extrêmes
-
-Chacun aurait son propre :
-- Plan de replay CSV
-- Registered model MLflow
-- Seuils de gates ajustés
-- Monitoring spécifique
+- La CI ne declenche jamais d'entrainement.
+- MLflow Registry reste la source de verite des promotions.
+- MinIO stocke les checkpoints et artefacts lourds.
+- Les dashboards ne doivent pas exposer de chemins locaux, masques ou images
+  industrielles.

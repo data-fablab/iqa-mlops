@@ -1,4 +1,4 @@
-"""Review Sophie - poste de controle qualite display-only."""
+"""Interface Inspecteur Qualite - revue visuelle display-only."""
 
 from __future__ import annotations
 
@@ -10,15 +10,15 @@ from typing import Any
 import requests
 import streamlit as st
 from iqa_client import API_URL, get, post
+from repo_paths import default_repo_root
 
-st.set_page_config(page_title="IQA - Poste Sophie", layout="wide")
-st.title("Poste Sophie - controle qualite")
+st.set_page_config(page_title="IQA - Inspecteur Qualite", layout="wide")
+st.title("Interface Inspecteur Qualite")
 st.caption(f"iqa-api: {API_URL}")
-st.info("Feedback Sophie display-only : l'oracle GT reste souverain pour fermer le feedback et entrainer.")
+st.info("Feedback inspecteur qualite display-only : la validation controle qualite reste souveraine pour fermer le feedback et entrainer.")
 
-DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
-REPO_ROOT = Path(os.environ.get("IQA_REPO_ROOT", DEFAULT_REPO_ROOT)).resolve()
-DEFAULT_RUN_DIR = os.environ.get("IQA_SOPHIE_REPLAY_RUN_DIR", "")
+REPO_ROOT = default_repo_root(__file__)
+DEFAULT_RUN_DIR = os.environ.get("IQA_INSPECTOR_REPLAY_RUN_DIR") or os.environ.get("IQA_SOPHIE_REPLAY_RUN_DIR", "")
 
 
 def _load_events(run_dir: str) -> list[dict[str, Any]]:
@@ -59,7 +59,7 @@ def _decision_label(value: str | None) -> str:
 
 
 def _feedback_jsonl() -> str:
-    rows = st.session_state.get("sophie_feedback", [])
+    rows = st.session_state.get("inspector_feedback", [])
     return "\n".join(json.dumps(row, sort_keys=True) for row in rows) + ("\n" if rows else "")
 
 
@@ -71,46 +71,46 @@ def _next_event_index(events: list[dict[str, Any]], start: int, *, oracle_verdic
     return None
 
 
-if "sophie_index" not in st.session_state:
-    st.session_state["sophie_index"] = 0
-if "sophie_feedback" not in st.session_state:
-    st.session_state["sophie_feedback"] = []
+if "inspector_index" not in st.session_state:
+    st.session_state["inspector_index"] = 0
+if "inspector_feedback" not in st.session_state:
+    st.session_state["inspector_feedback"] = []
 
 tab_replay, tab_api = st.tabs(["File replay", "Historique API"])
 
 with tab_replay:
     run_dir = st.text_input(
-        "Dossier replay lifecycle",
+        "Dossier de run a inspecter",
         value=DEFAULT_RUN_DIR,
         placeholder=".cache/iqa/replay_lifecycle/production_replay_natural/<run_id>",
     )
     events = _load_events(run_dir)
     if not events:
-        st.info("Renseigne un dossier de run replay lifecycle contenant events.jsonl.")
+        st.info("Renseigne un dossier de run contenant events.jsonl.")
     else:
-        st.session_state["sophie_index"] = min(st.session_state["sophie_index"], len(events) - 1)
-        current = events[st.session_state["sophie_index"]]
+        st.session_state["inspector_index"] = min(st.session_state["inspector_index"], len(events) - 1)
+        current = events[st.session_state["inspector_index"]]
         conforming_count = sum(1 for event in events if event.get("oracle_verdict") == "conforme")
         defective_count = sum(1 for event in events if event.get("oracle_verdict") == "defective")
 
         nav_a, nav_b, nav_c, nav_d, nav_e, nav_f = st.columns([1, 1, 1.2, 1.2, 2, 2])
-        if nav_a.button("Precedente", disabled=st.session_state["sophie_index"] <= 0):
-            st.session_state["sophie_index"] -= 1
+        if nav_a.button("Precedente", disabled=st.session_state["inspector_index"] <= 0):
+            st.session_state["inspector_index"] -= 1
             st.rerun()
-        if nav_b.button("Suivante", disabled=st.session_state["sophie_index"] >= len(events) - 1):
-            st.session_state["sophie_index"] += 1
+        if nav_b.button("Suivante", disabled=st.session_state["inspector_index"] >= len(events) - 1):
+            st.session_state["inspector_index"] += 1
             st.rerun()
         if nav_c.button("Defaut suivant", disabled=defective_count == 0):
-            next_index = _next_event_index(events, st.session_state["sophie_index"], oracle_verdict="defective")
+            next_index = _next_event_index(events, st.session_state["inspector_index"], oracle_verdict="defective")
             if next_index is not None:
-                st.session_state["sophie_index"] = next_index
+                st.session_state["inspector_index"] = next_index
                 st.rerun()
         if nav_d.button("Conforme suivant", disabled=conforming_count == 0):
-            next_index = _next_event_index(events, st.session_state["sophie_index"], oracle_verdict="conforme")
+            next_index = _next_event_index(events, st.session_state["inspector_index"], oracle_verdict="conforme")
             if next_index is not None:
-                st.session_state["sophie_index"] = next_index
+                st.session_state["inspector_index"] = next_index
                 st.rerun()
-        nav_e.metric("Piece", f"{st.session_state['sophie_index'] + 1}/{len(events)}", f"{defective_count} defaut(s)")
+        nav_e.metric("Piece", f"{st.session_state['inspector_index'] + 1}/{len(events)}", f"{defective_count} defaut(s)")
         nav_f.metric("Decision", _decision_label(current.get("decision")))
 
         raw_col, heatmap_col, info_col = st.columns([1.2, 1.2, 0.9])
@@ -118,7 +118,7 @@ with tab_replay:
             st.subheader("Image brute")
             image_path = _resolve_path(current.get("image_path"))
             if image_path.exists():
-                st.image(str(image_path), width="stretch")
+                st.image(str(image_path), use_container_width=True)
             else:
                 st.code(current.get("image_path") or current.get("image_uri") or "image indisponible")
 
@@ -126,7 +126,7 @@ with tab_replay:
             st.subheader("Overlay heatmap")
             heatmap_path = _resolve_path(current.get("heatmap_path"))
             if heatmap_path.exists():
-                st.image(str(heatmap_path), width="stretch")
+                st.image(str(heatmap_path), use_container_width=True)
             elif current.get("heatmap_uri"):
                 st.code(current["heatmap_uri"])
             else:
@@ -142,17 +142,17 @@ with tab_replay:
             st.write(f"**seuil orange**: `{current.get('threshold_orange')}`")
             st.write(f"**seuil rouge**: `{current.get('threshold_red')}`")
             st.write(f"**ROI**: `{current.get('roi_quality_status')}` ratio `{current.get('roi_ratio')}`")
-            st.write(f"**oracle GT**: `{current.get('oracle_verdict')}`")
+            st.write(f"**controle qualite**: `{current.get('oracle_verdict')}`")
             if current.get("roi_mask_uri"):
                 st.caption(f"ROI mask: {current['roi_mask_uri']}")
             if current.get("heatmap_uri"):
                 st.caption(f"Heatmap: {current['heatmap_uri']}")
 
         st.divider()
-        st.subheader("Feedback Sophie")
+        st.subheader("Revue inspecteur qualite")
         fb_col, comment_col = st.columns([1, 2])
         feedback_status = fb_col.selectbox(
-            "Avis Sophie",
+            "Avis inspecteur",
             options=[
                 ("conforme_valide", "Conforme"),
                 ("defaut_confirme", "Defaut suspecte"),
@@ -162,7 +162,7 @@ with tab_replay:
         )[0]
         comment = comment_col.text_input("Commentaire", value="")
         if st.button("Marquer revue"):
-            st.session_state["sophie_feedback"].append(
+            st.session_state["inspector_feedback"].append(
                 {
                     "feedback_source": "human_sophie",
                     "feedback_status": feedback_status,
@@ -175,14 +175,14 @@ with tab_replay:
                     "reason": "human_sophie_display_only",
                 }
             )
-            st.success("Feedback Sophie enregistre en session (display-only).")
+            st.success("Feedback inspecteur qualite enregistre en session (display-only).")
 
         st.download_button(
-            "Exporter feedback Sophie JSONL",
+            "Exporter feedback inspecteur JSONL",
             data=_feedback_jsonl(),
-            file_name="sophie_feedback.jsonl",
+            file_name="inspecteur_qualite_feedback.jsonl",
             mime="application/jsonl",
-            disabled=not st.session_state.get("sophie_feedback"),
+            disabled=not st.session_state.get("inspector_feedback"),
         )
 
 with tab_api:
@@ -204,21 +204,21 @@ with tab_api:
                     "lot": row.get("lot_id") or row.get("scenario_id"),
                     "piece": row.get("piece_event_id"),
                     "decision": row.get("decision"),
-                    "oracle": row.get("oracle_verdict") or "-",
+                    "controle_qualite": row.get("oracle_verdict") or "-",
                     "heatmap_uri": row.get("heatmap_uri") or "-",
                     "feedback_ferme": row.get("feedback_closed"),
-                    "sophie": row.get("display_feedback_status") or "-",
+                    "inspecteur": row.get("display_feedback_status") or "-",
                 }
                 for row in rows
             ],
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
-        st.subheader("Envoyer feedback Sophie display-only via API")
+        st.subheader("Envoyer feedback inspecteur display-only via API")
         prediction_ids = [row.get("prediction_id") for row in rows if row.get("prediction_id")]
         selected = st.selectbox("prediction_id", options=prediction_ids)
         selected_row = next(row for row in rows if row.get("prediction_id") == selected)
-        api_status = st.selectbox("Avis Sophie API", options=["conforme_valide", "defaut_confirme", "roi_warning"])
+        api_status = st.selectbox("Avis inspecteur API", options=["conforme_valide", "defaut_confirme", "roi_warning"])
         api_comment = st.text_input("Commentaire API", value="")
         if st.button("Envoyer a /feedback"):
             try:
@@ -235,4 +235,4 @@ with tab_api:
                 )
                 st.json(result)
             except requests.RequestException as exc:
-                st.error(f"Feedback Sophie indisponible : {exc}")
+                st.error(f"Feedback inspecteur indisponible : {exc}")

@@ -9,13 +9,15 @@ IQA est un MVP MLOps pour le controle visuel de pieces `Casting`.
 | Comprendre le produit et le scope MVP | [prd-iqa-mvp.md](prd-iqa-mvp.md) |
 | Comprendre l'architecture technique | [architecture-iqa.md](architecture-iqa.md) |
 | Installer et exploiter le serveur | [configuration-serveur-iqa.md](configuration-serveur-iqa.md) |
-| Executer les procedures Phase 1 | [runbook-phase1-iqa.md](runbook-phase1-iqa.md) |
+| Executer les procedures Streamlit/MVP | [runbook-phase1-iqa.md](runbook-phase1-iqa.md) |
 | Comprendre le segmenteur ROI | [modele-segmentation-roi-iqa.md](modele-segmentation-roi-iqa.md) |
 | Comprendre le Feature-AE | [modele-feature-ae-iqa.md](modele-feature-ae-iqa.md) |
 | Reproduire les runs ML | [reproductibilite-ml-iqa.md](reproductibilite-ml-iqa.md) |
 | Suivre les decisions | [decisions-iqa.md](decisions-iqa.md) et [adr/](adr/) |
 | Suivre la roadmap | [roadmap-iqa.md](roadmap-iqa.md) |
 | Suivre les taches | [repartition-taches-phases-1-2.md](repartition-taches-phases-1-2.md) |
+| Comprendre les scenarios demo Lifecycle et Drift P4 | [drift-regimes.md](drift-regimes.md) et [scenario-drift-piece-a-p4.md](scenario-drift-piece-a-p4.md) |
+| Presenter la soutenance | [phase3_storytelling_soutenance.md](phase3_storytelling_soutenance.md) |
 | Acceder au serveur | [acces-ssh-equipe-iqa.md](acces-ssh-equipe-iqa.md) |
 | Securite et gouvernance | [security/](security/) et [governance/](governance/) |
 

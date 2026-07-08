@@ -133,7 +133,7 @@ docker compose --env-file ../.env -f docker-compose.yml -f docker-compose.gpu.ym
   uv run --extra cu128 python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-## 8. Streamlit (Accueil + Dashboard Marc + Review Sophie)
+## 8. Streamlit (Accueil + Production + Inspecteur + Lineage)
 
 ```bash
 docker compose up -d iqa-streamlit
@@ -144,21 +144,18 @@ Ouvre `http://localhost:8501`. L'app est multipage (`deploy/streamlit/`) :
 - **Accueil** : modele actif (`/model/version`), lots (`/replay-scenarios`),
   statut piece (`/piece-events/{id}/predict`) et feedback `oracle_gt`
   (`/feedback`). Sert a generer l'historique lu par les deux vues.
-- **Dashboard Marc** : pilotage production. L'onglet **Run lifecycle** lit un
-  dossier `.cache/iqa/replay_lifecycle/.../<run_id>` via
-  `IQA_MARC_REPLAY_RUN_DIR` pour afficher conformite des lots, defauts GT,
-  decisions Vert/Orange/Rouge, lifecycle Feature-AE, `pixel_aupimo_1e-5_1e-3`,
-  `pixel_ap`, MLflow, MinIO et DVC. L'onglet **Historique API** conserve la
-  supervision par lot via `/lots/summary`.
-- **Review Sophie** : revue en **lecture seule** via `/predictions`, mettant en
-  evidence les divergences modele vs oracle GT (`faux_negatif`, `faux_positif`,
-  `orange_a_revoir`). Aucune action d'ecriture : l'oracle GT reste souverain,
-  `human_sophie` est futur.
+- **Dashboard Responsable Production** : vue atelier centree lots, pieces
+  controlees, lots liberables/a isoler/en attente et actions prioritaires.
+- **Interface Inspecteur Qualite** : revue visuelle display-only des images,
+  heatmaps et decisions ; le feedback inspecteur reste une aide de demo.
+- **Data Lineage** : vue technique separee pour run id, cycles, gates,
+  promotions, MLflow, DVC, registry, train sets et artefacts.
 
 C'est une vitrine MVP : l'historique est en memoire dans l'API (pas encore de
 persistance PostgreSQL en Phase 1).
 
-Pour ouvrir Marc sur un run progressif deja genere :
+Pour ouvrir le Dashboard Responsable Production sur un run progressif deja
+genere :
 
 ```bash
 export IQA_MARC_REPLAY_RUN_DIR=".cache/iqa/replay_lifecycle/production_replay_natural/<run_id>"

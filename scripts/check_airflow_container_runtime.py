@@ -22,6 +22,10 @@ CONTAINER_DAGS = {
     "iqa_monitoring.py": "iqa-run-monitoring",
     "iqa_lifecycle.py": "iqa-run-replay-lifecycle-cycle",
     "iqa_lifecycle_trigger.py": "iqa-collect-lifecycle-signal",
+    "iqa_drift_piece_a_p4.py": "iqa-run-drift-observation-replay",
+}
+PYTHON_OPERATOR_GLUE_ALLOWED = {
+    "iqa_drift_piece_a_p4.py",
 }
 EXPECTED_DAG_IDS = {
     "iqa_ingestion",
@@ -29,6 +33,7 @@ EXPECTED_DAG_IDS = {
     "iqa_monitoring",
     "iqa_lifecycle",
     "iqa_lifecycle_trigger",
+    "iqa_drift_piece_a_p4",
     "iqa_dvc_reproducibility",
 }
 FORBIDDEN_RUNTIME_IMPORTS = (
@@ -78,7 +83,7 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
             raise AssertionError(f"{filename} does not call expected command: {command}")
         if "except ImportError" in source or "build_container_dag is not None" in source:
             raise AssertionError(f"{filename} hides missing iqa.dags imports instead of surfacing a broken DAG")
-        if "PythonOperator(" in source:
+        if "PythonOperator(" in source and filename not in PYTHON_OPERATOR_GLUE_ALLOWED:
             raise AssertionError(f"{filename} still instantiates PythonOperator")
         for forbidden in FORBIDDEN_RUNTIME_IMPORTS:
             if forbidden in source:
@@ -150,7 +155,6 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "--promotion-min-delta",
         "--anchor-good-manifest",
         "--reference-eval-manifest",
-        "--progressive-min-defects-for-decision",
         "--max-good-red-regression",
         "--candidate-init-policy",
         "--publish-minio",
@@ -177,8 +181,10 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
         "airflow dags list-import-errors",
         "airflow dags unpause iqa_dvc_reproducibility",
         "airflow dags unpause iqa_lifecycle_trigger",
+        "airflow dags unpause iqa_drift_piece_a_p4",
         "airflow dags trigger iqa_dvc_reproducibility",
         "airflow dags trigger iqa_lifecycle_trigger",
+        "airflow dags trigger iqa_drift_piece_a_p4",
         "iqa-run-replay-lifecycle-cycle",
         "pipeline applicatif Feature-AE",
         "Docker Compose orchestre les services longs",
@@ -207,8 +213,10 @@ def build_airflow_container_runtime_evidence() -> dict[str, Any]:
             "airflow pools list",
             "airflow dags unpause iqa_dvc_reproducibility",
             "airflow dags unpause iqa_lifecycle_trigger",
+            "airflow dags unpause iqa_drift_piece_a_p4",
             "airflow dags trigger iqa_dvc_reproducibility",
             "airflow dags trigger iqa_lifecycle_trigger",
+            "airflow dags trigger iqa_drift_piece_a_p4",
         ],
         "socket_mount": "/var/run/docker.sock",
         "status": "validated",

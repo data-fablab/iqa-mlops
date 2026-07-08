@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 
-from iqa.dags import build_container_dag, data_image, make_container_task
+from iqa.dags import build_container_dag, data_image, make_container_task, ml_image
 
 
 NATURAL_DECISION_TASK_ID = "evaluate_decision"
@@ -67,11 +67,14 @@ def _lifecycle_conf(
         "lifecycle_decision_json": (
             "{{ ti.xcom_pull(task_ids='" + decision_task_id + "') }}"
         ),
+        "image_root": "{{ params.image_root }}",
         "mode": "{{ params.mode }}",
         "max_events": "{{ params.max_events }}",
         "lifecycle_interval": "{{ params.lifecycle_interval }}",
         "max_cycles": "{{ params.max_cycles }}",
         "epochs": "{{ params.epochs }}",
+        "max_steps": "{{ params.max_steps }}",
+        "gate_eval_profile": "{{ params.gate_eval_profile }}",
         "target_stage": "{{ params.target_stage }}",
         "promotion_min_delta": "{{ params.promotion_min_delta }}",
         "anchor_good_manifest": (
@@ -81,6 +84,9 @@ def _lifecycle_conf(
             "{{ params.anchor_good_max_per_class }}"
         ),
         "reference_eval_manifest": "{{ params.reference_eval_manifest }}",
+        "classification_selection_manifest": (
+            "{{ params.classification_selection_manifest }}"
+        ),
         "reference_gt_masks_manifest": (
             "{{ params.reference_gt_masks_manifest }}"
         ),
@@ -91,6 +97,11 @@ def _lifecycle_conf(
             "{{ params.max_good_red_regression }}"
         ),
         "candidate_init_policy": "{{ params.candidate_init_policy }}",
+        "require_mlflow_registry": "{{ params.require_mlflow_registry }}",
+        "mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}",
+        "mlflow_s3_endpoint_url": "{{ params.mlflow_s3_endpoint_url }}",
+        "s3_endpoint_url": "{{ params.s3_endpoint_url }}",
+        "ml_image": "{{ params.ml_image }}",
     }
 
 
@@ -150,33 +161,42 @@ dag = build_container_dag(
     max_active_runs=1,
     catchup=False,
     params={
-        "scenario_id": "production_replay_natural",
+        "scenario_id": "production_replay_natural_train_v004",
         "drift_scenario_id": "drift_domain_extension",
-        "natural_candidate_dataset_version": "feature_ae_good_v002",
-        "drift_candidate_dataset_version": "feature_ae_good_v003",
+        "natural_candidate_dataset_version": "feature_ae_good_mvp_v001",
+        "drift_candidate_dataset_version": "feature_ae_good_mvp_v001",
         "natural_anchor_good_manifest": (
-            "data/model_datasets/feature_ae_good_v002.csv"
+            "data/model_datasets/feature_ae_good_mvp_v001.csv"
         ),
         "drift_anchor_good_manifest": (
-            "data/model_datasets/feature_ae_good_v003.csv"
+            "data/model_datasets/feature_ae_good_mvp_v001.csv"
         ),
         "roi_window_size": 100,
         "min_natural_conforming": 50,
+        "image_root": "/opt/iqa/iqa-mlops/data/raw/hss-iad",
         "mode": "progressive-train",
         "max_events": 260,
         "lifecycle_interval": 50,
         "max_cycles": 3,
         "epochs": 10,
+        "max_steps": None,
+        "gate_eval_profile": "fast",
         "target_stage": "test",
         "promotion_min_delta": 0.0,
         "anchor_good_max_per_class": 256,
-        "reference_eval_manifest": "data/validation/validation_set_v001.csv",
+        "reference_eval_manifest": "data/validation/validation_set_replay_gate_v002.csv",
+        "classification_selection_manifest": "",
         "reference_gt_masks_manifest": (
             "data/validation/validation_gt_masks_v001.csv"
         ),
         "progressive_min_defects_for_decision": 5,
         "max_good_red_regression": 1,
         "candidate_init_policy": "stable_base",
+        "require_mlflow_registry": False,
+        "mlflow_tracking_uri": "http://mlflow:5000",
+        "mlflow_s3_endpoint_url": "http://minio:9000",
+        "s3_endpoint_url": "http://minio:9000",
+        "ml_image": ml_image(),
         "image": data_image(),
     },
 )

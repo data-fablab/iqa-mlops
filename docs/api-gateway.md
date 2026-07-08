@@ -37,7 +37,7 @@ FastAPI protects the business logic and AI governance.
 | Public route | Upstream service | Purpose |
 | --- | --- | --- |
 | /api/ | iqa-api:8000 | IQA API contracts |
-| /iqa/ | iqa-streamlit:8501 | Sophie review interface |
+| /iqa/ | iqa-streamlit:8501 | Streamlit role-based IQA interfaces |
 | /mlflow/ | mlflow:5000 | model registry and runs |
 | /minio/ | minio:9001 | artifact console |
 | /grafana/ | grafana:3000 | monitoring dashboards |

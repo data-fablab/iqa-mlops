@@ -7,7 +7,7 @@ import math
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Literal
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -37,7 +37,13 @@ from iqa.training.feature_ae_contracts import (
 )
 
 
-REPLAY_SCENARIOS = {"production_replay_natural", "drift_domain_extension"}
+REPLAY_SCENARIOS = {
+    "production_replay_natural",
+    "production_replay_natural_train_v004",
+    "production_replay_natural_piece_b_minimal",
+    "production_replay_natural_piece_b_full",
+    "drift_domain_extension",
+}
 
 
 @dataclass(frozen=True)
@@ -87,11 +93,17 @@ class FeatureAETrainingConfig:
     run_name: str = ""
     initial_checkpoint_path: Path | None = None
     initial_checkpoint_policy: str = "fresh"
+    candidate_initial_model_version: str = ""
+    candidate_initial_checkpoint: str = ""
+    candidate_initial_checkpoint_sha256: str = ""
+    lifecycle_run_id: str = ""
+    cycle_id: str = ""
+    lifecycle_event_callback: Callable[[dict[str, Any]], None] | None = None
     metric_eval_manifest_path: Path | None = None
     metric_eval_device: str | None = None
     metric_eval_roi_predictions_dirs: tuple[Path, ...] = ()
     gt_masks_manifest: Path | None = None
-    validation_set_id: str = "validation_set_v001"
+    validation_set_id: str = "validation_set_replay_representative_v001"
     metric_eval_every_epochs: int = 0
     metric_eval_start_epoch: int = 1
     metric_eval_batch_size: int = 8
@@ -106,6 +118,7 @@ class FeatureAETrainingConfig:
     metric_eval_score_smoothing: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_smoothing
     metric_eval_score_image: str = CANONICAL_FEATURE_AE_PREPROCESSING.score_image
     metric_eval_topk_fraction: float = CANONICAL_FEATURE_AE_PREPROCESSING.topk_fraction
+    metric_eval_profile: Literal["fast", "full"] = "full"
     metric_eval_save_score_maps: bool = False
     metric_eval_save_previews: bool = False
     metric_eval_max_previews: int = 31
@@ -237,15 +250,16 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
             checkpoint = periodic
 
         if _should_run_metric_eval(config, epoch):
+            metric_eval_manifest_path = config.metric_eval_manifest_path or config.manifest_path
             eval_result = evaluate_feature_ae_checkpoint(
                 FeatureAEEvaluationConfig(
                     checkpoint_path=checkpoint,
-                    manifest_path=config.metric_eval_manifest_path or config.manifest_path,
+                    manifest_path=metric_eval_manifest_path,
                     image_root=config.image_root,
                     output_dir=run_dir / "metric_eval" / f"epoch_{epoch:03d}",
                     roi_predictions_dirs=config.metric_eval_roi_predictions_dirs or config.roi_predictions_dirs,
                     gt_masks_manifest=config.gt_masks_manifest,
-                    validation_set_id=config.validation_set_id,
+                    validation_set_id=metric_eval_manifest_path.stem,
                     image_size=config.image_size,
                     context_size=config.context_size,
                     tile_stride=config.metric_eval_tile_stride or config.tile_stride,
@@ -265,6 +279,7 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     score_smoothing=config.metric_eval_score_smoothing,
                     score_image=config.metric_eval_score_image,
                     topk_fraction=config.metric_eval_topk_fraction,
+                    metric_profile=config.metric_eval_profile,
                     save_score_maps=config.metric_eval_save_score_maps,
                     save_previews=config.metric_eval_save_previews,
                     max_previews=config.metric_eval_max_previews,
@@ -275,12 +290,14 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
                     "epoch": epoch,
                     "checkpoint": str(checkpoint),
                     "metrics": eval_result.get("metrics") or {},
-                    "per_class_metrics": eval_result.get("per_class_metrics") or {},
-                    "aupimo_stability": eval_result.get("aupimo_stability") or {},
-                    "predictions_path": eval_result.get("predictions_path"),
                 }
             )
             _append_jsonl(run_dir / "epoch_metrics.jsonl", epoch_metric_history[-1])
+            if config.lifecycle_event_callback is not None:
+                try:
+                    config.lifecycle_event_callback(epoch_metric_history[-1])
+                except Exception:
+                    pass
             update_metric_best_checkpoints(
                 run_dir=run_dir,
                 candidate_checkpoint=checkpoint,
@@ -323,10 +340,6 @@ def train_feature_ae(config: FeatureAETrainingConfig) -> dict[str, Any]:
         )
 
     _write_history(run_dir / "loss_history.csv", history)
-    (run_dir / "metric_eval_history.json").write_text(
-        json.dumps(epoch_metric_history, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
     (run_dir / "params.json").write_text(json.dumps(_metadata(config, layers), indent=2, sort_keys=True), encoding="utf-8")
     return {
         "model_type": FEATURE_AE_MODEL_TYPE,
@@ -492,6 +505,7 @@ def _load_initial_checkpoint(
 
 def _metadata(config: FeatureAETrainingConfig, layers: tuple[str, ...]) -> dict[str, Any]:
     data = asdict(config)
+    data.pop("lifecycle_event_callback", None)
     for key, value in list(data.items()):
         if isinstance(value, Path):
             data[key] = str(value)

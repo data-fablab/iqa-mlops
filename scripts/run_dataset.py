@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path("data/model_datasets/feature_ae_good_v002.csv"),
+        default=Path("data/model_datasets/feature_ae_good_mvp_v001.csv"),
     )
     parser.add_argument("--scenario-id", default="production_replay_natural")
     parser.add_argument("--candidate-version", default="")

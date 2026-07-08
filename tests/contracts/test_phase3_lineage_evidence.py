@@ -78,7 +78,7 @@ def test_lineage_doc_covers_phase3_evidence_surfaces() -> None:
         "PostgreSQL metadata",
         "iqa-lineage-summary",
         "iqa-check-dvc-reproducibility --with-network",
-        "Marc",
+        "production manager",
         "Laurent",
     ]:
         assert expected in content
@@ -104,13 +104,13 @@ def test_lineage_summary_builds_complete_evidence(tmp_path: Path) -> None:
     assert summary["scenario_id"] == "production_replay_natural"
     assert summary["dataset_versions"] == [
         "production_replay_natural_v001",
-        "feature_ae_good_v001_bootstrap",
+        "feature_ae_piece_b_minimal_bootstrap_v001",
     ]
     assert summary["lot_ids"] == ["lot-001"]
     assert summary["model_artifact_uri"] == "s3://iqa-models/rd_feature_ae_gated_v001_bootstrap/checkpoint.pt"
     assert summary["model_sha256"]
     assert summary["preprocessing_contract_version"] == "feature_ae_reference_v001"
-    assert summary["decision_thresholds"]["calibration_set_id"] == "calibration_set_v001"
+    assert summary["decision_thresholds"]["calibration_set_id"] == "feature_ae_bootstrap_piece_b_minimal_v001"
     assert summary["threshold_sources"] == ["manifest:calibration_good_quantiles"]
     assert set(summary["dvc"]["stages"]) >= {"inventory", "piece_events", "replay", "validation", "model_dataset"}
     assert summary["mlflow_tracking"]["source_of_truth"] == "mlflow_registry"
@@ -191,4 +191,3 @@ def test_mlflow_logger_declares_required_lineage_fields() -> None:
         "mlflow.set_tags(tags)",
     ]:
         assert expected in source
-

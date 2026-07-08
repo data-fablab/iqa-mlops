@@ -63,7 +63,7 @@ iqa-run-ingestion \
 
 iqa-run-replay \
   --scenario-id production_replay_natural \
-  --plan data/metadata/casting_flux_replay_plan_natural.csv
+  --plan data/metadata/casting_flux_replay_plan_natural_v003.csv
 
 iqa-run-monitoring \
   --scenario-id production_replay_natural \

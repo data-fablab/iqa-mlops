@@ -52,6 +52,8 @@ def test_iqa_lifecycle_dag_source_declares_application_lifecycle_task() -> None:
         "--mode",
         "progressive-train",
         "--max-cycles",
+        "--max-steps",
+        "--gate-eval-profile",
         "--lifecycle-interval",
         "--promotion-min-delta",
         "--publish-minio",
@@ -116,6 +118,10 @@ def test_monitoring_dag_containerises_via_factory() -> None:
     assert '"{{ params.conforming_validated_count }}"' in monitoring
     assert '"--drift-confirmed", "{{ params.drift_confirmed }}"' in monitoring
     assert '"{{ params.roi_fail_rate }}"' in monitoring
+    assert '"--domain-ratio", "{{ params.domain_ratio }}"' in monitoring
+    assert '"--unexpected-red-rate", "{{ params.unexpected_red_rate }}"' in monitoring
+    assert '"--critical-window-count", "{{ params.critical_window_count }}"' in monitoring
+    assert '"--api-url", "{{ params.api_url }}"' in monitoring
     assert '"{{ params.thresholds_config }}"' in monitoring
     # No BashOperator shell form left.
     assert "BashOperator(" not in monitoring
@@ -130,7 +136,8 @@ def test_lifecycle_dag_runs_reference_application_pipeline_via_factory() -> None
     assert "make_container_task(" in source
     assert "iqa-run-replay-lifecycle-cycle" in source
     assert "{{ params.scenario_id }}" in source
-    assert "{{ params.repo_root }}/data/raw/hss-iad" in source
+    assert "--image-root {{ params.image_root }}" in source
+    assert '"/opt/iqa/iqa-mlops/data/raw/hss-iad"' in source
     assert "{{ params.mode }}" in source
     assert "pipeline" in source.lower()
 
@@ -157,10 +164,20 @@ def test_lifecycle_dag_declares_comparative_promotion_params() -> None:
     source = _read_dag_source("iqa_lifecycle.py")
 
     assert '"promotion_min_delta": 0.0' in source
+    assert '"gate_eval_profile": "fast"' in source
+    assert '"max_steps": None' in source
     assert '"require_mlflow_registry": False' in source
     assert '"mlflow_tracking_uri": "http://mlflow:5000"' in source
     assert '"MLFLOW_TRACKING_URI": "{{ params.mlflow_tracking_uri }}"' in source
     assert "--promotion-min-delta" in source
+    assert "--gate-eval-profile" in source
+    assert "--reference-eval-manifest" in source
+    assert "--classification-selection-manifest" in source
+    assert "--reference-gt-masks-manifest" in source
+    assert "--max-steps" in source
+    assert "--external-drift-confirmed" in source
+    assert "--initial-classification-registered-model" in source
+    assert "--initial-localization-registered-model" in source
     assert "--require-mlflow-registry" in source
 
 
@@ -252,11 +269,133 @@ def test_lifecycle_trigger_dag_collects_durable_signals_and_triggers_lifecycle()
     assert "PythonOperator(" not in trigger
     assert trigger.count("TriggerDagRunOperator(") == 2
     assert "lifecycle_decision_json" in trigger
-    assert "feature_ae_good_v002" in trigger
-    assert "feature_ae_good_v003" in trigger
+    assert "feature_ae_good_mvp_v001" in trigger
+    assert '"image_root": "{{ params.image_root }}"' in trigger
+    assert '"gate_eval_profile": "{{ params.gate_eval_profile }}"' in trigger
+    assert '"max_steps": "{{ params.max_steps }}"' in trigger
+    assert '"require_mlflow_registry": "{{ params.require_mlflow_registry }}"' in trigger
+    assert '"mlflow_tracking_uri": "{{ params.mlflow_tracking_uri }}"' in trigger
+    assert '"ml_image": "{{ params.ml_image }}"' in trigger
+    assert '"scenario_id": "production_replay_natural_train_v004"' in trigger
+    assert '"reference_eval_manifest": "data/validation/validation_set_replay_gate_v002.csv"' in trigger
     assert "iqa-run-lifecycle-decision" not in trigger
     assert "BashOperator(" not in trigger
     assert "bash_command" not in trigger
+
+
+@pytest.mark.unit
+def test_piece_a_p4_drift_dag_observes_before_triggering_one_correction() -> None:
+    """The natural P4 drift DAG must observe inference metrics before training."""
+    source = _read_dag_source("iqa_drift_piece_a_p4.py")
+
+    assert 'dag_id="iqa_drift_piece_a_p4"' in source
+    assert "iqa-run-drift-observation-replay" in source
+    assert "--stable-reference-events {{ params.stable_reference_events }}" in source
+    assert "--drift-observation-windows {{ params.drift_observation_windows }}" in source
+    assert "ShortCircuitOperator(" in source
+    assert "PythonOperator(" in source
+    assert 'task_id="trigger_drift_correction_lifecycle"' in source
+    assert 'trigger_dag_id=CORRECTION_DAG_ID' in source
+    assert "iqa_drift_correction_lifecycle" in source
+    assert "op_observe_replay >> op_gate_on_confirmed_drift >> op_build_correction_conf >> op_trigger_correction" in source
+    assert '"drift_context_path": "{{ ti.xcom_pull(task_ids=' in source
+    assert '"anchor_good_manifest": "{{ ti.xcom_pull(task_ids=' in source
+    assert '"reference_eval_manifest": "{{ ti.xcom_pull(task_ids=' in source
+    assert '"epochs": 4' in source
+    assert '"max_events": 40' in source
+    assert '"window_size": 10' in source
+    assert '"stable_reference_events": 10' in source
+    assert '"drift_observation_windows": 3' in source
+    assert '"lifecycle_interval": "{{ ti.xcom_pull(task_ids=' in source
+    assert '"lifecycle_interval": 24' in source
+    assert '"candidate_init_policy": "{{ params.candidate_init_policy }}"' in source
+    assert '"candidate_init_policy": "stable_base"' in source
+    assert '"skip_report_only_reference_eval": "{{ params.skip_report_only_reference_eval }}"' in source
+    assert '"skip_report_only_reference_eval": True' in source
+    assert '"external_drift_confirmed": True' in source
+    assert '"reference_eval_manifest": "data/validation/validation_set_piece_b_to_piece_a_p4_drift_v001.csv"' in source
+    assert '"classification_selection_manifest": "data/validation/classification_selection_piece_b_to_piece_a_p4_drift_v001.csv"' in source
+    assert '"reference_gt_masks_manifest": "data/validation/validation_gt_masks_piece_b_to_piece_a_p4_drift_v001.csv"' in source
+    assert '"epochs": 4' in source
+    assert '"initial_classification_registered_model": ""' in source
+    assert '"initial_localization_registered_model": ""' in source
+    assert '"require_mlflow_registry": False' in source
+    assert "BashOperator(" not in source
+    assert "bash_command" not in source
+
+
+@pytest.mark.unit
+def test_drift_correction_lifecycle_dag_requires_context_and_does_not_trigger_general_lifecycle() -> None:
+    source = _read_dag_source("iqa_drift_correction_lifecycle.py")
+
+    assert 'dag_id="iqa_drift_correction_lifecycle"' in source
+    assert 'task_id="run_drift_correction_lifecycle"' in source
+    assert "iqa-run-replay-lifecycle-cycle" in source
+    assert "--drift-context-path {{ params.drift_context_path }}" in source
+    assert '"drift_context_path": ""' in source
+    assert '"epochs": 4' in source
+    assert '"lifecycle_interval": 10' in source
+    assert '"candidate_init_policy": "stable_base"' in source
+    assert "--epochs {{ params.epochs }}" in source
+    assert "--candidate-init-policy {{ params.candidate_init_policy }}" in source
+    assert "--skip-report-only-reference-eval" in source
+    assert '"skip_report_only_reference_eval": True' in source
+    assert '"initial_classification_registered_model": ""' in source
+    assert '"initial_localization_registered_model": ""' in source
+    assert '"require_mlflow_registry": False' in source
+    assert "--external-drift-confirmed" in source
+    assert "--max-cycles 1" in source
+    assert "params.promotion_min_delta not in [none, 'None', 'none', 'null', '']" in source
+    assert "params.localization_promotion_min_delta not in [none, 'None', 'none', 'null', '']" in source
+    assert "params.classification_min_image_recall_delta not in [none, 'None', 'none', 'null', '']" in source
+    assert "params.classification_min_image_ap_delta not in [none, 'None', 'none', 'null', '']" in source
+    assert "TriggerDagRunOperator(" not in source
+    assert 'trigger_dag_id="iqa_lifecycle"' not in source
+
+
+@pytest.mark.unit
+def test_piece_a_p4_drift_gate_parses_noisy_container_xcom() -> None:
+    """DockerOperator XCom may contain dependency download logs before JSON."""
+    try:
+        import iqa_drift_piece_a_p4
+    except ImportError as e:
+        pytest.skip(f"Airflow not installed: {e}")
+
+    noisy_payload = (
+        'Downloading: "https://download.pytorch.org/models/resnet18-f37072fd.pth"\n'
+        '{"status":"validated","trigger_lifecycle":true,"drift_confirmed":true}\n'
+    )
+
+    assert iqa_drift_piece_a_p4._parse_observation_payload(noisy_payload)["trigger_lifecycle"] is True
+
+    class FakeTaskInstance:
+        @staticmethod
+        def xcom_pull(task_ids: str) -> str:
+            assert task_ids == iqa_drift_piece_a_p4.OBSERVE_TASK_ID
+            return noisy_payload
+
+    assert iqa_drift_piece_a_p4._should_trigger_correction(ti=FakeTaskInstance()) is True
+
+
+@pytest.mark.docker_contract
+def test_piece_a_p4_drift_dag_has_observe_gate_trigger_chain() -> None:
+    """P4 drift DAG wires observation -> gate -> one correction trigger."""
+    try:
+        import iqa_drift_piece_a_p4
+    except ImportError as e:
+        pytest.skip(f"Airflow not installed: {e}")
+
+    dag = iqa_drift_piece_a_p4.dag
+    if dag is None:
+        pytest.skip("DAG is None (Airflow provider not available)")
+
+    expected_chain = ["observe_replay", "gate_on_confirmed_drift", "trigger_lifecycle_correction"]
+    task_ids = {task.task_id for task in dag.tasks}
+    assert set(expected_chain) <= task_ids
+
+    for upstream, downstream in zip(expected_chain, expected_chain[1:]):
+        task = dag.get_task(upstream)
+        assert downstream in {t.task_id for t in task.downstream_list}
 
 
 @pytest.mark.docker_contract

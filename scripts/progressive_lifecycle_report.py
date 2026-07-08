@@ -46,20 +46,27 @@ def render_report(run_dir: Path, *, show_epochs: bool = False, show_cache: bool 
         "active_aupimo",
         "candidate_aupimo",
         "delta",
-        "pixel_ap",
+        "loc_gate",
         "active_fn",
         "candidate_fn",
+        "active_recall",
+        "candidate_recall",
         "active_good_red",
         "candidate_good_red",
         "fn_delta",
         "good_red_delta",
-        "unstable",
+        "class_gate",
+        "class_progress",
         "gate",
         "reason",
-        "registry",
+        "loc_registry",
+        "class_registry",
+        "activated",
+        "loc_active",
+        "class_active",
     )
     if show_cache:
-        header = header + ("cache", "hit", "schema", "aupimo_s", "pixel_s")
+        header = header + ("active_cache", "candidate_cache", "aupimo_s", "pixel_s")
     if show_mlflow:
         header = header + ("run_id", "dataset", "model")
     rows = [header, *[_row(cycle, show_cache=show_cache, show_mlflow=show_mlflow) for cycle in cycles]]
@@ -80,20 +87,18 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
     candidate_value = cycle.get("candidate_metric_value", cycle.get("selected_metric_value"))
     delta = cycle.get("metric_delta")
     candidate_metrics = cycle.get("candidate_metrics_on_eval_set") or cycle.get("metrics") or {}
-    active_metrics = cycle.get("active_metrics_on_eval_set") or cycle.get("progressive_active_metrics_on_eval_set") or {}
-    pixel_ap = candidate_metrics.get("pixel_ap")
+    active_metrics = cycle.get("active_metrics_on_eval_set") or {}
     active_false_negatives = cycle.get("active_false_negatives", active_metrics.get("false_negatives"))
     candidate_false_negatives = cycle.get("candidate_false_negatives", candidate_metrics.get("false_negatives"))
     active_good_red_count = cycle.get("active_good_red_count", active_metrics.get("good_red_count"))
     candidate_good_red_count = cycle.get("candidate_good_red_count", candidate_metrics.get("good_red_count"))
-    stability = cycle.get("candidate_aupimo_stability") or cycle.get("aupimo_stability") or {}
     fn_delta = cycle.get("fn_delta")
     good_red_delta = cycle.get("good_red_delta")
-    registry = cycle.get("registry_alias") or cycle.get("registry_stage") or ""
-    if cycle.get("registered_model_version"):
-        registry = f"{registry}:v{cycle['registered_model_version']}"
-    elif cycle.get("registry_status") in {"failed", "not_registered", "skipped"}:
-        registry = str(cycle.get("registry_status") or "")
+    localization_gate = cycle.get("localization_gate") or {}
+    classification_gate = cycle.get("classification_gate") or {}
+    classification_progress = cycle.get("classification_progress") or {}
+    active_recall = classification_gate.get("active_image_recall", active_metrics.get("image_recall"))
+    candidate_recall = classification_gate.get("candidate_image_recall", candidate_metrics.get("image_recall"))
     row = (
         str(cycle.get("cycle_id") or ""),
         str(cycle.get("active_model_before") or ""),
@@ -103,24 +108,30 @@ def _row(cycle: dict[str, Any], *, show_cache: bool = False, show_mlflow: bool =
         "" if active_value is None else f"{float(active_value):.6g}",
         "" if candidate_value is None else f"{float(candidate_value):.6g}",
         "" if delta is None else f"{float(delta):+.6g}",
-        "" if pixel_ap is None else f"{float(pixel_ap):.6g}",
+        _gate_status(localization_gate.get("passed")),
         "" if active_false_negatives is None else f"{float(active_false_negatives):.0f}",
         "" if candidate_false_negatives is None else f"{float(candidate_false_negatives):.0f}",
+        "" if active_recall is None else f"{float(active_recall):.3f}",
+        "" if candidate_recall is None else f"{float(candidate_recall):.3f}",
         "" if active_good_red_count is None else f"{float(active_good_red_count):.0f}",
         "" if candidate_good_red_count is None else f"{float(candidate_good_red_count):.0f}",
         "" if fn_delta is None else f"{float(fn_delta):+.0f}",
         "" if good_red_delta is None else f"{float(good_red_delta):+.0f}",
-        "yes" if stability.get("aupimo_unstable") else "no",
+        _gate_status(classification_gate.get("passed")),
+        str(classification_progress.get("summary") or ""),
         str(cycle.get("gate_decision") or ""),
         str(cycle.get("gate_reason") or ""),
-        registry,
+        _role_registry(cycle, "localization"),
+        _role_registry(cycle, "classification"),
+        _bool_status(cycle.get("activated_for_next_events")),
+        _bool_status(cycle.get("localization_activated_for_next_events")),
+        _bool_status(cycle.get("classification_activated_for_next_events")),
     )
     if show_cache:
         timings = cycle.get("candidate_metric_timings") or {}
         row = row + (
-            str(cycle.get("cache_status") or ""),
-            str(cycle.get("cache_hit") or ""),
-            str(cycle.get("prediction_schema_version") or ""),
+            str(cycle.get("active_cache_status") or cycle.get("cache_status") or ""),
+            str(cycle.get("candidate_cache_status") or ""),
             _duration(timings.get("aupimo_compute_seconds")),
             _duration(timings.get("pixel_rank_metrics_seconds")),
         )
@@ -138,6 +149,33 @@ def _bool_status(value: Any) -> str:
         return "yes"
     if value is False:
         return "no"
+    return ""
+
+
+def _role_registry(cycle: dict[str, Any], role: str) -> str:
+    status = str(cycle.get(f"{role}_registry_status") or "")
+    version = cycle.get(f"{role}_registered_model_version")
+    alias = str(cycle.get(f"{role}_registry_alias") or cycle.get(f"{role}_registry_stage") or "")
+    if version:
+        return f"{alias}:v{version}" if alias else f"v{version}"
+    if status in {"failed", "not_registered", "skipped"}:
+        return status
+    if role == "classification":
+        legacy_version = cycle.get("registered_model_version")
+        legacy_alias = str(cycle.get("registry_alias") or cycle.get("registry_stage") or "")
+        if legacy_version:
+            return f"{legacy_alias}:v{legacy_version}" if legacy_alias else f"v{legacy_version}"
+        legacy_status = str(cycle.get("registry_status") or "")
+        if legacy_status in {"failed", "not_registered", "skipped"}:
+            return legacy_status
+    return ""
+
+
+def _gate_status(value: Any) -> str:
+    if value is True:
+        return "pass"
+    if value is False:
+        return "fail"
     return ""
 
 
@@ -159,7 +197,8 @@ def _epoch_lines(cycles: list[dict[str, Any]]) -> list[str]:
                 f"{cycle.get('cycle_id')} epoch={item.get('epoch')} "
                 f"aupimo={metrics.get('pixel_aupimo_1e-5_1e-3')} "
                 f"pixel_ap={metrics.get('pixel_ap')} "
-                f"predictions={item.get('predictions_path')}"
+                f"image_ap={metrics.get('image_ap')} "
+                f"image_auroc={metrics.get('image_auroc')}"
             )
     return lines if found else []
 

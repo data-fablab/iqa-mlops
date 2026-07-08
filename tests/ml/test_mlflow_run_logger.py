@@ -20,6 +20,20 @@ from iqa.training.mlflow_logging import (
 class TestMLflowRunLoggerBasic:
     """Tracer bullet: MLflowRunLogger creates and manages runs."""
 
+    def test_create_run_uses_iqa_tracking_uri_fallback(self, tmp_path: Path, monkeypatch) -> None:
+        """The lifecycle container may expose only the IQA-prefixed URI."""
+        fallback_uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        monkeypatch.setenv("IQA_MLFLOW_TRACKING_URI", fallback_uri)
+
+        logger = MLflowRunLogger(
+            run_name="test_run",
+            scenario_id="test_scenario",
+        )
+
+        assert logger.tracking_uri == fallback_uri
+        assert logger.end_run()
+
     def test_create_run_and_end(self, mlflow_tracking_uri: str) -> None:
         """Test that logger can create and end a run."""
         logger = MLflowRunLogger(
@@ -136,6 +150,11 @@ class TestMLflowRunLoggerBasic:
             scenario_id="test_scenario",
             dataset_version="dataset_v1",
             candidate_version="candidate_v1",
+            initial_checkpoint_policy="active",
+            candidate_initial_model_version="bootstrap_v1",
+            candidate_initial_checkpoint_sha256="a" * 64,
+            lifecycle_run_id="replay_lifecycle_001",
+            cycle_id="cycle_001",
         )
         checkpoint_path = tmp_path / "checkpoint.pt"
         torch.save({"state_dict": {}}, checkpoint_path)
@@ -156,34 +175,17 @@ class TestMLflowRunLoggerBasic:
         run_id = logger.end_run()
 
         client = mlflow.tracking.MlflowClient(tracking_uri=mlflow_tracking_uri)
-        models = client.search_logged_models(
-            experiment_ids=["0"],
-            max_results=100,
-        )
-        matches = [
-            model
-            for model in models
-            if str(model.source_run_id) == run_id and model.name == "model"
-        ]
-
-        assert len(matches) == 1
-
-        model_id = matches[0].model_id
-        root = client.list_logged_model_artifacts(model_id)
-        root_paths = {item.path for item in root}
-
-        assert "MLmodel" in root_paths
-        assert "artifacts" in root_paths
-
-        artifact_paths = {
-            item.path
-            for item in client.list_logged_model_artifacts(
-                model_id,
-                "artifacts",
-            )
-        }
-        assert "artifacts/checkpoint.pt" in artifact_paths
-        assert "artifacts/score_contract.json" in artifact_paths
+        model_files = {item.path for item in client.list_artifacts(run_id, "model")}
+        assert "model/MLmodel" in model_files
+        artifact_files = {item.path for item in client.list_artifacts(run_id, "model/artifacts")}
+        assert "model/artifacts/score_contract.json" in artifact_files
+        mlmodel_path = Path(client.download_artifacts(run_id, "model/MLmodel"))
+        mlmodel_text = mlmodel_path.read_text(encoding="utf-8")
+        assert "model_role: legacy_compatibility" in mlmodel_text
+        assert "model_purpose: backward_compatibility_only" in mlmodel_text
+        assert "registration_policy: not_registered_in_dual_promotion" in mlmodel_text
+        assert "candidate_init_policy: active" in mlmodel_text
+        assert "lifecycle_run_id: replay_lifecycle_001" in mlmodel_text
 
     def test_log_promoted_bundle_is_complete(
         self,
@@ -231,7 +233,7 @@ class TestMLflowRunLoggerBasic:
         )
 
         assert result["model_id"].startswith("m-")
-        assert result["model_uri"] == (f"models:/{result['model_id']}")
+        assert result["model_uri"] == f"models:/{result['model_id']}"
         assert result["checkpoint_sha256"] == digest
 
         client = mlflow.tracking.MlflowClient(tracking_uri=mlflow_tracking_uri)
@@ -252,6 +254,45 @@ class TestMLflowRunLoggerBasic:
             "artifacts/model_manifest.json",
             "artifacts/score_contract.json",
         }.issubset(artifact_paths)
+
+    def test_log_feature_ae_model_writes_role_metadata(self, tmp_path: Path, mlflow_tracking_uri: str) -> None:
+        """Role-specific logged models carry explicit role metadata."""
+        import mlflow
+
+        config = FeatureAETrainingConfig(
+            manifest_path=tmp_path / "manifest.csv",
+            image_root=tmp_path / "images",
+            output_checkpoint=tmp_path / "checkpoint.pt",
+            scenario_id="test_scenario",
+            dataset_version="dataset_v1",
+            candidate_version="candidate_v1",
+            initial_checkpoint_policy="fresh",
+            lifecycle_run_id="replay_lifecycle_001",
+            cycle_id="cycle_001",
+        )
+        checkpoint_path = tmp_path / "checkpoint_best_localization.pt"
+        torch.save({"state_dict": {}}, checkpoint_path)
+        logger = MLflowRunLogger(
+            run_name="role_model_logging_test",
+            scenario_id="test_scenario",
+            tracking_uri=mlflow_tracking_uri,
+        )
+
+        assert logger.log_feature_ae_model(
+            config,
+            checkpoint_path,
+            artifact_path="model_localization",
+            model_role="localization",
+        ) is True
+        run_id = logger.end_run()
+
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        client = mlflow.tracking.MlflowClient(tracking_uri=mlflow_tracking_uri)
+        mlmodel_path = Path(client.download_artifacts(run_id, "model_localization/MLmodel"))
+        mlmodel_text = mlmodel_path.read_text(encoding="utf-8")
+        assert "model_role: localization" in mlmodel_text
+        assert "registration_policy" not in mlmodel_text
+        assert "checkpoint_filename: checkpoint_best_localization.pt" in mlmodel_text
 
     def test_set_tags(self, mlflow_tracking_uri: str) -> None:
         """Test that logger sets traceability tags."""

@@ -1,35 +1,151 @@
-# Industrial Quality Assistant MLOps
+# Industrial Quality Assistant (IQA) — MLOps
 
-Industrial Quality Assistant (IQA) is a Phase 2 MLOps MVP for visual quality
-control on `Casting` parts. It combines a FastAPI application (`iqa-api`), a
-separate inference service (`iqa-inference`), Streamlit review views for Marc
-and Sophie, replay runs, Airflow orchestration, DVC/MinIO data reproducibility,
-MLflow tracking and registry, optional PostgreSQL metadata persistence,
-Prometheus/Grafana observability, and an Nginx reverse proxy.
+![CI](https://github.com/data-fablab/iqa-mlops/actions/workflows/ci.yml/badge.svg)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Python](https://img.shields.io/badge/python-3.12-blue)
 
-The MVP replays a historical Casting dataset through the same contracts expected
-from a future factory flow. In production, camera/MES adapters will emit
-`production_ingest` events. In the school MVP, replay jobs emit
-`historical_replay` events while preserving the same `piece_event` traceability
-chain.
+Industrial Quality Assistant (IQA) is a completed MLOps MVP for visual quality
+control on `Casting` parts. It packages a FastAPI application (`iqa-api`), a
+separate inference service (`iqa-inference`), role-based Streamlit interfaces
+for the quality inspector, the production manager and data lineage, replay
+runs, Airflow orchestration, DVC/MinIO data
+reproducibility and lineage, MLflow tracking and registry, opt-in PostgreSQL
+metadata persistence, Prometheus/Alertmanager/Grafana observability, and a
+Kong/Nginx edge.
 
-## Historical Dataset Vs Ingested Data
+The MVP replays a historical Casting dataset through the same contracts a future
+factory flow would use. In production, camera/MES adapters would emit
+`production_ingest` events; in the school MVP, replay jobs emit `historical_replay`
+events while preserving the same `piece_event` traceability chain.
 
-The source dataset and ingested runtime images are intentionally separate:
+## Project status
 
-- `s3://iqa-source-datasets/hss-iad-casting-raw-v1` stores the immutable source
-  dataset used by replay and inventory jobs.
-- `s3://iqa-ingested-images/...` stores images after they pass through the
-  ingestion contract and have an associated `piece_event`.
+All three project phases are delivered and validated:
 
-For the student MVP, these buckets are hosted by local MinIO. No paid cloud
-storage is required.
+- **Phase 1 — Foundations.** Docker Compose stack, DVC + historical Casting data
+  on MinIO, ROI bootstrap, Phase 1 API, feedback MVP, security and governance.
+- **Phase 2 — Realistic loop.** Predictions/feedback/lots/incidents wired to
+  PostgreSQL, candidate datasets from replay + oracle feedback, Feature-AE
+  train/evaluate/log in MLflow, promotion and rollback gates via MLflow Registry,
+  Airflow lifecycle and monitoring.
+- **Phase 3 — Hardening.** Automated drift/incident scenarios, Grafana and
+  Streamlit stabilisation, MinIO retention, validation reports, security controls,
+  hardened team access and recovery procedures, Kong API gateway.
+- **Phase 4 — Monitoring & lineage.** Prometheus scraping every service,
+  Alertmanager drift/incident rules, four provisioned Grafana dashboards
+  (overview, lifecycle, executive, drift), and an end-to-end data lineage from
+  `sha256` to `feedback` — see [Observability & monitoring](#observability--monitoring)
+  and [Data & lineage](#data--lineage) below.
 
-## Quick Start
+### Out of scope (by design)
+
+This is an academic MVP, not a production deployment. The following are
+intentionally excluded — see [docs/roadmap-iqa.md](docs/roadmap-iqa.md):
+
+- Kubernetes (the stack runs on Docker Compose).
+- Full OAuth/RBAC (edge auth is handled at the Kong/Nginx layer).
+- Automated retraining of the ROI segmenter.
+- One `pyproject.toml` per service (a single root project is used — see
+  [ADR 0007](docs/adr/0007-architecture-services-avec-pyproject-racine.md)).
+
+Object storage is local MinIO; no paid cloud storage is required.
+
+## Architecture
+
+```text
+                         Kong / Nginx (edge)
+                                 |
+                +----------------+----------------+
+                |                                 |
+            iqa-api  <---------- REST ----------> iqa-inference
+                |                                 |
+     +----------+----------+          +-----------+-----------+
+     |          |          |          |                       |
+ PostgreSQL   MinIO      MLflow     MinIO                   MLflow
+ (metadata) (images)   (registry) (checkpoints)           (artifacts)
+
+ Airflow orchestrates:  ingestion · replay · monitoring · lifecycle · dvc-repro
+ Prometheus + Alertmanager + Grafana observe every service
+```
+
+Full topology, data contracts, and component responsibilities:
+[docs/architecture-iqa.md](docs/architecture-iqa.md).
+
+The Phase 2/3 traceability chain — `piece_event` is the atomic unit for split,
+replay, validation, feedback, and training eligibility:
+
+```text
+sha256 -> piece_event -> scenario -> lot -> dataset_version -> model_version -> prediction -> feedback
+```
+
+## MLOps practices
+
+| Practice | How it is implemented | Evidence |
+| --- | --- | --- |
+| Data reproducibility & lineage | DVC with a MinIO remote (`iqa-minio` → `s3://iqa-dvc`), enforced by the `iqa_dvc_reproducibility` DAG as an explicit gate | [dvc-versioning.md](docs/dvc-versioning.md), [lineage-evidence.md](docs/lineage-evidence.md) |
+| Model registry as source of truth | MLflow Registry decides the active model; promotion and rollback go through it, MinIO only stores artifacts | [mlflow-registry.md](docs/mlflow-registry.md), [ADR 0006](docs/adr/0006-mlflow-registry-source-verite.md) |
+| Promotion gates & rollback | Config-driven gates (`iqa-run-gates`, `iqa-run-promotion`); model rollback via Registry, app rollback by immutable image tag | [gates.md](docs/gates.md), [rollback.md](docs/rollback.md), [rollback-server.md](docs/rollback-server.md) |
+| CI/CD | 4-job GitHub Actions: lint+test, API/DAG contracts (zero-broken-DAG check), docker build + compose validate, opt-in image publish with immutable tags (git SHA + `v*`, never `latest`) | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
+| Automated testing | Broad pytest suite including API/data/contract tests, Airflow DAG checks, dashboards, replay scenarios and Streamlit contracts | [tests/](tests/) |
+| Orchestration | 9 Airflow DAGs (ingestion, replay, monitoring, lifecycle, drift observation, drift correction, DVC reproducibility) run as containerised tasks | [ADR 0002](docs/adr/0002-airflow-comme-orchestrateur.md), [ADR 0008](docs/adr/0008-taches-airflow-comme-conteneurs.md) |
+| Observability & monitoring | Prometheus scraping every service, Alertmanager drift rules, 4 provisioned Grafana dashboards | [Observability & monitoring](#observability--monitoring), [deploy/prometheus](deploy/prometheus), [deploy/grafana](deploy/grafana) |
+| Reproducible environments | `uv` lockfile with role/CUDA extras, multi-stage Dockerfile, per-role images | [pyproject.toml](pyproject.toml), [Dockerfile](Dockerfile) |
+| API gateway & edge | Kong gateway (Phase 3) in front of the services | [api-gateway.md](docs/api-gateway.md), [ADR 0009](docs/adr/0009-kong-api-gateway-phase3.md) |
+| Security & governance | Audit trail, AI security governance, feedback eligibility rules, documented decisions (ADR 0001–0009) | [ai_security_governance.md](docs/ai_security_governance.md), [audit_trail.md](docs/audit_trail.md), [docs/adr/](docs/adr/) |
+
+## Observability & monitoring
+
+Every service exposes a Prometheus text endpoint and is scraped centrally;
+Alertmanager fires on drift/incident conditions and Grafana renders the story.
+
+**Prometheus scrape targets** ([deploy/prometheus/prometheus.yml](deploy/prometheus/prometheus.yml)):
+
+| Target | Endpoint | Interval |
+| --- | --- | --- |
+| `iqa-api` | `:8000/metrics` | 5s |
+| `iqa-inference` | `:8100/metrics` | 15s |
+| Airflow | `statsd-exporter:9102/metrics` (StatsD → Prometheus sidecar) | 15s |
+| MinIO | `:9000/minio/v2/metrics/cluster` | 15s |
+
+**Metric families** exposed by the application (`iqa_*`):
+
+- Service health — `iqa_api_up`, `iqa_inference_up`, `iqa_active_model_info`,
+  `iqa_inference_gpu_lock_held`.
+- Drift — `iqa_drift_roi_mask_novelty_rate`,
+  `iqa_drift_roi_mask_nn_distance`, `iqa_drift_context_events_total`,
+  `iqa_drift_status`, `iqa_drift_trigger_lifecycle`.
+- Lifecycle — `iqa_lifecycle_cycle_current`, `iqa_lifecycle_epoch_current`,
+  `iqa_lifecycle_train_set_size`, `iqa_lifecycle_phase_active`,
+  `iqa_lifecycle_gate_value`, `iqa_lifecycle_promotion_total`,
+  `iqa_lifecycle_final_model_info`.
+- Quality & feedback — `iqa_feedback_conflict_total`, `iqa_invalid_feedback_total`,
+  `iqa_divergence_filtered_total`.
+- Security — `iqa_ai_security_incident_total`.
+
+**Alerting** — Alertmanager ([deploy/alertmanager/alertmanager.yml](deploy/alertmanager/alertmanager.yml))
+with recorded/alerting rules for the drift proxy and the `piece_a → P4` drift
+scenario ([deploy/prometheus/rules/](deploy/prometheus/rules/), rules
+`IqaDriftProxy`, `IqaPieceAP…`).
+
+**Grafana dashboards** — auto-provisioned datasource and dashboards
+([deploy/grafana/provisioning/](deploy/grafana/provisioning/)):
+
+| Dashboard | Purpose |
+| --- | --- |
+| `iqa-overview` | Service health, prediction latency, V/O/R decision mix, incidents |
+| `iqa-lifecycle` | The industrial MLOps "red thread": scenario cycles, retrain epochs, promotions |
+| `iqa-executive-mlops` | High-level MLOps posture for a non-technical audience |
+| `iqa-drift-p4` | ROI-based P4 drift detection, targeted correction DAG and final promotions |
+
+Bring the observability stack up and operate it via
+[docs/exploitation-runbook.md](docs/exploitation-runbook.md); drift regimes are
+documented in [docs/drift-regimes.md](docs/drift-regimes.md).
+
+## Quick start
 
 Local validation:
 
-```powershell
+```bash
 uv sync --extra cpu
 uv run --extra cpu pytest -q
 uv run --extra cpu ruff check src scripts tests
@@ -37,7 +153,7 @@ uv run --extra cpu ruff check src scripts tests
 
 Local API:
 
-```powershell
+```bash
 uv run --extra cpu iqa-api
 ```
 
@@ -52,9 +168,27 @@ docker compose --env-file ../.env up -d iqa-inference iqa-api
 For the full server sequence, GPU overlay, Airflow, observability, smoke tests,
 and rollback notes, see [docs/deploy_runbook.md](docs/deploy_runbook.md).
 
-## Phase 2 API
+### Common commands
 
-Available endpoints include:
+```bash
+uv sync --extra cpu                                   # install (CPU torch)
+uv run --extra cpu pytest -q                          # run the test suite
+uv run --extra cpu ruff check src scripts tests       # lint
+uv run --extra cpu iqa-api                             # run the API locally
+uv run --extra cpu iqa-init-metadata-db                # initialize metadata DB
+docker compose --env-file ../.env up -d               # run the stack (from deploy/)
+uv run --extra cpu iqa-demo-phase2                     # end-to-end demo
+```
+
+The full CLI surface (~50 `iqa-*` entry points) is declared in
+[pyproject.toml](pyproject.toml) under `[project.scripts]`; every command accepts
+`--help`. Operational procedures live in
+[docs/exploitation-runbook.md](docs/exploitation-runbook.md) and
+[docs/replay-runbook.md](docs/replay-runbook.md).
+
+## API
+
+Public endpoints:
 
 - `GET /health`
 - `GET /model/version`
@@ -71,151 +205,114 @@ Available endpoints include:
 - `GET /metrics`
 - `POST /admin/reload-model`
 
-Critical scenario-scoped routes keep `scenario_id` mandatory. This preserves
-isolation between `production_replay_natural`, `drift_domain_extension`, and
-future production scenarios.
+Internal-only routes (`/internal/drift/events`, `/internal/lifecycle/events`) are
+called by orchestration and are not part of the public surface. Critical
+scenario-scoped routes keep `scenario_id` mandatory to preserve isolation between
+`production_replay_natural`, `production_replay_natural_train_v004`,
+`production_replay_natural_piece_b_full`, and
+`production_replay_natural_piece_b_to_piece_a_p4_drift`. Full contracts:
+[docs/api_contracts.md](docs/api_contracts.md).
 
-## Public Commands
+## Data & lineage
 
-Data, manifests, and replay:
+Every artifact is traceable end to end. The chain is
+`sha256 -> piece_event -> scenario -> lot -> dataset_version -> model_version -> prediction -> feedback`,
+and each stage has a producer and a store:
 
-```powershell
-uv run --extra cpu iqa-build-inventory --help
-uv run --extra cpu iqa-finalize-data-phase1 --help
-uv run --extra cpu iqa-build-flux-plan --help
-uv run --extra cpu iqa-build-feature-ae-datasets --help
-uv run --extra cpu iqa-simulate-lifecycle --help
-uv run --extra cpu iqa-prepare-sim-env --help
-uv run --extra cpu iqa-validate-mvp --help
-uv run --extra cpu iqa-validate-ml-source --help
-```
+| Stage | Meaning | Produced by | Recorded in |
+| --- | --- | --- | --- |
+| `sha256` | Content hash of the raw image | Ingestion/replay | Manifest + PostgreSQL |
+| `piece_event` | Atomic traceable piece | Ingestion contract | PostgreSQL (`piece_events`) |
+| `scenario` | Replay/production context | Replay driver | `piece_event.scenario_id` |
+| `lot` | Batch grouping for review | Aggregation | PostgreSQL (`lot_events`) |
+| `dataset_version` | Frozen candidate dataset | Dataset build (DVC) | DVC + MinIO |
+| `model_version` | Trained & promoted model | Training + MLflow Registry | MLflow (`model_version_events`) |
+| `prediction` | Inference result on a piece | `iqa-inference` | PostgreSQL (`predictions`) |
+| `feedback` | Oracle/review verdict | `oracle_gt` / review | PostgreSQL (`feedback_events`) |
 
-DVC/MinIO reproducibility:
-
-```powershell
-uv run --extra cpu --extra data iqa-check-dvc-reproducibility --help
-```
-
-PostgreSQL metadata:
-
-```powershell
-uv run --extra cpu iqa-init-metadata-db --help
-```
-
-Model artifacts from MinIO:
-
-```powershell
-uv run --extra cpu iqa-restore-model-artifacts --help
-uv run --extra cpu iqa-build-feature-ae-bootstrap --help
-uv run --extra cpu iqa-calibrate-feature-ae-thresholds --help
-```
-
-Runtime services:
-
-```powershell
-uv run --extra cpu iqa-api --help
-uv run --extra cpu iqa-inference --help
-uv run --extra cpu iqa-predict-image --help
-uv run --extra cpu iqa-predict-roi --help
-uv run --extra cpu iqa-generate-bootstrap-roi --help
-```
-
-Airflow boundary scripts:
-
-```powershell
-uv run --extra cpu iqa-run-ingestion --help
-uv run --extra cpu iqa-run-replay --help
-uv run --extra cpu iqa-run-monitoring --help
-uv run --extra cpu iqa-run-lifecycle --help
-uv run --extra cpu iqa-run-replay-lifecycle-cycle --help
-```
-
-Phase 2 demo:
-
-```powershell
-uv run --extra cpu iqa-demo-phase2 --help
-```
-
-## Architecture And Storage
-
-Git tracks source code, tests, documentation, configuration, lightweight CSV
-manifests, model manifests, and DVC metadata.
-
-DVC and MinIO handle heavy data and versioned data artifacts. The default DVC
-remote is `iqa-minio` targeting `s3://iqa-dvc`, and the Airflow DAG
-`iqa_dvc_reproducibility` exposes DVC as an explicit reproducibility and data
-lineage gate.
-
-MLflow is the tracking and registry source of truth for model promotion and
-rollback. MinIO stores MLflow artifacts and model files; it does not decide
-which model is active.
-
-PostgreSQL stores metadata facts, statuses, timestamps, versions, URIs, and JSONB
-payloads. It never stores images, checkpoints, masks, heatmaps, or other binary
-artifacts. Runtime PostgreSQL write-through remains explicit and opt-in through
-`IQA_METADATA_BACKEND=postgres`.
-
-Model checkpoints are restored from MinIO manifests into `.cache/iqa/models/`;
-the `models/` tree stores manifests only, not binary checkpoints.
-
-## Data, Replay And Lifecycle
+Reproduce and audit the full chain with
+[docs/lineage-evidence.md](docs/lineage-evidence.md) and the
+[docs/phase3-final-lineage-runbook.md](docs/phase3-final-lineage-runbook.md);
+`iqa-lineage-summary` renders it on demand. `iqa-check-dvc-reproducibility`
+is the explicit DVC/MinIO gate for operator and CI evidence.
 
 `piece_event` is the atomic split, replay, validation, feedback, and training
-eligibility unit. The Phase 2 traceability chain is:
-
-```text
-sha256 -> piece_event -> scenario -> lot -> dataset_version -> model_version -> prediction -> feedback
-```
-
-The supported replay scenarios are:
+eligibility unit. Supported replay scenarios:
 
 - `production_replay_natural`
+- `production_replay_natural_train_v004`
 - `drift_domain_extension`
+- `production_replay_natural_piece_b_minimal`
+- `production_replay_natural_piece_b_full`
+- `production_replay_natural_piece_b_to_piece_a_p4_drift`
 
-`bootstrap`, `calibration_set_v001`, replay manifests, and
-`validation_set_v001` remain disjoint. `oracle_gt` is the sovereign feedback
-source for training eligibility; Sophie remains a display/review persona in this
-phase.
+`bootstrap`, `calibration_good_reference_v001`, replay manifests, and
+`validation_set_replay_representative_v001` remain disjoint. `oracle_gt` is the
+sovereign feedback source for training eligibility. The Streamlit quality
+inspector interface is display/review only; model and data traceability live in
+the Data Lineage page. Feature-AE MVP training uses one stable good anchor,
+`feature_ae_good_mvp_v001`, disjoint from validation, calibration and replay.
 
-Feature-AE candidate datasets are materialized from oracle-validated conforming
-pieces:
+Model lifecycle decisions are triggered by data events (e.g. 50 new
+oracle-validated conforming pieces, or confirmed drift). CI validates contracts
+and builds images, but it does not trigger model training. See
+[docs/model-lifecycle.md](docs/model-lifecycle.md) and
+[docs/feedback_rules.md](docs/feedback_rules.md).
 
-- `feature_ae_good_v002` from natural replay conforming pieces.
-- `feature_ae_good_v003` from drift/domain-extension conforming pieces.
+## Storage & repository state
 
-Model lifecycle decisions are triggered by data events, such as 50 new
-oracle-validated conforming pieces or confirmed drift. CI validates contracts and
-builds images, but it does not trigger model training.
+The source dataset and ingested runtime images are intentionally separate:
 
-## Repository State
+- `s3://iqa-source-datasets/hss-iad-casting-raw-v1` — the immutable source
+  dataset used by replay and inventory jobs.
+- `s3://iqa-ingested-images/...` — images after they pass the ingestion contract
+  and have an associated `piece_event`.
 
-Tracked by Git:
+PostgreSQL stores metadata facts, statuses, timestamps, versions, URIs, and JSONB
+payloads — never binary artifacts. Runtime PostgreSQL write-through is explicit
+and opt-in via `IQA_METADATA_BACKEND=postgres`. Model checkpoints are restored
+from MinIO manifests into `.cache/iqa/models/` with
+`iqa-restore-model-artifacts`; the `models/` tree stores manifests only.
 
-- source code, tests, docs, configs, lightweight manifests, model manifests;
-- DVC metadata and reproducibility contracts;
-- no PyTorch checkpoints or generated local metadata databases.
+**Tracked by Git:** source code, tests, docs, configs, lightweight CSV/model
+manifests, DVC metadata and reproducibility contracts. No PyTorch checkpoints, no
+generated local metadata databases.
 
-Stored outside Git:
+**Stored outside Git:** checkpoints and model artifacts in MinIO
+(`s3://iqa-models`, `s3://mlflow-artifacts`), replayed/production raw images
+(`s3://iqa-ingested-images`), heavy data via DVC/MinIO, and runtime metadata in
+PostgreSQL when the opt-in backend is enabled.
 
-- checkpoints and model artifacts in MinIO, especially `s3://iqa-models` and
-  `s3://mlflow-artifacts`;
-- production or replayed raw images under `s3://iqa-ingested-images`;
-- heavy data and versioned data artifacts through DVC/MinIO;
-- runtime metadata in PostgreSQL when the opt-in backend is enabled.
+## Documentation
 
-## Main Documentation
+Start here: [docs/index.md](docs/index.md).
 
-- [docs/index.md](docs/index.md)
-- [docs/architecture-iqa.md](docs/architecture-iqa.md)
-- [docs/api_contracts.md](docs/api_contracts.md)
-- [docs/data-contracts.md](docs/data-contracts.md)
-- [docs/dvc-versioning.md](docs/dvc-versioning.md)
-- [docs/replay-runbook.md](docs/replay-runbook.md)
-- [docs/deploy_runbook.md](docs/deploy_runbook.md)
-- [docs/retention_storage.md](docs/retention_storage.md)
-- [docs/ai_security_governance.md](docs/ai_security_governance.md)
+Core:
 
-Model-specific contracts:
+- [docs/architecture-iqa.md](docs/architecture-iqa.md) — architecture
+- [docs/prd-iqa-mvp.md](docs/prd-iqa-mvp.md) — product & MVP scope
+- [docs/api_contracts.md](docs/api_contracts.md) — API contracts
+- [docs/data-contracts.md](docs/data-contracts.md) — data contracts
+- [docs/dvc-versioning.md](docs/dvc-versioning.md) — DVC versioning
+- [docs/roadmap-iqa.md](docs/roadmap-iqa.md) — roadmap & scope
 
-- [docs/modele-feature-ae-iqa.md](docs/modele-feature-ae-iqa.md)
-- [docs/modele-segmentation-roi-iqa.md](docs/modele-segmentation-roi-iqa.md)
+Operations (Phase 3):
+
+- [docs/deploy_runbook.md](docs/deploy_runbook.md) — full deployment
+- [docs/exploitation-runbook.md](docs/exploitation-runbook.md) — day-to-day ops
+- [docs/replay-runbook.md](docs/replay-runbook.md) — replay runs (API + Airflow)
+- [docs/rollback.md](docs/rollback.md) / [docs/rollback-server.md](docs/rollback-server.md) — model & app rollback
+- [docs/retention_storage.md](docs/retention_storage.md) — object storage & retention
+- [docs/api-gateway.md](docs/api-gateway.md) — Kong API gateway
+
+Governance & models:
+
+- [docs/ai_security_governance.md](docs/ai_security_governance.md) — AI security & governance
+- [docs/audit_trail.md](docs/audit_trail.md) — audit & traceability
+- [docs/adr/](docs/adr/) — architecture decision records (0001–0009)
+- [docs/modele-feature-ae-iqa.md](docs/modele-feature-ae-iqa.md) — Feature-AE model
+- [docs/modele-segmentation-roi-iqa.md](docs/modele-segmentation-roi-iqa.md) — ROI segmenter
+
+## License
+
+MIT — see [LICENSE](LICENSE).

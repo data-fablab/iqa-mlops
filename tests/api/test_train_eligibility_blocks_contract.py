@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from iqa.api.main import (
@@ -9,12 +11,16 @@ from iqa.api.main import (
     DISPLAY_FEEDBACK_STORE,
     FEEDBACK_STORE,
     PREDICTION_STORE,
-    feedback,
+    feedback as _feedback,
     list_predictions,
     metrics,
     predict,
 )
 from iqa.api.schemas import FeedbackRequest, FeedbackStatus, PredictRequest
+
+
+def feedback(request: FeedbackRequest):
+    return _feedback(request, x_iqa_service_token=os.getenv("IQA_SERVICE_TOKEN"))
 
 
 @pytest.fixture(autouse=True)

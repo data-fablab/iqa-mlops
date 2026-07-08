@@ -46,7 +46,7 @@ artefacts lourds exclus de Git
   - modeles promus/candidats dans `s3://iqa-models` ;
   - runs et artefacts MLflow dans `s3://mlflow-artifacts` ;
   - datasets versionnes DVC dans `s3://iqa-dvc`.
-- Ajouter interface Sophie/Marc.
+- Ajouter les interfaces Inspecteur Qualite, Responsable Production et Data Lineage.
 
 Livrable Phase 2 :
 ```text

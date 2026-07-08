@@ -40,7 +40,7 @@ def _preserved_event_fields(rows: list[dict[str, str]]) -> list[str]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario-id", default="production_replay_natural")
-    parser.add_argument("--plan", type=Path, default=Path("data/metadata/casting_flux_replay_plan_natural.csv"))
+    parser.add_argument("--plan", type=Path, default=Path("data/metadata/casting_flux_replay_plan_natural_v003.csv"))
     return parser.parse_args()
 
 
